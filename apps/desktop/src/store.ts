@@ -73,6 +73,27 @@ export async function clearDataAndRelaunch(electronSession: Session): Promise<vo
     relaunchApp();
 }
 
+/** A window rectangle in screen coordinates (x/y may be negative on a secondary display). */
+export interface WindowBounds {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * The persisted size/position/maximized state of the main window, restored on the next launch.
+ *
+ * `bounds` is always the last *normal* (non-maximized, non-fullscreen) rectangle so that
+ * un-maximizing lands at a sane size. Fullscreen is intentionally not persisted (see window-state.ts
+ * and element-web#32360). See element-web#32228. This replaces the unmaintained
+ * `electron-window-state` package.
+ */
+export interface PersistedWindowState {
+    bounds?: WindowBounds;
+    isMaximized?: boolean;
+}
+
 interface StoreData {
     warnBeforeExit: boolean;
     minimizeToTray: boolean;
@@ -95,6 +116,8 @@ interface StoreData {
      * window before the web app's CSS loads and avoid a white flash on launch (#32260)
      */
     backgroundColor?: string;
+    /** the persisted main-window geometry restored on the next launch (#32228 / #32360) */
+    windowState?: PersistedWindowState;
 }
 
 /**
@@ -257,6 +280,24 @@ class Store extends ElectronStore<StoreData> {
                 },
                 backgroundColor: {
                     type: "string",
+                },
+                windowState: {
+                    type: "object",
+                    properties: {
+                        bounds: {
+                            type: "object",
+                            properties: {
+                                x: { type: "number" },
+                                y: { type: "number" },
+                                width: { type: "number" },
+                                height: { type: "number" },
+                            },
+                            required: ["x", "y", "width", "height"],
+                            additionalProperties: false,
+                        },
+                        isMaximized: { type: "boolean" },
+                    },
+                    additionalProperties: false,
                 },
             },
         });

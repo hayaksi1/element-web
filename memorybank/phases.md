@@ -43,7 +43,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | --- | --------------- | ------------------------------------------------------------------------------------ | ------------------------ |
 | 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default). Platform-aware default via `Store.shouldWarnBeforeExit()` (false on darwin, true elsewhere); explicit user choice preserved. | ✅ **done (session 6)** |
 | 3.2 | #32267          | Cmd-W should not orphan the window without prompting; route through quit/hide logic. | ⏳ planned               |
-| 3.3 | #32228 / #32360 | Persist & restore maximized/fullscreen state reliably (hide-to-tray vs close).       | ⏳ planned               |
+| 3.3 | #32228 / #32360 | **Replaced the unmaintained `electron-window-state` dep** with an in-repo store-backed `WindowStateManager` (`window-state.ts`). Persists bounds + maximized on every window event through the existing `electron-store` Store (durable), not only on the `closed` event the old lib relied on (which never fires under macOS hide-on-close → #32228). **Fullscreen is no longer restored** (like VS Code's `restoreFullscreen:false`) so the app can't auto-start fullscreen → #32360. Visibility clamp uses workArea + overlap (not strict containment) to survive menu-bar/notch/multi-monitor. | ✅ **done (session 9)** |
 | 3.4 | #32260          | **Theme-aware window background** so the native window is painted in the user's theme colour before the web CSS loads. New `background-color.ts` (`resolveBackgroundColor` = valid persisted colour ⟶ else `nativeTheme`-derived opaque default, dark `#101317` / light `#ffffff`); renderer reports its resolved bg via a new `setThemeColor` IPC (persisted + live `setBackgroundColor`). Validator enforces opacity (rejects alpha) to preserve the blurry-font guarantee. | ✅ **done (session 8)** |
 | 3.5 | #32352          | Tray "Exit" works during a call.                                                     | ⏳ planned               |
 | 3.6 | #32273          | UI freeze after "Open" on download toast (`shell.openPath` / focus).                 | ⏳ planned               |
@@ -195,6 +195,36 @@ frame shows the white native bg before the themed CSS loads, so dark-theme users
 - **Verification:** desktop vitest **102/102** (10 files), `tsc` clean, `eslint src` clean, prettier clean; web Jest
   `theme-test` **15/15**, web `tsc` 0 errors, web eslint/prettier clean. **Not verifiable here:** the actual flash on
   a live macOS build (manual QA).
+
+### Session 9 fixes (2026-06-24) — Phase 3.3: insource window-state restore (#32228 / #32360)
+
+- ✅ **3.3** Replaced the unmaintained `electron-window-state@^5.0.3` (2018) with a new in-repo
+  [window-state.ts](../apps/desktop/src/window-state.ts) `WindowStateManager` modelled on the Phase 2.1 `auto-launch.ts`
+  pattern (thin class over pure helpers + the `Store` seam). **Root causes (research workflow, 6 agents):** (#32228)
+  the old lib only flushed on the BrowserWindow `closed` event, which never fires under Element's macOS hide-on-close
+  (`e.preventDefault()`), so geometry was lost on crash/force-quit; (#32360) it re-applied a sticky persisted
+  `isFullScreen` flag on launch (Element quits without un-fullscreening; on Linux tiling WMs `isFullScreen()` is a
+  false-positive) → "always starts in fullscreen."
+- **Fix:** persist `{bounds, isMaximized}` through the existing `electron-store`-backed `Store` (atomic) on every
+  window event (resize/move debounced+coalesced, maximize/unmaximize/leave-full-screen immediate, cancel on `closed`),
+  plus a synchronous flush in the `close` handler and before the Cmd+Q `app.exit()`. **Fullscreen is deliberately NOT
+  restored** (matches VS Code `window.restoreFullscreen:false`) — the definitive #32360 fix (also dissolves the
+  quit-while-fullscreen edge cases). Visibility clamp uses **workArea + overlap** (≥100px each axis), not the old lib's
+  strict `display.bounds` containment, so menu-bar/notch/multi-monitor layouts aren't reset. Dropped the dep from
+  `package.json` + `pnpm-lock.yaml`.
+- **Adversarial review** (21-agent workflow, 17 findings → 10 confirmed): the **critical** finding was that the
+  original cut (which DID restore fullscreen) still reproduced #32360 on the `app.quit()`-from-fullscreen path
+  (`appQuitting=true` skips the un-fullscreen branch → persists `isFullScreen:true`). Resolved by **not restoring
+  fullscreen at all** (stronger than the reviewers' "normalise on quit"). Also applied: destroyed-window `try/catch`
+  guard + `closed`→clearTimeout (stale-timer crash), Cmd+Q `app.exit()` flush, and test-quality fixes (100px overlap
+  boundary, debounce-coalescing proof, leave-full-screen end-to-end, destroyed-window guard).
+- **Deliberately documented, not fixed:** (a) existing users' legacy `window-state.json` is ignored → a **one-time**
+  reset to the centred 1024×768 default on upgrade (self-healing on first close; migration deemed not worth the I/O
+  risk for an S-Minor issue); (b) the `electron-main.ts` close/exit wiring is thin glue and stays unit-untested by
+  repo convention (the testable logic lives in `window-state.ts`).
+- **Verification:** desktop `vitest run` **145/145** (11 files; new `window-state.test.ts` = 43), `tsc` clean, `eslint
+  --max-warnings 0` clean, prettier clean, **knip clean** (dep removal). **Not verifiable here:** real macOS
+  multi-monitor restore + the live launch (manual QA). Committed on `main`.
 
 ### Recommended next session
 

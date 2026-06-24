@@ -1,5 +1,61 @@
 # Activity Log
 
+## 2026-06-24 (session 9) — Phase 3.3: insource window-state restore (#32228 / #32360)
+
+### Context / pick
+- Working tree clean, on `main`, 1 commit ahead of `origin/main` (session-8 Phase 3.4 `1e06fa8`, unpushed). Picked
+  Phase 3.3 — top recommended in-repo + unit-testable window/lifecycle item.
+
+### Research (6-agent workflow: gh + dep audit + code-map + upstream-PR scan → structured synthesis)
+- **#32228** ("remember window size", OPEN since 2022, S-Minor/O-Frequent): the unmaintained `electron-window-state@5.0.3`
+  only writes state in its `closed` handler. Element's macOS `close` handler does `e.preventDefault()` + hide (window
+  never destroyed), so `closed` never fires → geometry only flushed on a real quit, lost on crash/force-quit. Secondary:
+  the lib's strict `display.bounds` full-containment check resets menu-bar/notch/multi-monitor layouts to defaults.
+- **#32360** ("always starts in fullscreen"): reported mostly on **Linux tiling WMs** (the macOS framing is wrong). The
+  lib persists `isFullScreen` and re-applies it via `setFullScreen(true)` on launch; the flag is sticky (Element quits
+  without un-fullscreening; tiling WMs report `isFullScreen()=true` spuriously).
+- Verdict: **replace the dep** (maintainer t3chguy explicitly suggests insourcing, cf. VS Code). No upstream PR to adopt.
+
+### Fix shipped (TDD: RED → GREEN)
+- NEW [window-state.ts](../apps/desktop/src/window-state.ts) — pure helpers `boundsAreValid` / `isVisibleOnSomeDisplay`
+  (workArea overlap ≥100px each axis, not strict containment) / `resolveRestoreState` / `captureState`, plus a
+  `WindowStateManager` class (constructor reads `Store.instance.get("windowState")`; `getRestoreState(displays)`;
+  `persist(win)` with a destroyed-window `try/catch`; `monitor(win)` debounces resize/move and immediately persists
+  maximize/unmaximize/leave-full-screen, cancelling the timer on `closed`).
+- [store.ts](../apps/desktop/src/store.ts): new exported `WindowBounds` / `PersistedWindowState` (`{bounds?, isMaximized?}`)
+  + `StoreData.windowState` + JSON schema (bounds requires x/y/width/height; `additionalProperties:false`).
+- [electron-main.ts](../apps/desktop/src/electron-main.ts): dropped `import windowStateKeeper`; added `screen`; window
+  created from `windowState.getRestoreState(screen.getAllDisplays())`; ready-to-show restores **maximized only** (no
+  `setFullScreen`); `monitor()` attached; synchronous `persist()` in the `close` handler and before the Cmd+Q `app.exit()`.
+- [package.json](../apps/desktop/package.json) + `pnpm-lock.yaml`: removed `electron-window-state` (electron-store@11
+  already present; no new dep).
+- **Fullscreen is deliberately NOT restored** (VS Code `restoreFullscreen:false` precedent) — the definitive #32360 fix.
+
+### Adversarial review (21-agent workflow, 4 dimensions → per-finding skeptic) — 17 findings, 10 confirmed
+- **CRITICAL (high-confidence, acted on):** the first cut still restored fullscreen, so quitting *while* fullscreen via
+  `app.quit()` (`appQuitting=true` skips the un-fullscreen branch) persisted `isFullScreen:true` → #32360 unfixed on the
+  real-quit path. Three findings converged on this. **Resolution: stop restoring fullscreen entirely** (stronger than the
+  reviewers' "normalise the flag on quit"; also kills the async `setFullScreen(false)` race and the appQuitting asymmetry).
+- **Applied (others):** destroyed-window `try/catch` + `closed`→clearTimeout (stale-timer teardown crash); Cmd+Q
+  `app.exit()` geometry flush (app.exit fires no `close`); test-quality — 100px overlap boundary (was untested,
+  off-by-one `>=`→`>` survived), debounce **coalescing** proof (single-event test couldn't tell a debounce from a
+  per-event timer), end-to-end leave-full-screen capture, destroyed-window guard.
+- **Documented, not fixed (with rationale):** legacy `window-state.json` ignored → one-time reset on upgrade
+  (self-healing; migration not worth the I/O risk for S-Minor); the `electron-main.ts` close/exit glue stays unit-untested
+  by repo convention (logic lives in `window-state.ts`); the schema is machine-written only so the conf/AJV validation
+  can't be meaningfully unit-tested against the in-memory store mock.
+
+### Verification
+- `vitest run` (apps/desktop): **145 pass / 11 files** (+43 in `window-state.test.ts`). `tsc --noEmit`: clean.
+  `eslint --max-warnings 0` (4 changed src + test): clean. prettier `--check`: clean. **knip** (root): clean (dep removed).
+- Not verifiable here: real macOS multi-monitor restore + the live launch geometry (manual QA on a signed build).
+
+### Recommended next session
+- **Phase 3.2** Cmd-W orphan-window prompt (#32267) — verify the exact repro first (darwin `close` already hides).
+- **Phase 3.3 follow-up (optional):** best-effort one-shot migration importing the legacy `window-state.json` to avoid
+  the one-time geometry reset on upgrade.
+- **Phase 5.3 (#32288)** only after a live-build re-confirm; PR shortlist **#33955+#33956** Seshat backfill resilience.
+
 ## 2026-06-24 (session 6) — Phase 3.1 macOS warnBeforeExit default → opt-in (#32287)
 
 ### Context / pick
