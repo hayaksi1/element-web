@@ -421,9 +421,55 @@ Continued in the same session. Adopted the low-effort PR-review shortlist item #
   the `scratchpad/webjest.sh` helper (recreated; appends `matrix-js-sdk` to `transformIgnorePatterns`; Jest 30
   `--testPathPatterns`).
 
-### Recommended next session
+### Recommended next session (as of session 7)
 
 - **Phase 5.3 (#32288)** only after re-confirming against a live build (may be no-op/wontfix — see above).
 - PR-review adopt shortlist remainder: **#33954** arm64 AES build flag (validate seshat pin/toolchain first), or the
   larger **#33955+#33956** Seshat backfill resilience (Phase 4.2). Or **Phase 3.4** white launch flash (#32260) /
   **Phase 3.2** Cmd-W orphan prompt (#32267).
+
+## 2026-06-24 (session 8) — Phase 3.4: theme-aware window background (#32260)
+
+### Context / pick
+- Working tree clean, on `main`, 4 commits ahead of `origin/main` (510c618 + the three session-7 commits, all
+  unpushed). Picked Phase 3.4 (white launch flash) — the top "recommended next" item, in-repo + unit-testable.
+
+### Root cause (firecrawl on the issue + code-mapping)
+- The reporter suggested the `ready-to-show` pattern, but `electron-main.ts` **already** uses `show:false` +
+  `ready-to-show` → `show()`. The real cause: `backgroundColor:"#fff"` (hard-coded white) + `index.html`'s
+  transparent `<body>` ⇒ the first painted frame is the white native bg before the themed CSS applies ⇒ dark-theme
+  users see a white→dark flash. The renderer already computes the body bg for the `theme-color` meta
+  ([theme.ts:386-389](../apps/web/src/theme.ts)) — reused as the source of the colour.
+
+### Fix shipped (TDD, layered, each layer independently testable)
+- **`apps/desktop/src/background-color.ts` (NEW):** pure `resolveBackgroundColor(persisted, prefersDark)` (valid
+  persisted colour ⟶ else opaque `nativeTheme` default, dark `#101317` / light `#ffffff` = real Compound
+  `--cpd-color-bg-canvas-default`→`--cpd-color-theme-bg`) + `isValidThemeColor()` (opaque hex/rgb/rgba(…,1) only).
+- **`store.ts`** optional `backgroundColor` key + schema; **`electron-main.ts`** window bg now uses the helper with
+  `nativeTheme.shouldUseDarkColors`; **`ipc.ts`** new `setThemeColor` fire-and-forget handler (validate → skip if
+  unchanged → persist + live `setBackgroundColor`); **`preload.cts`** + **`global.d.ts`** allowlist/union;
+  **`apps/web/src/theme.ts`** reports the colour via `window.electron?.send("setThemeColor", …)` (guarded).
+- Design: first launch → OS appearance (default "match system theme"); later launches → exact persisted colour.
+
+### Adversarial review (49-agent workflow) — 22 findings, 2 confirmed (same root)
+1+2. **(confirmed) `isValidThemeColor` accepted alpha** (`#rgba`/`#rrggbbaa`/`rgba(…,a<1)`). A **translucent custom
+   theme**'s computed body bg would pass → persisted → transparent native window → blurry fonts / see-through launch,
+   violating the opaque-background (blurry-font FAQ) invariant the change itself documents. **Fixed:** validator
+   enforces opacity (also kills the ambiguous `RRGGBBAA` vs Electron `AARRGGBB` hex-alpha ordering). Tests updated:
+   `#ffff`/`#ffffffff`/`rgba(…,0.5)` moved to rejects + explicit `rgba(0,0,0,0)`/`#0000`/`#00000000` rejects + a
+   translucent-persisted-→-fallback case.
+- Folded in 1 rejected-but-cheap quality win: skip the redundant synchronous `store.set` disk write when the colour
+  is unchanged (switchTheme fires on every theme resolution) + a test. 19 other findings nits/by-design (stale
+  single-frame self-corrects on next render; ElectronPlatform-seam preference; out-of-range RGB that
+  `getComputedStyle` never emits; no-ReDoS/allowlist-correct confirmations).
+
+### Verification
+- Desktop: `vitest run` **102/102** (10 files; new `background-color.test.ts` + ipc/theme additions), `tsc -p
+  tsconfig.json` clean, `eslint --max-warnings 0 src` clean, prettier clean.
+- Web: `theme-test` Jest **15/15** (+2), `tsc --noEmit` **0 errors**, eslint/prettier clean on changed files.
+- **Not verifiable here:** the actual flash on a live signed macOS build (manual QA). Committed on `main` (NOT pushed).
+
+### Recommended next session
+- **Phase 3.2** Cmd-W orphan-window prompt (#32267) — verify exact repro first (darwin `close` handler already hides).
+- **Phase 3.3** persist/restore maximized & fullscreen (#32228/#32360) — has a unit-testable store component.
+- **Phase 5.3 (#32288)** only after re-confirming on a live build; PR shortlist **#33955+#33956** Seshat backfill.

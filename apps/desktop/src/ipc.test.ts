@@ -13,6 +13,8 @@ const { ipcHandlers, mockStore, send, randomArray } = vi.hoisted(() => ({
         isSecretUndecryptable: vi.fn<(key: string) => Promise<boolean>>(),
         setSecret: vi.fn<(key: string, secret: string) => Promise<void>>(),
         getSecret: vi.fn<(key: string) => Promise<string | undefined>>(),
+        set: vi.fn<(key: string, value: unknown) => void>(),
+        get: vi.fn<(key: string) => unknown>(),
     },
     send: vi.fn(),
     randomArray: vi.fn<(len: number) => Promise<string>>(),
@@ -99,5 +101,56 @@ describe("ipc pickle key handling", () => {
 
             expect(send).toHaveBeenCalledWith("ipcReply", { id: 10, reply: null });
         });
+    });
+});
+
+describe("setThemeColor", () => {
+    let setBackgroundColor: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        setBackgroundColor = vi.fn();
+        (global as unknown as { mainWindow: unknown }).mainWindow = { setBackgroundColor };
+    });
+
+    function reportColor(color: unknown): void {
+        ipcHandlers["setThemeColor"]({}, color);
+    }
+
+    it("persists a valid colour and repaints the live window", () => {
+        reportColor("rgb(16, 19, 23)");
+
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "rgb(16, 19, 23)");
+        expect(setBackgroundColor).toHaveBeenCalledWith("rgb(16, 19, 23)");
+    });
+
+    it("ignores an invalid colour", () => {
+        reportColor("javascript:alert(1)");
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
+    });
+
+    it("ignores a non-string payload", () => {
+        reportColor({ malicious: true });
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
+    });
+
+    it("does not throw when there is no window", () => {
+        (global as unknown as { mainWindow: unknown }).mainWindow = null;
+
+        expect(() => reportColor("#101317")).not.toThrow();
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "#101317");
+    });
+
+    it("does not re-persist or repaint when the colour is unchanged", () => {
+        mockStore.get.mockReturnValue("#101317");
+
+        reportColor("#101317");
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
     });
 });

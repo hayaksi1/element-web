@@ -44,7 +44,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default). Platform-aware default via `Store.shouldWarnBeforeExit()` (false on darwin, true elsewhere); explicit user choice preserved. | ✅ **done (session 6)** |
 | 3.2 | #32267          | Cmd-W should not orphan the window without prompting; route through quit/hide logic. | ⏳ planned               |
 | 3.3 | #32228 / #32360 | Persist & restore maximized/fullscreen state reliably (hide-to-tray vs close).       | ⏳ planned               |
-| 3.4 | #32260          | Remove white launch flash (`backgroundColor`/`show` timing).                         | ⏳ planned               |
+| 3.4 | #32260          | **Theme-aware window background** so the native window is painted in the user's theme colour before the web CSS loads. New `background-color.ts` (`resolveBackgroundColor` = valid persisted colour ⟶ else `nativeTheme`-derived opaque default, dark `#101317` / light `#ffffff`); renderer reports its resolved bg via a new `setThemeColor` IPC (persisted + live `setBackgroundColor`). Validator enforces opacity (rejects alpha) to preserve the blurry-font guarantee. | ✅ **done (session 8)** |
 | 3.5 | #32352          | Tray "Exit" works during a call.                                                     | ⏳ planned               |
 | 3.6 | #32273          | UI freeze after "Open" on download toast (`shell.openPath` / focus).                 | ⏳ planned               |
 | 3.7 | #32114          | Crash on close (Ventura/M2).                                                         | ⬆️ track (Electron bump) |
@@ -167,8 +167,40 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
       prettier clean, i18n consistent + lint clean. **Not verifiable here:** real Squirrel.Mac install on a signed
       build (needs manual macOS QA).
 
+### Session 8 fixes (2026-06-24) — Phase 3.4: theme-aware window background (#32260)
+
+White launch flash. **Root cause** (confirmed via firecrawl on the issue + code-mapping): the window is already
+`show:false` + shown on `ready-to-show` (the reporter's suggested fix), so that wasn't it. The real cause is the
+hard-coded `backgroundColor:"#fff"` (white) combined with `index.html`'s transparent `<body>` — the first painted
+frame shows the white native bg before the themed CSS loads, so dark-theme users get a white→dark flash.
+
+- **`apps/desktop/src/background-color.ts` (NEW):** `resolveBackgroundColor(persisted, prefersDark)` — returns a
+  **valid persisted** colour, else a `nativeTheme`-derived **opaque** default (dark `#101317` / light `#ffffff`,
+  the real Compound `--cpd-color-bg-canvas-default` → `--cpd-color-theme-bg` values). `isValidThemeColor()` accepts
+  only **opaque** hex (`#rgb`/`#rrggbb`) and `rgb()`/`rgba(…,1)` — translucency rejected to keep the blurry-font
+  guarantee.
+- **`store.ts`:** new optional `backgroundColor` string key + schema. **`electron-main.ts`:** window bg now
+  `resolveBackgroundColor(store.get("backgroundColor"), nativeTheme.shouldUseDarkColors)`. **`ipc.ts`:** new
+  fire-and-forget `setThemeColor` handler (validate → skip if unchanged → `store.set` + live `setBackgroundColor`).
+  **`preload.cts` + `apps/web/.../global.d.ts`:** `setThemeColor` added to the CHANNELS allowlist + `ElectronChannel`.
+- **`apps/web/src/theme.ts`:** `switchTheme()` now reports the resolved body bg to main via
+  `window.electron?.send("setThemeColor", …)` (guarded; no-op on web). **Design:** first launch → OS appearance
+  (covers the default "match system theme"); later launches → exact persisted colour (covers manual theme overrides).
+- **Adversarial review** (49-agent workflow, 22 findings → **2 confirmed**, same root): the validator accepted
+  alpha-channel colours (`#rgba`/`#rrggbbaa`/`rgba(…,a<1)`), which a **translucent custom theme** could feed through
+  → transparent native window → blurry fonts / see-through launch. **Fixed:** validator now enforces opacity (also
+  removes the ambiguous `RRGGBBAA` vs Electron `AARRGGBB` hex-alpha ordering). Folded in one rejected-but-cheap win:
+  skip the redundant synchronous `store.set` disk write when the colour is unchanged. 19 other findings were
+  nits/by-design (stale single-frame self-corrects; ElectronPlatform seam; out-of-range RGB `getComputedStyle` never emits).
+- **Verification:** desktop vitest **102/102** (10 files), `tsc` clean, `eslint src` clean, prettier clean; web Jest
+  `theme-test` **15/15**, web `tsc` 0 errors, web eslint/prettier clean. **Not verifiable here:** the actual flash on
+  a live macOS build (manual QA).
+
 ### Recommended next session
 
+- **Phase 3.2** Cmd-W orphan-window prompt (#32267) — route Cmd-W (`role:"close"`) through the quit/hide logic so it
+  does not silently quit the app (no-tray non-darwin) without the warn-before-exit prompt. macOS-flagged; verify the
+  exact repro first (on darwin the `close` handler already hides the window).
 - **Phase 5.3** remove the "99+" dock badge cap (#32288) — but NOTE: investigation this session found the catalogue
   mischaracterised it. macOS uses raw `app.badgeCount` (no cap) in [badge.ts](../apps/desktop/src/badge.ts); the
   only in-code cap is the **favicon/Windows overlay** renderer ([favicon.ts:148](../apps/web/src/favicon.ts) → shows
@@ -176,8 +208,8 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
   the in-app badge. Re-confirm against a live build before spending effort; it may be a no-op / wontfix.
 - **PR-review adopt shortlist** (see `upstream-pr-review.md`): #33954 arm64 AES build flag + #33957 timeline-reset
   guard (both low-effort), or #33955+#33956 Seshat backfill resilience (high, complements Phase 0.2).
-- **Phase 3.4** white launch flash (#32260, `backgroundColor`/`show` timing, clean shared fix) or **Phase 3.2**
-  Cmd-W orphan-window prompt (#32267).
+- **Phase 3.3** persist/restore maximized & fullscreen state (#32228/#32360, "always starts in fullscreen") —
+  `store.ts` + `electron-window-state`; has a unit-testable store component.
 - **Re-scope / skip (session-6 finding):** **Phase 1.2 (#32398)** is largely resolved by the in-tree Electron-42
   `{useSystemPicker:true}` (macOS 15+ uses the native picker; handler not invoked) — residual is upstream/Wayland.
   **Phase 1.3 (#32075)** is a native Wayland/PipeWire segfault (mostly Linux/upstream). Neither is a strong in-repo
