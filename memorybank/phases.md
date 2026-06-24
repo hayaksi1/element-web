@@ -41,7 +41,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 | #   | Issue           | Action                                                                               | Status                   |
 | --- | --------------- | ------------------------------------------------------------------------------------ | ------------------------ |
-| 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default).             | ⏳ planned               |
+| 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default). Platform-aware default via `Store.shouldWarnBeforeExit()` (false on darwin, true elsewhere); explicit user choice preserved. | ✅ **done (session 6)** |
 | 3.2 | #32267          | Cmd-W should not orphan the window without prompting; route through quit/hide logic. | ⏳ planned               |
 | 3.3 | #32228 / #32360 | Persist & restore maximized/fullscreen state reliably (hide-to-tray vs close).       | ⏳ planned               |
 | 3.4 | #32260          | Remove white launch flash (`backgroundColor`/`show` timing).                         | ⏳ planned               |
@@ -140,10 +140,16 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 ### Recommended next session
 
-- **Phase 1.2/1.3** screen-share picker (#32398 double-picker on macOS / #32075 toggle crash), or
-- **Phase 3.1** `warnBeforeExit` default on macOS (#32287), or
-- **Phase 2.2** non-writable `/Applications` auto-update guidance (#32404); OR pick up the PR-review adopt
-  shortlist (#33954 + #33957, both low-effort — see `upstream-pr-review.md`).
+- **Phase 2.2** non-writable `/Applications` auto-update guidance (#32404), or **Phase 5.3** remove the "99+" dock
+  badge cap (#32288, clean small macOS fix); OR pick up the PR-review adopt shortlist (#33954 arm64 AES build flag +
+  #33957 timeline-reset guard, both low-effort — see `upstream-pr-review.md`).
+- **Re-scope / skip (session-6 finding):** **Phase 1.2 (#32398)** is largely resolved by the in-tree Electron-42
+  `{useSystemPicker:true}` (macOS 15+ uses the native picker; handler not invoked) — residual is upstream/Wayland.
+  **Phase 1.3 (#32075)** is a native Wayland/PipeWire segfault (mostly Linux/upstream). Neither is a strong in-repo
+  macOS target; only defensive hardening (try/catch on `getDesktopCapturerSources`, empty-source guard, stale-callback
+  guard) is in-repo, and the crash itself stays upstream.
+- **Known pre-existing limitation (3.1):** the app-menu `role:"quit"` (`vectormenu.ts`) bypasses the warn-before-exit
+  dialog on all platforms; harmless on macOS with the new default, only diverges if a user re-enables the warning.
 - **Main-process follow-up for 0.3:** investigate coaxing Chromium to grant durable storage on desktop (e.g.
   ensure notifications-permission signal) so `persist()` actually returns true — the only real cure for the
   IndexedDB-eviction flavour of #32198/#32108.

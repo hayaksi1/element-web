@@ -206,7 +206,10 @@ class Store extends ElectronStore<StoreData> {
             schema: {
                 warnBeforeExit: {
                     type: "boolean",
-                    default: true,
+                    // macOS convention is that ⌘Q quits immediately, so the warning defaults OFF
+                    // there and ON on Windows/Linux. An explicit user choice always overrides this.
+                    // See https://github.com/element-hq/element-web/issues/32287.
+                    default: process.platform !== "darwin",
                 },
                 minimizeToTray: {
                     type: "boolean",
@@ -249,6 +252,17 @@ class Store extends ElectronStore<StoreData> {
                 },
             },
         });
+    }
+
+    /**
+     * Whether to warn the user before quitting the app (⌘Q on macOS, Ctrl-Q / Alt-F4 elsewhere).
+     *
+     * Defaults to OFF on macOS — the platform convention is that ⌘Q quits immediately — and ON on
+     * Windows/Linux. A value the user has explicitly set always takes precedence over this default.
+     * See https://github.com/element-hq/element-web/issues/32287.
+     */
+    public shouldWarnBeforeExit(): boolean {
+        return this.get("warnBeforeExit", process.platform !== "darwin");
     }
 
     private safeStorageReadyPromise?: Promise<boolean>;

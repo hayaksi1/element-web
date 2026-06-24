@@ -1497,7 +1497,10 @@ export const SETTINGS: Settings = {
     "Electron.warnBeforeExit": {
         supportedLevels: [SettingLevel.PLATFORM],
         displayName: _td("settings|warn_quit"),
-        default: true,
+        // Match the desktop platform default (see apps/desktop Store.shouldWarnBeforeExit): macOS
+        // quits immediately on ⌘Q by convention, so the warning is off there and on elsewhere. This
+        // fallback only applies before the PLATFORM value loads; see element-web#32287.
+        default: !IS_MAC,
     },
     "Electron.alwaysShowMenuBar": {
         supportedLevels: [SettingLevel.PLATFORM],

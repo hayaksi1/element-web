@@ -1,5 +1,69 @@
 # Activity Log
 
+## 2026-06-24 (session 6) — Phase 3.1 macOS warnBeforeExit default → opt-in (#32287)
+
+### Context / pick
+- Session 5's Phase 0.3 work was already committed+pushed as `01e11ec` (an external actor committed it with
+  an equivalent message while this session started; the working tree was clean). Re-verified before continuing:
+  `StorageManager-test` 17/17 pass, eslint/prettier clean.
+- Researched the next-priority Phase 1.2/1.3 screen-share issues first (#32398, #32075) via `gh` + the Electron
+  42.3.3 type defs. **Finding (changed the plan):** the catalogue mis-scoped them as in-repo macOS fixes. Electron
+  42.3.3 `setDisplayMediaRequestHandler({useSystemPicker:true})` docs (`electron.d.ts:13167-13171`) confirm that on
+  **macOS 15+ the system picker is used and the handler is NOT invoked** — so the "two pickers fight on macOS"
+  premise is wrong; the tree already ships `{useSystemPicker:true}`. #32398 (2017→2026, X-Blocked/Z-Upstream/A-Jitsi)
+  is largely fixed by the Electron-42 bump (recent issue comments confirm the system picker now appears); #32075 is a
+  native Wayland/PipeWire **segfault** (`base_capturer_pipewire.cc ScreenCastPortal failed`, `core dumped`), mostly
+  Linux/upstream, maintainers suggest closing as a dup. **User chose to pivot to Phase 3.1.**
+
+### Fix shipped (TDD: RED → GREEN)
+- Root cause: `warnBeforeExit` defaulted to `true` everywhere (schema `store.ts` + `store.get("warnBeforeExit", true)`
+  in the ⌘Q handler), so macOS users got a confirm dialog on ⌘Q — contrary to the native convention that ⌘Q quits
+  immediately (#32287, open since 2021, T-Enhancement; maintainer t3chguy resisted a *global* off-by-default but users
+  specifically want the macOS native behaviour). The ⌘Q path is real: `exitShortcuts` (electron-main.ts:225-230)
+  matches `darwin && meta && !control && Q`; the `before-input-event` handler (line 459) `preventDefault()`s it
+  (shadowing the menu `role:"quit"` accelerator) and shows the dialog when `shouldWarnBeforeExit`.
+- Change — **platform-aware default**, explicit user choice always preserved:
+  - [store.ts](../apps/desktop/src/store.ts): new `Store.shouldWarnBeforeExit()` → `this.get("warnBeforeExit",
+    process.platform !== "darwin")` (false on darwin, true elsewhere); schema `default` also made
+    `process.platform !== "darwin"` for consistency with the method + sibling settings.
+  - [electron-main.ts](../apps/desktop/src/electron-main.ts):470 — `store.get("warnBeforeExit", true)` →
+    `store.shouldWarnBeforeExit()`.
+  - [settings.ts](../apps/desktop/src/settings.ts):31 — the `Electron.warnBeforeExit` read bridge →
+    `Store.instance?.shouldWarnBeforeExit()`.
+  - [Settings.tsx](../apps/web/src/settings/Settings.tsx):1500 — web fallback `default: true` → `default: !IS_MAC`
+    (`IS_MAC` already imported from `../Keyboard`, via `navigator.platform`) so the toggle's pre-load fallback matches
+    the macOS platform default. No-op on jsdom/Linux (IS_MAC=false), differs only on real macOS.
+- Tests [store.test.ts](../apps/desktop/src/store.test.ts): new `describe("shouldWarnBeforeExit (#32287)")` (6 tests):
+  darwin/win32/linux unset defaults, darwin explicit opt-in, win32 + linux explicit opt-out; per-test
+  `Object.defineProperty(process,"platform")` override. Self-contained `beforeAll` inits the Store singleton if needed.
+
+### Adversarial review (workflow) — 20 agents, 4 lenses → per-finding skeptic verifiers
+- 16 findings, 15 "real". Applied receiving-code-review rigor (evaluated each, not blind agreement). Acted on **2**:
+  (1) **test-ordering dependency** — my describe relied on the prior suite's `beforeAll` initialising `Store.instance`
+  (would crash under a `-t` filter) → added a self-contained `beforeAll`. (2) **Settings.tsx web default** mismatched
+  the new macOS platform default → `default: !IS_MAC`. **Rejected as out-of-scope:** the menu `role:"quit"` bypass of
+  the warn dialog (pre-existing; my change makes macOS *more* consistent, and "fixing" it would *expand* warnings —
+  the opposite of #32287). **Kept:** the redundant-but-harmless schema default (matches sibling-setting style; conf's
+  `get(key,default)` uses the explicit fallback, so the method is the source of truth). Skipped a hypothetical
+  non-boolean-stored-value test (type/schema-prevented).
+
+### Verification
+- `vitest run` (apps/desktop): **360 pass / 43 files** (store.test.ts 12/12; +6 new). (3 playwright browser-mode files
+  don't run here — pre-existing `chrome-headless-shell` not installed; unrelated.)
+- prettier `--check` (5 files): clean. eslint `--max-warnings 0` (4 desktop + Settings.tsx): clean. desktop
+  `tsc --noEmit`: clean. web `tsc`: only the 4 pre-existing vendored matrix-js-sdk errors (none in Settings.tsx).
+- Not verifiable here: real macOS ⌘Q behaviour on a signed build (pure-logic default flip, fully unit-covered).
+
+### Known limitation (documented, not fixed)
+- Menu **File→Quit / app-menu Quit** (`vectormenu.ts` `role:"quit"`) bypasses the `before-input-event` warn path on
+  all platforms — pre-existing. On macOS with the new default this is harmless (both quit immediately); it only
+  diverges if a user explicitly re-enables the warning. Out of scope for #32287 (which wants *fewer* macOS warnings).
+
+### Recommended next session
+- **Phase 2.2** non-writable `/Applications` auto-update guidance (#32404), or **Phase 5.3** remove "99+" dock badge
+  cap (#32288, clean small macOS fix), or the PR adopt shortlist (**#33954** arm64 AES build flag, **#33957**
+  timeline-reset guard — both low-effort, validated in `upstream-pr-review.md`).
+
 ## 2026-06-24 (session 5) — Phase 0.3 web StorageManager.tryPersistStorage hardening (#32198/#32108/#32472)
 
 ### Goal
