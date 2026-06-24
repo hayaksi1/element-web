@@ -26,10 +26,22 @@ import {
 } from "matrix-js-sdk/src/matrix";
 
 import EventIndex from "../../../src/indexing/EventIndex.ts";
-import { emitPromise, getMockClientWithEventEmitter, mockClientMethodsRooms, mockPlatformPeg } from "../../test-utils";
+import {
+    emitPromise,
+    flushPromises,
+    getMockClientWithEventEmitter,
+    mockClientMethodsRooms,
+    mockPlatformPeg,
+} from "../../test-utils";
 import type BaseEventIndexManager from "../../../src/indexing/BaseEventIndexManager.ts";
 import { type ICrawlerCheckpoint } from "../../../src/indexing/BaseEventIndexManager.ts";
 import SettingsStore from "../../../src/settings/SettingsStore.ts";
+import { logErrorAndShowErrorDialog } from "../../../src/utils/ErrorUtils.tsx";
+
+jest.mock("../../../src/utils/ErrorUtils.tsx", () => ({
+    ...jest.requireActual("../../../src/utils/ErrorUtils.tsx"),
+    logErrorAndShowErrorDialog: jest.fn(),
+}));
 
 afterEach(() => {
     jest.restoreAllMocks();
@@ -158,6 +170,62 @@ describe("EventIndex", () => {
             roomId: "!room2:id",
             token: "token2",
             direction: Direction.Forward,
+        });
+    });
+
+    describe("when the sync handler throws (#33501)", () => {
+        /**
+         * Build an indexer whose `commitLiveEvents` always rejects, so that the `onSync`
+         * handler throws on every sync. Returns the indexer and the mock client.
+         */
+        async function setUpFailingIndexer(): Promise<{ indexer: EventIndex; mockClient: Mocked<MatrixClient> }> {
+            const mockIndexingManager = {
+                loadCheckpoints: jest.fn().mockResolvedValue([]),
+                isEventIndexEmpty: jest.fn().mockResolvedValue(false),
+                commitLiveEvents: jest.fn().mockRejectedValue(new Error("indexer boom")),
+            } as any as Mocked<BaseEventIndexManager>;
+            mockPlatformPeg({ getEventIndexingManager: () => mockIndexingManager });
+
+            const mockClient = getMockClientWithEventEmitter({
+                getEventMapper: () => (obj: Partial<IEvent>) => new MatrixEvent(obj),
+                createMessagesRequest: jest.fn(),
+                ...mockClientMethodsRooms([]),
+            });
+
+            const indexer = new EventIndex();
+            await indexer.init();
+            // Don't actually start the background crawler loop (avoids real timers in the test).
+            jest.spyOn(indexer, "startCrawler").mockImplementation(() => {});
+
+            return { indexer, mockClient };
+        }
+
+        it("only shows the error dialog once even if syncs keep failing", async () => {
+            jest.mocked(logErrorAndShowErrorDialog).mockClear();
+            const { mockClient } = await setUpFailingIndexer();
+
+            // First failing sync: the user should be told once.
+            mockClient.emit(ClientEvent.Sync, SyncState.Syncing, null, {});
+            await flushPromises();
+            expect(logErrorAndShowErrorDialog).toHaveBeenCalledTimes(1);
+
+            // Subsequent failing syncs must NOT keep popping the dialog (this is what made the app unusable).
+            mockClient.emit(ClientEvent.Sync, SyncState.Syncing, null, {});
+            await flushPromises();
+            mockClient.emit(ClientEvent.Sync, SyncState.Syncing, null, {});
+            await flushPromises();
+            expect(logErrorAndShowErrorDialog).toHaveBeenCalledTimes(1);
+        });
+
+        it("stops the crawler when indexing errors", async () => {
+            jest.mocked(logErrorAndShowErrorDialog).mockClear();
+            const { indexer, mockClient } = await setUpFailingIndexer();
+            const stopCrawler = jest.spyOn(indexer, "stopCrawler");
+
+            mockClient.emit(ClientEvent.Sync, SyncState.Syncing, null, {});
+            await flushPromises();
+
+            expect(stopCrawler).toHaveBeenCalled();
         });
     });
 });
