@@ -25,8 +25,8 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | #   | Issue           | Action                                                                                                                                                                                                                                                         | Status                  |
 | --- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | 1.1 | #32373          | macOS media permissions: `setPermissionCheckHandler`/`RequestHandler` (**fail-open, NOT origin-scoped** so widget/Jitsi media survives), `askForMediaAccess` on darwin, add `NS*UsageDescription` via `mac.extendInfo` in `electron-builder.ts`. + unit tests. | ✅ **done (session 4)** |
-| 1.2 | #32398 / #32017 | Screen-share: one picker per platform — gate the custom `openDesktopCapturerSourcePicker` behind `process.platform !== 'darwin'` when `useSystemPicker` is honoured; clean cancel path. (Z-Upstream — verify on macOS 15.)                                     | ⏳ planned              |
-| 1.3 | #32075          | Guard the screen-share picker toggle crash (stale `displayMediaCallback`).                                                                                                                                                                                     | ⏳ planned              |
+| 1.2 | #32398 / #32017 | Screen-share: one picker per platform — gate the custom `openDesktopCapturerSourcePicker` behind `process.platform !== 'darwin'` when `useSystemPicker` is honoured; clean cancel path. (Z-Upstream — verify on macOS 15.)                                     | ✅ **defensive hardening done (session 11)**; root crash stays upstream/Wayland |
+| 1.3 | #32075          | Guard the screen-share picker toggle crash (stale `displayMediaCallback`).                                                                                                                                                                                     | ✅ **defensive hardening done (session 11)**: consume-once `displayMediaCallback.ts` + `getSources` try/catch in `ipc.ts`; native Wayland/PipeWire segfault stays upstream |
 | 1.4 | #32426          | Wire toggle-mute hotkey through the menu/accelerator path.                                                                                                                                                                                                     | ❌ skip-mischaracterized (session 10): NOT a desktop bug. ⌘D mute works for legacy 1:1 calls (`LegacyCallView.onNativeKeyDown`); voice rooms/group calls use Element Call as a cross-origin **iframe widget** so the keydown never reaches element-web's document. Reproduces on web too. Belongs upstream in element-call; no `vectormenu.ts`/`electron-main.ts`/`ipc.ts` involvement. |
 
 ## Phase 2 — Auto-launch & auto-update ★ HIGH (frequent, cross-platform)
@@ -41,12 +41,12 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 | #   | Issue           | Action                                                                               | Status                   |
 | --- | --------------- | ------------------------------------------------------------------------------------ | ------------------------ |
-| 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default). Platform-aware default via `Store.shouldWarnBeforeExit()` (false on darwin, true elsewhere); explicit user choice preserved. | ✅ **done (session 6)** |
+| 3.1 | #32287          | `warnBeforeExit` default → opt-in on macOS (CMD+Q immediate by default). Platform-aware default via `Store.shouldWarnBeforeExit()` (false on darwin, true elsewhere); explicit user choice preserved. | ✅ **done (session 6)**; **follow-up done (session 11)**: the menu File/app-menu Quit and tray Quit used Electron `role:"quit"` / direct `app.quit()`, **bypassing** the warn dialog that ⌘Q/Ctrl+Q showed (silent on Windows/Linux where warn is the default). New pure `confirm-quit.ts` `shouldQuitAfterConfirm`; all quit entry points now route through one `confirmAndQuit` (DI into `vectormenu.ts`/`tray.ts`, no import cycle). ⌘Q path unchanged (`app.exit()` + geometry persist). |
 | 3.2 | #32267          | Cmd-W should not orphan the window without prompting; route through quit/hide logic. | ✅ **done (session 10)**: NOT a prompt (maintainer dbkr rejected that). On darwin the close handler now hides the whole **app** (`app.hide()`, ⌘W ≡ ⌘H) instead of just the window, so another app becomes active rather than leaving Element frontmost with an empty menu bar ("limbo"). New pure `resolveWindowCloseBehavior()` (`window-close.ts`); tray/non-darwin unchanged. Also `app.show()` in the second-instance handler (app.hide leaves `isVisible()` true). |
 | 3.3 | #32228 / #32360 | **Replaced the unmaintained `electron-window-state` dep** with an in-repo store-backed `WindowStateManager` (`window-state.ts`). Persists bounds + maximized on every window event through the existing `electron-store` Store (durable), not only on the `closed` event the old lib relied on (which never fires under macOS hide-on-close → #32228). **Fullscreen is no longer restored** (like VS Code's `restoreFullscreen:false`) so the app can't auto-start fullscreen → #32360. Visibility clamp uses workArea + overlap (not strict containment) to survive menu-bar/notch/multi-monitor. | ✅ **done (session 9)** |
 | 3.4 | #32260          | **Theme-aware window background** so the native window is painted in the user's theme colour before the web CSS loads. New `background-color.ts` (`resolveBackgroundColor` = valid persisted colour ⟶ else `nativeTheme`-derived opaque default, dark `#101317` / light `#ffffff`); renderer reports its resolved bg via a new `setThemeColor` IPC (persisted + live `setBackgroundColor`). Validator enforces opacity (rejects alpha) to preserve the blurry-font guarantee. | ✅ **done (session 8)** |
 | 3.5 | #32352          | Tray "Exit" works during a call.                                                     | ❌ skip-mischaracterized (session 10): the tray Quit path already force-quits — `tray.ts` `app.quit()` → `beforeQuit` sets `appQuitting=true` (no preventDefault) → close handler stops hiding → `window-all-closed` → exit. No in-repo handler (`Call.beforeUnload`, `ElectronPlatform` before-quit) blocks unload. Ancient (riot-web 1.5.12/Linux); any residual is the element-call widget (upstream). |
-| 3.6 | #32273          | UI freeze after "Open" on download toast (`shell.openPath` / focus).                 | ⏳ planned               |
+| 3.6 | #32273          | UI freeze after "Open" on download toast (`shell.openPath` / focus).                 | ✅ **partial (session 11)**: the in-repo defect (a `void`-discarded `shell.openPath` error → a failed "Open" was silent) is fixed — the handler now `await`s `openPath` and shows an error dialog (`download\|unable_to_open_*`) + logs. New pure `resolveUserDownloadAction` (`user-download.ts`). The success-path "freeze" is the opened app taking foreground focus — **native macOS, not in-repo fixable**. |
 | 3.7 | #32114          | Crash on close (Ventura/M2).                                                         | ⬆️ track (Electron bump) |
 | 3.8 | #32222 / #32223 | White-screen-on-return; single-instance focus after boot.                            | ⬆️ investigate/upstream  |
 
@@ -56,7 +56,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | --- | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------ |
 | 4.1 | #32253                                              | Warn the user when searching before indexing is complete.                             | ✅ **done (session 10)**: `SearchWarning.tsx` now shows a polite-live-region notice when the Seshat index exists but is **still crawling** (`EventIndex.currentRoom() !== null`), subscribing to `changedCheckpoint` so it auto-clears. Renderer-only; new i18n `seshat\|warning_kind_search_partial`. The deeper "indexed-but-0-results" reliability is upstream matrix-seshat (out of scope). |
 | 4.2 | #32341 / #32258 / #32266 / #32011 / #32356 / #32343 | Query/index correctness bugs — triage as a batch against `seshat.ts` + matrix-seshat. | ⏳ planned         |
-| 4.3 | #32038 / #32119 / #32112 / #32130                   | i18n tokenization, CPU spikes, packaging, Skylake illegal-instruction.                | ⬆️ mostly upstream |
+| 4.3 | #32038 / #32119 / #32112 / #32130                   | i18n tokenization, CPU spikes, packaging, Skylake illegal-instruction.                | ⬆️ mostly upstream; ✅ **#33954 adopted (session 11)**: arm64 `--cfg aes_armv8` RUSTFLAGS in `hak/matrix-seshat/build.ts` (hardware AES on Apple Silicon, ~10-20× CPU saving). Build-flag only — **needs native arm64 build QA** (not unit-testable). |
 | 4.4 | #33957 (→ #32119)                                   | **Adopted upstream PR #33957:** `onTimelineReset` ignores thread/filtered timeline-set resets (only the room's own unfiltered live timeline re-seeds a gap-fill checkpoint) — stops dead rooms re-inflating the crawl list every launch (a contributor to the #32119 startup CPU spike). | ✅ **done (session 7)** |
 
 ## Phase 5 — Notifications & badge
@@ -65,16 +65,16 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | --- | ------ | ----------------------------------------------------------------------------- | --------------- |
 | 5.1 | #32383 | Respect macOS DND/Focus (needs vetted native module + IPC + renderer gating). | ⚠️ needs design |
 | 5.2 | #31996 | macOS Sequoia: notification sounds stack after wake.                          | ⏳ investigate  |
-| 5.3 | #32288 | Remove "99+" dock badge cap.                                                  | ⏳ planned      |
+| 5.3 | #32288 | Remove "99+" dock badge cap.                                                  | ❌ **document-only / wontfix (session 11)**: there is **no "99+" cap in Element's code**. The macOS dock uses raw `app.badgeCount = count` (`badge.ts:47`, no clamp); the in-app badge uses `formatCount` (compact `1K/10K`, never "99+"); the favicon/Windows overlay shows `Nk+` for >999. The "99+" the reporter saw is rendered by **macOS itself** for any dock badge >99 and is **not overridable via Electron's `app.badgeCount`** (a number). Not actionable in-repo. |
 
 ## Phase 6 — Files, config, title bar, accessibility
 
 | #   | Issue                    | Action                                                                                      | Status          |
 | --- | ------------------------ | ------------------------------------------------------------------------------------------- | --------------- |
 | 6.1 | #32355 / #32362          | Blob/anchor downloads not promoted to the session pipeline; Save-image-as failure.          | ✅ **done (session 10)** for **#32362**: right-click "Save image as" used the main-process **global `fetch()`**, bypassing the `media-auth.ts` `session.webRequest` interceptors (URL rewrite + Bearer token) → 401/404 on authenticated media. Now routes via `webContents.session.fetch()` (new pure `saveImageToFile(url,filePath,session)` in `save-image.ts`). **#32355** is **already fixed in the renderer** (`FileBodyViewModel` preventDefault + blob `a.click()` → `will-download` → native Save dialog) — not re-fixed. |
-| 6.2 | #32351 / #32337 / #32284 | config.json override/loading defects (system-wide path, integration manager, jitsi domain). **⚠️ Session-7 shallow-`Object.assign` hypothesis REFUTED (session 10 triage, high confidence):** the desktop asar config has **no top-level `jitsi`/`integrations` object**, so `Object.assign(buildConfig, localConfig)` (electron-main.ts:180) has **nothing to clobber** — the user's key is added cleanly, and the renderer then deep-merges DEFAULTS via lodash `mergeWith` (`SdkConfig.ts:81`). Real per-issue causes (from maintainer comments): **#32284** = element-integration-manager always using meet.element.io for a manually-added Jitsi widget + `preferredDomain` vs `preferred_domain` casing (not config merge); **#32337** = upstream renderer/SDK race (`this._managers is undefined`) + Electron stale `.well-known` HTTP cache; **#32351** = a genuine **feature gap** — no system-wide config path exists (`loadLocalConfigFile()` only reads `ELEMENT_DESKTOP_CONFIG_JSON`/`--config`/`userData/config.json`); maintainer wants a new `/Library/Application Support/Element/config.json` (macOS) or `/etc/element-desktop/config.json` (Linux) fallback. **Optional latent-bug hardening (NOT required by any filed issue):** the shallow merge *would* clobber keys nested in BOTH configs (`room_directory`, `features`, `setting_defaults`, `element_call`) — a deep merge in a new `config.ts` helper would prevent that, but no issue exercises it. | ⏳ split: #32351 = feature (defer to maintainer-agreed path); #32337/#32284 = upstream/docs; merge-bug = not the cause |
+| 6.2 | #32351 / #32337 / #32284 | config.json override/loading defects (system-wide path, integration manager, jitsi domain). **⚠️ Session-7 shallow-`Object.assign` hypothesis REFUTED (session 10 triage, high confidence):** the desktop asar config has **no top-level `jitsi`/`integrations` object**, so `Object.assign(buildConfig, localConfig)` (electron-main.ts:180) has **nothing to clobber** — the user's key is added cleanly, and the renderer then deep-merges DEFAULTS via lodash `mergeWith` (`SdkConfig.ts:81`). Real per-issue causes (from maintainer comments): **#32284** = element-integration-manager always using meet.element.io for a manually-added Jitsi widget + `preferredDomain` vs `preferred_domain` casing (not config merge); **#32337** = upstream renderer/SDK race (`this._managers is undefined`) + Electron stale `.well-known` HTTP cache; **#32351** = a genuine **feature gap** — no system-wide config path exists (`loadLocalConfigFile()` only reads `ELEMENT_DESKTOP_CONFIG_JSON`/`--config`/`userData/config.json`); maintainer wants a new `/Library/Application Support/Element/config.json` (macOS) or `/etc/element-desktop/config.json` (Linux) fallback. **Optional latent-bug hardening (NOT required by any filed issue):** the shallow merge *would* clobber keys nested in BOTH configs (`room_directory`, `features`, `setting_defaults`, `element_call`) — a deep merge in a new `config.ts` helper would prevent that, but no issue exercises it. | ✅ **#32351 done (session 11)** + deep-merge hardening: new pure `config.ts` (`getConfigCandidatePaths` system-wide fallback — macOS `/Library/Application Support/<productName>/config.json`, Windows `%PROGRAMDATA%\<productName>\config.json`, Linux fixed `/etc/element-desktop/config.json`; per-user `userData` wins, explicit `--config`/env bypasses fallback; a malformed **machine-wide** config is skipped+logged, only the user-controlled primary rethrows the existing dialog) + `deepMergeConfig` (replaces the shallow `Object.assign`; nested-merge, array-replace, depth-recursive `__proto__`/`constructor`/`prototype` strip), wired in `electron-main.ts`. **#32337/#32284 remain upstream/docs.** |
 | 6.3 | #32018                   | macOS title-bar draggable area too small (`macos-titlebar.ts`).                             | ✅ **done (session 10)**: with `titleBarStyle:"hidden"` the only drag affordance is the injected `-webkit-app-region:drag` `::before` strips, which were 13–24px (florianduros measured 13px). Enlarged `.mx_RoomView` / `.mx_LeftPanel` / `.mx_LeftPanel_newRoomList` / `.mx_SpaceRoomView` `::before` to **32px** (within the empty band above header controls — no element becomes both clickable and draggable). CSS extracted into pure `buildTitleBarCss()` for testing. |
-| 6.4 | #32315                   | Disable smooth scrolling (accessibility).                                                   | ⬆️ web/Chromium |
+| 6.4 | #32315                   | Disable smooth scrolling (accessibility).                                                   | ✅ **done (session 11)**: new `Accessibility.disableSmoothScrolling` setting (Preferences) + pure `scrollBehavior.ts` helper `getScrollBehavior()` that returns `auto` when the setting OR OS `prefers-reduced-motion` is set. Gates the 3 user-perceptible JS smooth scrolls (RoomSublist ×2, SessionManagerTab); all other sites were already instant. Web/Jest. |
 
 ---
 
@@ -257,33 +257,77 @@ agents** (disjoint files, TDD) → full verification → **18-agent adversarial 
   web `SearchWarning` Jest **8/8**, web `tsc` (only the 4 pre-existing vendored matrix-js-sdk errors), eslint/prettier/i18n
   clean. **Not verifiable here:** live macOS behaviour (⌘W app-hide, the drag feel, authenticated-media save) — manual QA.
 
+### Session 11 fixes (2026-06-24) — batched 6 phases via subagents (+2 document-only)
+
+Picked up the user's "handle all the selected phases this session with subagents" directive (phases.md lines 262-289).
+Ran an **8-agent triage workflow** (5 structured + 3 re-run as markdown after a StructuredOutput cap) → 6 implement,
+2 document-only; implemented the web phase via a **background agent** and all desktop phases serially (electron-main.ts
+is shared by 3.1 + 6.2); then a **6-reviewer adversarial workflow** with per-finding independent verification → **5
+confirmed findings (4 fix-now + 1 document)** all applied → full re-verification.
+
+- ✅ **6.4 (#32315)** Disable smooth scrolling — new `Accessibility.disableSmoothScrolling` setting (Preferences,
+  `LEVELS_ACCOUNT_SETTINGS`, no controller) + pure [scrollBehavior.ts](../apps/web/src/utils/scrollBehavior.ts)
+  `getScrollBehavior()` (returns `auto` when the setting **or** OS `prefers-reduced-motion` is set). Gates the 3
+  user-perceptible JS smooth scrolls (`RoomSublist` ×2, `SessionManagerTab`); everything else was already instant; no
+  CSS change (the only `scroll-behavior:smooth` is export-only). 12 Jest tests.
+- ✅ **1.2/1.3 (#32398/#32075)** Screen-share **defensive hardening** — consume-once
+  [displayMediaCallback.ts](../apps/desktop/src/displayMediaCallback.ts) `consumeDisplayMediaCallback` (atomic
+  read-and-clear; duplicate/stale `callDisplayMediaCallback` is a safe no-op), and `getDesktopCapturerSources` in
+  `ipc.ts` now try/catches `desktopCapturer.getSources` → replies `[]` instead of rejecting the IPC (renderer picker
+  cancels cleanly, never dangles). Removed the now-dead `getDisplayMediaCallback`. Root crash stays upstream/Wayland.
+- ✅ **#33954** (Phase 4.3 / #32119) — `hak/matrix-seshat/build.ts` appends `--cfg aes_armv8` to RUSTFLAGS when
+  `hakEnv.getTargetArch() === "arm64"` (hardware AES on Apple Silicon). Review confirmed: `aes 0.8.4` declares the cfg
+  (Cargo auto-registers it for check-cfg, no `-D warnings`), so build-break risk is **low**; universal builds run
+  per-arch so x86_64 correctly omits it. **Not unit-testable** (build script) — **needs native arm64 build QA**.
+- ✅ **3.6 (#32273)** Download-toast "Open" — the in-repo defect (a `void`-discarded `shell.openPath` error → failed
+  "Open" was silent) is fixed: handler is now async, `await`s `openPath`, and on a non-empty error string shows an
+  error dialog (`download|unable_to_open_*`) + logs. New pure
+  [user-download.ts](../apps/desktop/src/user-download.ts) `resolveUserDownloadAction`. **The success-path "freeze" is
+  the opened app stealing foreground focus — native macOS, not in-repo fixable** (honestly documented).
+- ✅ **3.1 follow-up (#32287)** Menu/tray Quit now honour warn-before-exit — new pure
+  [confirm-quit.ts](../apps/desktop/src/confirm-quit.ts) `shouldQuitAfterConfirm`; one `confirmAndQuit` glue in
+  `electron-main.ts` injected into `vectormenu.ts` (`buildMenuTemplate(onQuit)`, `role:"quit"`→`click`, accelerator
+  kept — `before-input-event` preventDefault suppresses it) and `tray.ts` (`setQuitHandler`). ⌘Q path unchanged
+  (`app.exit()` + geometry persist). No expansion on default config; closes the documented bypass.
+- ✅ **6.2 (#32351)** System-wide config path + deep-merge — new pure [config.ts](../apps/desktop/src/config.ts)
+  `getConfigCandidatePaths` (mac `/Library/Application Support/<productName>/config.json`, Windows
+  `%PROGRAMDATA%\<productName>\config.json`, Linux fixed `/etc/element-desktop/config.json`; per-user wins, explicit
+  `--config`/env bypasses) + `loadMergedLocalConfig` (a malformed **machine-wide** config is skipped+logged so it
+  can't break the user's session or trigger the user-blaming dialog; only the user-controlled primary rethrows) +
+  `deepMergeConfig` (nested-merge, array-replace, depth-recursive `__proto__`/`constructor`/`prototype` strip).
+  Replaces the shallow `Object.assign` in `electron-main.ts`. 22 vitest tests.
+- ❌ **document-only:** **5.3 (#32288)** — no "99+" cap exists in Element; macOS renders it for any dock badge >99
+  and Electron's `app.badgeCount` (a number) can't override it. **0.3 main-process durability** — no Electron API to
+  force per-origin durable storage; notifications permission is **already** granted fail-open (`media-permissions.ts`)
+  and demonstrably does **not** flip `navigator.storage.persist()`; scheme privileges don't feed the durability
+  heuristic. Both not actionable in-repo.
+- **Adversarial review → 5 confirmed findings, all resolved:** (config) malformed MDM config aborted the whole load +
+  user-blamed → per-layer try/catch; (config) nested one-sided `__proto__` not stripped → recurse into one-sided
+  objects; (config) Linux `/etc` path ignores branding → documented as intentional; (download) failed open only
+  `console.error`'d → added the error dialog; (download) handler behaviour untested → new
+  `webcontents-handler.test.ts` drives the real `will-download` flow to exercise open/fail-dialog/dismiss/re-open.
+- **Verification:** desktop `vitest run` **214/214** (19 files; +43 new across 5 new test files), `tsc`/`eslint`/
+  `prettier`/**knip**/i18n clean; web `scrollBehavior` Jest **12/12**, web tsc (only the 4 pre-existing vendored
+  matrix-js-sdk errors), eslint/prettier/i18n clean. **Not verifiable here:** live macOS (⌘W/quit dialogs, screen-share
+  cancel, download-open dialog & focus), the **arm64 seshat native build** (#33954), and real MDM config paths.
+
 ### Recommended next session
 
+- **#33954 native QA:** build seshat for `aarch64-apple-darwin` on a real Apple-Silicon Mac and confirm `--cfg
+  aes_armv8` compiles + measure the Seshat-thread CPU drop (see `upstream-pr-review.md` §#33954 / the seshat agent's
+  validation steps). This is the only unverified piece of session 11.
 - **Phase 6.2 / #32351** (if pursued): add a **system-wide config path** fallback in `loadLocalConfigFile()`
-  ([electron-main.ts:129](../apps/desktop/src/electron-main.ts)) — macOS `/Library/Application Support/Element/config.json`,
-  Linux `/etc/element-desktop/config.json` — when no `userData/config.json` exists. This is a **feature** (maintainer
-  t3chguy wants a standard path); confirm the exact path with maintainers first. Optionally fold in the deep-merge
-  hardening (latent, no filed issue).
-- **PR-review adopt shortlist** (see `upstream-pr-review.md`): #33954 arm64 AES build flag, or #33955+#33956 Seshat
-  backfill resilience (high, complements Phase 0.2 & 4.4).
-- **Phase 6.4 (#32315)** disable smooth scrolling (accessibility) — web/Chromium; check if a setting can gate it.
-- **Phase 3.6 (#32273)** UI freeze after "Open" on download toast (`shell.openPath`/focus) — verify repro first.
-- **Phase 5.3** remove the "99+" dock badge cap (#32288) — but NOTE: investigation found the catalogue
-  mischaracterised it. macOS uses raw `app.badgeCount` (no cap) in [badge.ts](../apps/desktop/src/badge.ts); the
-  only in-code cap is the **favicon/Windows overlay** renderer ([favicon.ts:148](../apps/web/src/favicon.ts) → shows
-  `Nk+` for >999, not "99+"). The reporter's "99+" doesn't match current code — likely already changed upstream or
-  the in-app badge. Re-confirm against a live build before spending effort; it may be a no-op / wontfix.
-- **PR-review adopt shortlist** (see `upstream-pr-review.md`): #33954 arm64 AES build flag + #33957 timeline-reset
-  guard (both low-effort), or #33955+#33956 Seshat backfill resilience (high, complements Phase 0.2).
-- **Phase 3.3** persist/restore maximized & fullscreen state (#32228/#32360, "always starts in fullscreen") —
-  `store.ts` + `electron-window-state`; has a unit-testable store component.
-- **Re-scope / skip (session-6 finding):** **Phase 1.2 (#32398)** is largely resolved by the in-tree Electron-42
-  `{useSystemPicker:true}` (macOS 15+ uses the native picker; handler not invoked) — residual is upstream/Wayland.
-  **Phase 1.3 (#32075)** is a native Wayland/PipeWire segfault (mostly Linux/upstream). Neither is a strong in-repo
-  macOS target; only defensive hardening (try/catch on `getDesktopCapturerSources`, empty-source guard, stale-callback
-  guard) is in-repo, and the crash itself stays upstream.
-- **Known pre-existing limitation (3.1):** the app-menu `role:"quit"` (`vectormenu.ts`) bypasses the warn-before-exit
-  dialog on all platforms; harmless on macOS with the new default, only diverges if a user re-enables the warning.
-- **Main-process follow-up for 0.3:** investigate coaxing Chromium to grant durable storage on desktop (e.g.
-  ensure notifications-permission signal) so `persist()` actually returns true — the only real cure for the
-  IndexedDB-eviction flavour of #32198/#32108.
+  ([electron-main.ts](../apps/desktop/src/electron-main.ts)) — **DONE in session 11** (`config.ts`); if a maintainer
+  prefers a different exact path or per-variant Linux dirs, that is the only remaining tweak. The deep-merge hardening
+  was also folded in.
+- **PR-review adopt shortlist** (see `upstream-pr-review.md`): **#33954 DONE (session 11, needs native build QA)**;
+  remaining: **#33955+#33956** Seshat backfill resilience + progress UI (high effort, complements Phase 0.2 & 4.4) —
+  still open. (#33957 timeline-reset guard already adopted session 7.)
+- **Main-process follow-up for 0.3:** **investigated & closed (session 11, document-only):** no Electron API forces
+  per-origin durable storage; notifications are already granted fail-open (`media-permissions.ts`) yet
+  `persist()` still returns false (the JS handlers don't feed Chromium's `DurableStoragePermissionContext`), and
+  scheme privileges don't participate in the heuristic. The web-side ceiling (Phase 0.3 `StorageManager` hardening) +
+  `StorageEvictedDialog` recovery remain the realistic mitigations. Only an upstream Electron feature or migrating off
+  the `vector://` scheme would change it.
+- **Still planned / untouched:** Phase 4.2 Seshat query-correctness cluster; Phase 5.1 macOS DND/Focus (needs a vetted
+  native module); Phase 5.2 Sequoia notification-sound stacking; Phase 3.7/3.8 (Electron-bump / upstream).

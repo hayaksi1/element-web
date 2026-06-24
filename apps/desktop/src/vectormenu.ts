@@ -12,7 +12,7 @@ import { _t } from "./language-helper.js";
 
 const isMac = process.platform === "darwin";
 
-export function buildMenuTemplate(): Menu {
+export function buildMenuTemplate(onQuit: () => void): Menu {
     // Menu template from http://electron.atom.io/docs/api/menu/, edited
     const template: Array<MenuItemConstructorOptions | MenuItem> = [
         {
@@ -179,8 +179,13 @@ export function buildMenuTemplate(): Menu {
                 },
                 { type: "separator" },
                 {
-                    role: "quit",
+                    // Not role:"quit": that calls app.quit() directly and bypasses the warn-before-exit
+                    // confirmation. Route through onQuit so it honours the setting like ⌘Q. The accelerator
+                    // is shown for affordance only — the key itself is handled by the before-input-event
+                    // handler, whose preventDefault() suppresses this menu accelerator. See #32287.
                     label: _t("action|quit"),
+                    accelerator: "CommandOrControl+Q",
+                    click: onQuit,
                 },
             ],
         });
@@ -239,8 +244,11 @@ export function buildMenuTemplate(): Menu {
                     label: _t('About'),
                 },*/
                 {
-                    role: "quit",
+                    // Not role:"quit" — route through onQuit so File→Quit honours the warn-before-exit
+                    // setting like Ctrl+Q (which on Windows/Linux is the default). See #32287.
                     label: _t("action|quit"),
+                    accelerator: "CommandOrControl+Q",
+                    click: onQuit,
                 },
             ],
         });

@@ -582,3 +582,46 @@ Continued in the same session. Adopted the low-effort PR-review shortlist item #
 - **Phase 3.2** Cmd-W orphan-window prompt (#32267) — verify exact repro first (darwin `close` handler already hides).
 - **Phase 3.3** persist/restore maximized & fullscreen (#32228/#32360) — has a unit-testable store component.
 - **Phase 5.3 (#32288)** only after re-confirming on a live build; PR shortlist **#33955+#33956** Seshat backfill.
+
+---
+
+## Session 11 (2026-06-24) — batched 6 phases via subagents (+2 document-only)
+
+> (Sessions 9–10 are recorded in `phases.md`, which is the authoritative status. This entry covers session 11.)
+
+Directive: handle ALL of the user-selected "Recommended next session" items (phases.md lines 262-289) with subagents.
+
+**Process:** 8-agent triage workflow (5 structured-schema + 3 re-run as markdown after a StructuredOutput retry cap)
+→ 6 implement, 2 document-only. Web phase (6.4) implemented by a background agent (isolated to `apps/web`); all desktop
+phases implemented serially in the main loop (electron-main.ts is shared by 3.1 + 6.2, so serial avoids cross-talk),
+TDD throughout. Then a 6-reviewer adversarial workflow with per-finding independent skeptic verification → 5 confirmed
+findings (4 fix-now + 1 document) → all applied → full re-verification.
+
+**Implemented (all TDD):**
+- **6.4 (#32315)** Disable smooth scrolling — `Accessibility.disableSmoothScrolling` setting + pure `scrollBehavior.ts`
+  `getScrollBehavior()` (OR of the setting and OS `prefers-reduced-motion`); gates the 3 perceptible JS smooth scrolls.
+- **1.2/1.3 (#32398/#32075)** Screen-share defensive hardening — consume-once `consumeDisplayMediaCallback`;
+  `getDesktopCapturerSources` try/catch → `[]` (no dangling renderer). Root crash stays upstream/Wayland.
+- **#33954** (4.3/#32119) — arm64 `--cfg aes_armv8` RUSTFLAGS in `hak/matrix-seshat/build.ts`. Build-flag only; NEEDS
+  native arm64 build QA (low break-risk per review: `aes 0.8.4` declares the cfg, no `-D warnings`).
+- **3.6 (#32273)** Download-toast "Open" — `await shell.openPath` + error dialog (`download|unable_to_open_*`) + log;
+  pure `resolveUserDownloadAction`. Success-path "freeze" = native macOS focus (documented, not in-repo fixable).
+- **3.1 follow-up (#32287)** Menu/tray Quit honour warn-before-exit — pure `confirm-quit.ts` `shouldQuitAfterConfirm`
+  + `confirmAndQuit` injected into `vectormenu.ts`/`tray.ts` (no import cycle). ⌘Q unchanged.
+- **6.2 (#32351)** System-wide config path + deep-merge — pure `config.ts` (`getConfigCandidatePaths`,
+  `loadMergedLocalConfig`, `deepMergeConfig`) wired into `electron-main.ts`; replaces the shallow `Object.assign`.
+
+**Document-only:** 5.3 (#32288) no "99+" cap exists; macOS renders it natively, not overridable via `app.badgeCount`.
+0.3 main-process durability — no Electron API; notifications already granted yet `persist()` stays false.
+
+**Review → 5 confirmed findings, all fixed:** (config) malformed MDM config aborted the whole load + blamed the user →
+per-layer try/catch (only the user-controlled primary rethrows); (config) nested one-sided `__proto__` unstripped →
+recurse into one-sided objects; (config) Linux `/etc` ignores branding → documented intentional; (download) failed
+open only logged → added error dialog; (download) handler untested → new `webcontents-handler.test.ts` drives the real
+`will-download` flow.
+
+**Verification:** desktop `vitest run` **214/214** (19 files; +5 new test files: config/confirm-quit/displayMediaCallback/
+user-download/webcontents-handler), `tsc`/`eslint`/`prettier`/**knip**/i18n clean; web `scrollBehavior` Jest **12/12**,
+web tsc (only the 4 pre-existing vendored matrix-js-sdk errors), eslint/prettier/i18n clean. **Not verifiable here:**
+live macOS (quit dialogs, ⌘W, screen-share cancel, download-open dialog/focus), the **arm64 seshat native build**
+(#33954), and real MDM config paths.

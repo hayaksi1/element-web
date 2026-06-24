@@ -22,9 +22,19 @@ import { getIconPath } from "./icon.js";
 const UUID_NAMESPACE = "9fc9c6a0-9ffe-45c9-9cd7-5639ae38b232";
 
 let trayIcon: Tray | null = null;
+let quitHandler: (() => void) | null = null;
 
 export function hasTray(): boolean {
     return trayIcon !== null;
+}
+
+/**
+ * Register the handler invoked by the tray's "Quit" item. Routed through electron-main's
+ * confirmAndQuit so the tray Quit honours the warn-before-exit setting instead of force-quitting
+ * via app.quit() directly. See element-web#32287.
+ */
+export function setQuitHandler(handler: () => void): void {
+    quitHandler = handler;
 }
 
 export function destroy(): void {
@@ -120,7 +130,13 @@ export function initApplicationMenu(): void {
         {
             label: _t("action|quit"),
             click: function (): void {
-                app.quit();
+                // Fall back to a direct quit if no handler was registered (defensive; electron-main
+                // always registers confirmAndQuit before the tray menu is built).
+                if (quitHandler) {
+                    quitHandler();
+                } else {
+                    app.quit();
+                }
             },
         },
     ]);
