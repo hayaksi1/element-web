@@ -87,11 +87,13 @@ export default abstract class BaseEventIndexManager {
      *
      * @param {string} userId The event that should be added to the index.
      * @param {string} deviceId The profile of the event sender at the
+     * @param {string} tokenizerMode The tokenizer to build the index with ("language" | "ngram").
+     * Optional; implementations default to the language-based tokenizer. See #32038.
      *
      * @return {Promise} A promise that will resolve when the event index is
      * initialized.
      */
-    public async initEventIndex(userId: string, deviceId: string): Promise<void> {
+    public async initEventIndex(userId: string, deviceId: string, tokenizerMode?: string): Promise<void> {
         throw new Error("Unimplemented");
     }
 

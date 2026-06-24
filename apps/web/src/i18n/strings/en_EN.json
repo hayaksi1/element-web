@@ -2893,6 +2893,7 @@
             "message_search_section": "Message search",
             "message_search_sleep_time": "How fast should messages be downloaded.",
             "message_search_space_used": "Space used:",
+            "message_search_tokenizer_mode": "Tokenizer used to index encrypted messages for search. Use \"ngram\" for languages without spaces between words (e.g. Chinese, Japanese).",
             "message_search_unsupported": "%(brand)s is missing some components required for securely caching encrypted messages locally. If you'd like to experiment with this feature, build a custom %(brand)s Desktop with <nativeLink>search components added</nativeLink>.",
             "message_search_unsupported_web": "%(brand)s can't securely cache encrypted messages locally while running in a web browser. Use <desktopLink>%(brand)s Desktop</desktopLink> for encrypted messages to appear in search results.",
             "record_session_details": "Record the client name, version, and url to recognise sessions more easily in session manager",

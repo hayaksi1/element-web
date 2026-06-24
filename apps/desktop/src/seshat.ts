@@ -17,6 +17,8 @@ import type {
 import IpcMainEvent = Electron.IpcMainEvent;
 import { randomArray } from "./utils.js";
 import Store from "./store.js";
+import { initEventIndex as openEventIndex } from "./seshat-index.js";
+import { normalizeTokenizerMode, type TokenizerMode } from "./seshat-config.js";
 
 let seshatSupported = false;
 let Seshat: typeof SeshatType;
@@ -66,7 +68,10 @@ const deleteContents = async (p: string): Promise<void> => {
         for (const entry of await afs.readdir(p)) {
             const curPath = path.join(p, entry);
             try {
-                await afs.unlink(curPath);
+                // `rm` with recursive+force handles both files and any nested directories, so the
+                // tokenizer-change rebuild (#32038) fully clears the index even if a future seshat
+                // version stores it in subdirectories, and missing entries are ignored.
+                await afs.rm(curPath, { recursive: true, force: true });
             } catch (e) {
                 console.log("Error deleting a file in EventStore directory", e);
             }
@@ -103,39 +108,37 @@ ipcMain.on("seshat", async function (_ev: IpcMainEvent, payload): Promise<void> 
             if (eventIndex === null) {
                 const userId = args[0];
                 const deviceId = args[1];
+                const requestedMode = args[2];
+                const tokenizerMode = normalizeTokenizerMode(requestedMode);
+                if (typeof requestedMode === "string" && requestedMode !== "" && requestedMode !== tokenizerMode) {
+                    // e.g. a config.json with a typo'd "tokenizerMode" — coerced to the language default,
+                    // so search still works but (silently) not in the requested mode. Log it to aid diagnosis.
+                    console.warn(`Unknown Seshat tokenizerMode "${requestedMode}", falling back to "${tokenizerMode}"`);
+                }
                 const passphraseKey = `seshat|${userId}|${deviceId}`;
 
                 const passphrase = await getOrCreatePassphrase(store, passphraseKey);
 
                 try {
-                    await afs.mkdir(eventStorePath, { recursive: true });
-                    eventIndex = new Seshat(eventStorePath, { passphrase });
+                    // The ReindexError recovery + tokenizer-change rebuild logic lives in the
+                    // injectable `openEventIndex` helper so it can be unit-tested without the native
+                    // module. See seshat-index.ts and https://github.com/element-hq/element-web/issues/32038.
+                    eventIndex = await openEventIndex(eventStorePath, passphrase, tokenizerMode, {
+                        Seshat,
+                        SeshatRecovery,
+                        ReindexError,
+                        ensureDir: (p) => afs.mkdir(p, { recursive: true }).then(() => undefined),
+                        deleteContents,
+                        getStoredTokenizerMode: (): TokenizerMode | undefined => {
+                            const stored = store.get("seshatTokenizerMode");
+                            return stored === undefined ? undefined : normalizeTokenizerMode(stored);
+                        },
+                        setStoredTokenizerMode: (mode) => store.set("seshatTokenizerMode", mode),
+                        log: (m) => console.log(m),
+                    });
                 } catch (e) {
-                    if (e instanceof ReindexError) {
-                        // If this is a reindex error, the index schema
-                        // changed. Try to open the database in recovery mode,
-                        // reindex the database and finally try to open the
-                        // database again.
-                        const recoveryIndex = new SeshatRecovery(eventStorePath, {
-                            passphrase,
-                        });
-
-                        const userVersion = await recoveryIndex.getUserVersion();
-
-                        // If our user version is 0 we'll delete the db
-                        // anyways so reindexing it is a waste of time.
-                        if (userVersion === 0) {
-                            await recoveryIndex.shutdown();
-                            await deleteContents(eventStorePath);
-                        } else {
-                            await recoveryIndex.reindex();
-                        }
-
-                        eventIndex = new Seshat(eventStorePath, { passphrase });
-                    } else {
-                        sendError(payload.id, <Error>e);
-                        return;
-                    }
+                    sendError(payload.id, <Error>e);
+                    return;
                 }
             }
             break;

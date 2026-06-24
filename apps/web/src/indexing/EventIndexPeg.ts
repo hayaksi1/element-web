@@ -78,9 +78,12 @@ export class EventIndexPeg {
 
         const userId = client.getUserId()!;
         const deviceId = client.getDeviceId()!;
+        // Which tokenizer the local search index should be built with. The desktop side rebuilds
+        // the index if this differs from the mode it was last built with. See #32038.
+        const tokenizerMode = SettingsStore.getValueAt(SettingLevel.DEVICE, "tokenizerMode");
 
         try {
-            await indexManager.initEventIndex(userId, deviceId);
+            await indexManager.initEventIndex(userId, deviceId, tokenizerMode);
 
             const userVersion = await indexManager.getUserVersion();
             const eventIndexIsEmpty = await indexManager.isEventIndexEmpty();
@@ -91,7 +94,7 @@ export class EventIndexPeg {
                 await indexManager.closeEventIndex();
                 await this.deleteEventIndex();
 
-                await indexManager.initEventIndex(userId, deviceId);
+                await indexManager.initEventIndex(userId, deviceId, tokenizerMode);
                 await indexManager.setUserVersion(INDEX_VERSION);
             }
 
