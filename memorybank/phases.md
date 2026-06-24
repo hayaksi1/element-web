@@ -15,7 +15,7 @@ The worst class: users silently lose their session / encrypted history.
 | #   | Issue                    | Action                                                                                                                                                       | Status                   |
 | --- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
 | 0.1 | #32521 / #32715 / #32198 | **Pickle-key transient-decrypt guard** in `store.ts` + `ipc.ts`: distinguish absent vs undecryptable; never overwrite an undecryptable secret. + unit tests. | ✅ **done this session** |
-| 0.2 | #33501                   | Seshat error-dialog **circuit-breaker** in apps/web `EventIndex.ts` (show once, stop indexing, offer disable-search).                                        | 🔜 next                  |
+| 0.2 | #33501                   | Seshat error-dialog **circuit-breaker** in apps/web `EventIndex.ts` (show the dialog once, then stop indexing — no flood after every `/sync`).               | ✅ **done (session 2)**  |
 | 0.3 | #32198 / #32472 / #32108 | Harden web-side `StorageManager.tryPersistStorage()` (act on the `persistent` boolean; warn on desktop; recovery before forced logout).                      | ⏳ planned               |
 
 ## Phase 1 — Calls / media (screen-share + mic/camera) ★ HIGH
@@ -77,11 +77,19 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 ---
 
-### This session's fixes
+### Session 1 fixes (2026-06-24)
 
 - ✅ **0.1** Pickle-key transient-decrypt data-loss guard (`store.ts`, `ipc.ts`, `store.test.ts`)
 - ✅ **2.1** Start-at-login via native Electron loginItem API (`auto-launch.ts`, `auto-launch.test.ts`)
 
+### Session 2 fixes
+
+- ✅ Committed + pushed session 1 work to `origin/main`.
+- ✅ **0.2** Seshat error-dialog **circuit-breaker** (`apps/web/src/indexing/EventIndex.ts`): `onSync` now shows
+  the error dialog **once**, sets an `indexingErrored` flag, stops the crawler, and skips further indexing —
+  fixing the dialog flood (#33501, S-Critical). Tests added to `EventIndex-test.ts` (now 4 pass).
+
 ### Recommended next session
 
-- **0.2** Seshat dialog circuit-breaker, **1.1** macOS media permissions — both high-impact and unit-testable.
+- **1.1** macOS media (mic/cam) permissions (#32373) — `electron-main.ts` permission handlers + `NS*UsageDescription`.
+- Then **0.3** harden web-side `StorageManager.tryPersistStorage()`, or **Phase 1.2/1.3** screen-share.
