@@ -945,3 +945,66 @@ Host: this machine is the target — Apple Silicon **M4 Pro / aarch64**, Rust **
   clicks, multi-monitor, TCC prompts, encrypted rooms). Authored **`memorybank/manual-qa-checklist.md`** — a build+run
   recipe plus per-issue repro steps and expected results, grouped A–E by priority (data-loss → calls → window/lifecycle
   → files/config → search). The user runs it against a freshly repackaged build.
+
+## Session 17 (2026-06-25) — Room search Telegram-parity initiative: research + plan + Phase 1 (⌘F fix)
+
+User report: "⌘F to search in a room doesn't work" + "search isn't as good as Telegram". Ran a 9-agent research
+workflow (code-map of shortcut/exec/UI/settings paths + Telegram in-chat/filters/global research + upstream
+element-web PR scan + synthesis). Full deliverable: **`memorybank/search-improvement-plan.md`** (root cause, gap
+table, 5-phase plan, upstream PR table, open questions). User confirmed via 3 decisions: **⌘F default-ON Desktop
+only** (web stays opt-in), **scope = full plan 1–5**, **Phase 2 = complement the list** (keep RoomSearchView).
+
+### What was DONE this session
+
+- ✅ **Phase 1 (TDD + fully verified)** — fixes the reported ⌘F bug. Changes (all UNCOMMITTED — user will review/commit):
+  - `apps/web/src/settings/Settings.tsx`: `ctrlFForSearch` default flipped `false` → `!!IS_ELECTRON` (on for the
+    desktop app, off on web so the browser find bar is preserved); added `IS_ELECTRON` to the `../Keyboard` import;
+    added `description: _td("settings|use_command_f_search_description")` (microcopy under the toggle).
+  - `apps/web/src/i18n/strings/en_EN.json`: new key `settings|use_command_f_search_description`.
+  - `apps/web/test/unit-tests/KeyBindingsDefaults-test.ts` (NEW): regression test locking the `roomBindings()` gate
+    (present when `ctrlFForSearch` true, absent when false). 2/2 pass.
+  - `apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap`:
+    updated for the new microcopy (only diff = the description line).
+  - Verified: eslint 0; tsc only the 4 pre-existing vendored matrix-js-sdk errors; i18n lint clean; prettier clean.
+
+### Root cause (confirmed, code-level) — for next session
+
+- `ctrlFForSearch` **defaulted to `false`** ([Settings.tsx:956]); `roomBindings()` only registers the `SearchInRoom`
+  `{key:'f', ctrlOrCmdKey:true}` combo when that setting is truthy ([KeyBindingsDefaults.ts:116-130]). With it off,
+  `getRoomAction` returns undefined → keypress falls through to the OS. **Not** a focus bug (React `onReactKeyDown`
+  path covers the focused-composer case at LoggedInView.tsx:512-516,851) and **not** a desktop bug (vectormenu.ts /
+  webcontents-handler.ts have no Find item / `findInPage`; electron-main.ts before-input only touches Quit shortcuts).
+  Historic "works once then dead" regression (#28221/#28223) is **already fixed here** ([RightPanelStore.ts:95-100]
+  re-opens the summary card on `FocusMessageSearch`).
+
+### Upstream PR check (answer to user's question)
+
+- NO open upstream PR fixes a macOS search bug. #28223 (the fix) is already in this fork. Live open items: #22888
+  (off-by-default = "users think it's broken"), #24359 (differentiate ⌘F web vs desktop), #27876 (fold into Cmd-K),
+  #21640 (fuzzy UI), legacy matrix-react-sdk #4156 (`from:` filter, never merged). Several search-quality issues
+  (#32127/#32258/#32266/#32343…) overlap our prior Phase 4.x work.
+
+### WHERE I LEFT OFF / next steps (Phases 2–5 in `search-improvement-plan.md`)
+
+- **Phase 2 (next, biggest win):** in-timeline match stepping + "k of N" counter + live in-bubble highlight, as a
+  COMPLEMENT to the existing list (`RoomSearchView.tsx`). Key files: `Searching.ts` (extend `SearchInfo` with
+  currentMatchIndex/totalMatches), new ViewModel in `apps/web/src/viewmodels`, dumb arrow+counter View in
+  `packages/shared-components`, wire into `RoomSearchAuxPanel.tsx`, apply `BaseHighlighter` (HtmlUtils.tsx) to live
+  EventTiles in search mode. Risk: driving the live MessagePanel to arbitrary historical matches needs contextual
+  back-pagination + Seshat-result→live-event mapping.
+- **Phase 3:** `from:`/sender (homeserver `IRoomEventFilter.senders` already supported; Seshat post-filter in v1) +
+  jump-to-date (MSC3030) — Compound filter chips in the search header.
+- **Phase 4:** split `FilePanel.tsx` into searchable Media/Files/Links/Music/Voice tabs; index media filenames
+  (needs INDEX_VERSION bump + re-backfill — see EventIndex.ts isValidEvent).
+- **Phase 5:** portable offline encrypted web search (WASM, packaged locally), recency↔relevance toggle
+  (SearchOrderBy.Rank), corrupt-index health check (#32056).
+
+### ⚠️ ENV gotcha (also saved as a memory) — read before running jest next session
+
+- Jest unit tests **cannot run as-installed**: node_modules was installed with pnpm's **symlinked** `.pnpm` layout,
+  but `apps/web/jest.config.ts` `transformIgnorePatterns` is written for a **hoisted** layout, so TS-source
+  `matrix-js-sdk` is excluded from babel transform → every test dies in `setupTests.ts` with `Cannot use import
+  statement outside a module`. Workaround (no committed change): pass a CLI `--transformIgnorePatterns` that adds
+  `matrix-js-sdk` to the allowlist. `--preserve-symlinks` is NOT a fix (breaks corepack + pnpm nested resolution).
+  Working command shape:
+  `corepack pnpm -C apps/web exec jest <testfile> --transformIgnorePatterns 'node_modules/.pnpm/(?!(matrix-js-sdk|mime|uuid|p-retry|is-network-error|react-merge-refs|is-ip|ip-regex|super-regex|function-timeout|time-span|convert-hrtime|clone-regexp|is-regexp|matrix-web-i18n|await-lock|react-virtuoso|lodash|domutils|domhandler|domelementtype|dom-serializer|entities)).+$'`
