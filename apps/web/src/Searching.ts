@@ -17,25 +17,165 @@ import {
     EventType,
     type MatrixClient,
     type SearchResult,
+    RelationType,
 } from "matrix-js-sdk/src/matrix";
+import { logger } from "matrix-js-sdk/src/logger";
 
 import { type ISearchArgs } from "./indexing/BaseEventIndexManager";
 import EventIndexPeg from "./indexing/EventIndexPeg";
 import { isNotUndefined } from "./Typeguards";
+import SettingsStore from "./settings/SettingsStore";
 
 const SEARCH_LIMIT = 10;
+
+// A room-upgrade predecessor chain is normally 1-2 rooms; cap traversal so a
+// malformed/cyclic predecessor graph can never spin (#32258).
+const MAX_PREDECESSOR_CHAIN = 20;
+
+/**
+ * Seshat's full-text engine (tantivy) interprets an unescaped colon as a
+ * `field:value` operator, so a query such as `https://github.com` is parsed as a
+ * search of the non-existent field `https` and Seshat rejects the whole query
+ * with `Query is invalid. FieldDoesNotExist("https")` (#32341). Wrapping the
+ * term in double quotes forces tantivy into phrase mode and disables the field
+ * operator — the maintainer-endorsed workaround. This is applied ONLY to the
+ * Seshat (local) search term, never to the homeserver search body, which does a
+ * plain substring match and must keep the raw term.
+ */
+export function hardenSeshatSearchTerm(term: string): string {
+    // A genuinely closed phrase (balanced surrounding quotes with no stray inner quote) is
+    // already safe for tantivy, and a term with no field-operator character cannot trip it —
+    // leave both alone. Note: a leading-but-unbalanced quote (e.g. `"https://github.com`) is
+    // NOT treated as a phrase here; it falls through to be escaped and re-wrapped so tantivy
+    // does not reject it as an odd-quote syntax error.
+    const isClosedPhrase =
+        term.length >= 2 && term.startsWith('"') && term.endsWith('"') && !term.slice(1, -1).includes('"');
+    if (isClosedPhrase || !term.includes(":")) return term;
+    // Escape any embedded double quotes so the phrase stays well-formed, then phrase-wrap.
+    return `"${term.replace(/"/g, '\\"')}"`;
+}
+
+interface IReplaceRelation {
+    rel_type?: string;
+    event_id?: string;
+}
+
+/**
+ * Seshat indexes message edits (`m.replace`) as standalone events, so a search
+ * for the edited text matches the edit event rather than the original message.
+ * The search render path has no tile for a replace relation
+ * (`haveRendererForEvent` -> `isRelation(RelationType.Replace)` returns false),
+ * so the result silently fails to render even though the reported count includes
+ * it (#32356). The live timeline never hits this because the SDK aggregates the
+ * edit onto its target; that aggregation does not run in the search path.
+ *
+ * We cannot simply rewrite the edit's content, because the SDK event mapper
+ * (`eventMapperFor`) resolves a result via `room.findEventById(event_id)` and,
+ * when the event is loaded, REUSES that live model verbatim — discarding any
+ * content we mutated and re-dropping the live `m.replace`. So instead we re-key
+ * the result to the edit's TARGET (the original message id): the mapper then
+ * resolves the renderable original — which already carries the aggregated edit
+ * in a loaded room — and, when the original is not loaded, builds a fresh event
+ * from the promoted `m.new_content` we leave behind. Either way the edited text
+ * renders and the permalink targets the original message.
+ *
+ * We touch `content` and `event_id` only; the encryption sidecar fields
+ * (curve25519Key/ed25519Key/algorithm/forwardingCurve25519KeyChain) that
+ * `restoreEncryptionInfo` re-reads live at the event top level and are preserved.
+ */
+function promoteReplacementContent(event: Record<string, unknown> | undefined): void {
+    const content = event?.content as Record<string, unknown> | undefined;
+    if (!content) return;
+    const relatesTo = content["m.relates_to"] as IReplaceRelation | undefined;
+    const newContent = content["m.new_content"] as Record<string, unknown> | undefined;
+    // Only act on a well-formed edit: a Replace relation with a target event id and a
+    // non-empty replacement body (an empty m.new_content would otherwise blank the tile).
+    if (
+        relatesTo?.rel_type !== RelationType.Replace ||
+        typeof relatesTo.event_id !== "string" ||
+        typeof newContent?.body !== "string"
+    ) {
+        return;
+    }
+    event!.content = { ...newContent };
+    event!.event_id = relatesTo.event_id;
+}
+
+/**
+ * Post-process a raw Seshat search response in place: strip the spurious
+ * `state_key: null` Seshat attaches to non-state events (which makes the SDK
+ * treat them as state events) from every event, promote a matched edit so it
+ * renders (#32356), and de-duplicate results that now resolve to the same
+ * message (a promoted edit re-keyed to its original id alongside the original
+ * itself) to avoid duplicate tiles / React-key collisions in RoomSearchView.
+ */
+function sanitizeSeshatResults(localResult: IResultRoomEvents): void {
+    if (!localResult.results) return;
+    const stripStateKey = (event: Record<string, unknown> | undefined): void => {
+        if (event?.state_key === null) delete event.state_key;
+    };
+    for (const searchResult of localResult.results) {
+        const matched = searchResult.result as unknown as Record<string, unknown>;
+        stripStateKey(matched);
+        // Promote only the MATCHED event: re-keying a context event would risk colliding
+        // its id with another result/context event, and an edit appearing only as context
+        // is harmlessly skipped by the renderer as before.
+        promoteReplacementContent(matched);
+        if (searchResult.context) {
+            for (const ctxEvent of searchResult.context.events_before || []) {
+                stripStateKey(ctxEvent as unknown as Record<string, unknown>);
+            }
+            for (const ctxEvent of searchResult.context.events_after || []) {
+                stripStateKey(ctxEvent as unknown as Record<string, unknown>);
+            }
+        }
+    }
+    const seenIds = new Set<string>();
+    localResult.results = localResult.results.filter((r) => {
+        const id = (r.result as unknown as Record<string, unknown>)?.event_id;
+        if (typeof id !== "string") return true;
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
+    });
+}
+
+/**
+ * Build the room-id search chain for a single-room search: the room itself
+ * followed by its room-upgrade predecessors (#32258). Seshat indexes per
+ * room_id and an upgraded room's new id differs from the old one, so without
+ * walking `findPredecessor()` a single-room search can never see pre-upgrade
+ * history. Cycle-guarded and depth-capped.
+ */
+export function getRoomSearchChain(client: MatrixClient, roomId: string): string[] {
+    const dynamicPredecessors = SettingsStore.getValue("feature_dynamic_room_predecessors");
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    let current: string | undefined = roomId;
+    while (current && !seen.has(current) && chain.length < MAX_PREDECESSOR_CHAIN) {
+        chain.push(current);
+        seen.add(current);
+        const predecessorRoomId: string | undefined = client
+            .getRoom(current)
+            ?.findPredecessor(dynamicPredecessors)?.roomId;
+        current = predecessorRoomId;
+    }
+    return chain;
+}
 
 async function serverSideSearch(
     client: MatrixClient,
     term: string,
-    roomId?: string,
+    roomIds?: string[],
     abortSignal?: AbortSignal,
 ): Promise<{ response: ISearchResponse; query: ISearchRequestBody }> {
     const filter: IRoomEventFilter = {
         limit: SEARCH_LIMIT,
     };
 
-    if (roomId !== undefined) filter.rooms = [roomId];
+    // Scope to the given rooms (a single room, or — for an upgraded room — the
+    // room plus its predecessor chain so pre-upgrade history is searched, #32258).
+    if (roomIds && roomIds.length > 0) filter.rooms = roomIds;
 
     const body: ISearchRequestBody = {
         search_categories: {
@@ -60,10 +200,10 @@ async function serverSideSearch(
 async function serverSideSearchProcess(
     client: MatrixClient,
     term: string,
-    roomId?: string,
+    roomIds?: string[],
     abortSignal?: AbortSignal,
 ): Promise<ISearchResults> {
-    const result = await serverSideSearch(client, term, roomId, abortSignal);
+    const result = await serverSideSearch(client, term, roomIds, abortSignal);
 
     // The js-sdk method backPaginateRoomEventsSearch() uses _query internally
     // so we're reusing the concept here since we want to delegate the
@@ -93,23 +233,47 @@ async function combinedSearch(
     searchTerm: string,
     abortSignal?: AbortSignal,
 ): Promise<ISearchResults> {
-    // Create two promises, one for the local search, one for the
-    // server-side search.
-    const serverSidePromise = serverSideSearch(client, searchTerm, undefined, abortSignal);
-    const localPromise = localSearch(searchTerm);
+    // Run the server-side and the local (Seshat) search concurrently, but
+    // tolerate one leg failing: Seshat rejects some queries the homeserver
+    // accepts and vice-versa (e.g. a URL trips tantivy's `field:` operator and
+    // Seshat throws FieldDoesNotExist, #32341). Promise.all used to reject the
+    // entire "All Rooms" search whenever either leg threw; degrade to the
+    // surviving leg's results instead, and only fail if BOTH legs fail.
+    const [serverSettled, localSettled] = await Promise.allSettled([
+        serverSideSearch(client, searchTerm, undefined, abortSignal),
+        localSearch(searchTerm),
+    ]);
 
-    // Wait for both promises to resolve.
-    await Promise.all([serverSidePromise, localPromise]);
+    if (serverSettled.status === "rejected" && localSettled.status === "rejected") {
+        logger.error("Both server-side and local search failed", serverSettled.reason, localSettled.reason);
+        throw serverSettled.reason;
+    }
 
-    // Get both search results.
-    const localResult = await localPromise;
-    const serverSideResult = await serverSidePromise;
+    // Degradation is intentionally sticky for the session: a leg that fails here leaves its
+    // query undefined, so eventIndexSearchPagination routes later pages to the surviving leg
+    // only (it never retries the failed one). This is sound because each leg returns at most
+    // SEARCH_LIMIT results, so the degraded first page never overflows into cachedEvents (which
+    // the single-leg paginators do not drain). A future limit bump would need to revisit this.
 
-    const serverQuery = serverSideResult.query;
-    const serverResponse = serverSideResult.response;
+    let serverSideResult: { response: ISearchResponse; query: ISearchRequestBody } | undefined;
+    if (serverSettled.status === "fulfilled") {
+        serverSideResult = serverSettled.value;
+    } else {
+        logger.warn("Server-side search failed; returning local search results only", serverSettled.reason);
+    }
 
-    const localQuery = localResult.query;
-    const localResponse = localResult.response;
+    let localResult: { response: IResultRoomEvents; query: ISearchArgs } | undefined;
+    if (localSettled.status === "fulfilled") {
+        localResult = localSettled.value;
+    } else {
+        logger.warn("Local (Seshat) search failed; returning server-side search results only", localSettled.reason);
+    }
+
+    const serverQuery = serverSideResult?.query;
+    const serverResponse = serverSideResult?.response;
+
+    const localQuery = localResult?.query;
+    const localResponse = localResult?.response;
 
     // Store our queries for later on so we can support pagination.
     //
@@ -125,15 +289,16 @@ async function combinedSearch(
     const emptyResult: ISeshatSearchResults = {
         seshatQuery: localQuery,
         _query: serverQuery,
-        serverSideNextBatch: serverResponse.search_categories.room_events.next_batch,
+        serverSideNextBatch: serverResponse?.search_categories.room_events.next_batch,
         cachedEvents: [],
         oldestEventFrom: "server",
         results: [],
         highlights: [],
     };
 
-    // Combine our results.
-    const combinedResult = combineResponses(emptyResult, localResponse, serverResponse.search_categories.room_events);
+    // Combine our results (combineResponses tolerates either source being undefined,
+    // so a degraded single-leg search still produces a valid, paginatable result).
+    const combinedResult = combineResponses(emptyResult, localResponse, serverResponse?.search_categories.room_events);
 
     // Let the client process the combined result.
     const response: ISearchResponse = {
@@ -150,6 +315,17 @@ async function combinedSearch(
     return result;
 }
 
+function buildSeshatSearchArgs(searchTerm: string, roomId?: string): ISearchArgs {
+    return {
+        search_term: hardenSeshatSearchTerm(searchTerm),
+        before_limit: 1,
+        after_limit: 1,
+        limit: SEARCH_LIMIT,
+        order_by_recency: true,
+        room_id: roomId,
+    };
+}
+
 async function localSearch(
     searchTerm: string,
     roomId?: string,
@@ -157,43 +333,16 @@ async function localSearch(
 ): Promise<{ response: IResultRoomEvents; query: ISearchArgs }> {
     const eventIndex = EventIndexPeg.get();
 
-    const searchArgs: ISearchArgs = {
-        search_term: searchTerm,
-        before_limit: 1,
-        after_limit: 1,
-        limit: SEARCH_LIMIT,
-        order_by_recency: true,
-        room_id: undefined,
-    };
-
-    if (roomId !== undefined) {
-        searchArgs.room_id = roomId;
-    }
+    const searchArgs = buildSeshatSearchArgs(searchTerm, roomId);
 
     const localResult = await eventIndex!.search(searchArgs);
     if (!localResult) {
         throw new Error("Local search failed");
     }
 
-    // Fix state_key: null issue - Seshat includes "state_key": null for non-state events,
-    // which causes matrix-js-sdk to incorrectly treat them as state events
-    if (localResult.results) {
-        for (const searchResult of localResult.results) {
-            const event = searchResult.result as unknown as Record<string, unknown>;
-            if (event?.state_key === null) delete event.state_key;
-            // Also fix context events
-            if (searchResult.context) {
-                for (const ctxEvent of searchResult.context.events_before || []) {
-                    const ev = ctxEvent as unknown as Record<string, unknown>;
-                    if (ev?.state_key === null) delete ev.state_key;
-                }
-                for (const ctxEvent of searchResult.context.events_after || []) {
-                    const ev = ctxEvent as unknown as Record<string, unknown>;
-                    if (ev?.state_key === null) delete ev.state_key;
-                }
-            }
-        }
-    }
+    // Strip Seshat's spurious `state_key: null` (which makes the SDK treat non-state events as
+    // state events) and promote edited messages so they render in results (#32356).
+    sanitizeSeshatResults(localResult);
 
     searchArgs.next_batch = localResult.next_batch;
 
@@ -210,7 +359,15 @@ export interface ISeshatSearchResults extends ISearchResults {
     cachedEvents?: ISearchResult[];
     oldestEventFrom?: "local" | "server";
     serverSideNextBatch?: string;
+    // Per-room Seshat queries when searching an upgraded room across its predecessor
+    // chain locally (#32258). Each entry carries its own room_id + next_batch so the
+    // chain can be paginated independently.
+    seshatChainQueries?: ISearchArgs[];
 }
+
+// Sentinel next_batch token marking a local multi-room (predecessor-chain) search that
+// still has buffered/uncrawled results to page through.
+const LOCAL_CHAIN_NEXT_BATCH = "local-chain";
 
 async function localSearchProcess(
     client: MatrixClient,
@@ -271,6 +428,175 @@ async function localPagination(
     const result = client.processRoomEventsSearch(searchResult, response);
 
     // Restore our encryption info so we can properly re-verify the events.
+    const newSlice = result.results.slice(Math.max(result.results.length - newResultCount, 0));
+    restoreEncryptionInfo(newSlice);
+
+    searchResult.pendingRequest = undefined;
+
+    return result;
+}
+
+/**
+ * Merge a freshly-fetched batch of local results into the carry-over cache,
+ * emit the newest SEARCH_LIMIT for this page, and return the remainder to cache.
+ * Because every non-exhausted chain room is paged on every call, each room's
+ * frontier stays <= the page's minimum timestamp, so this simple re-sort
+ * preserves global recency order across pages (#32258).
+ */
+function mergeChainResults(
+    newResults: ISearchResult[],
+    cache: ISearchResult[],
+): { page: ISearchResult[]; cache: ISearchResult[] } {
+    const combined = newResults.concat(cache).sort(compareEvents);
+    return { page: combined.slice(0, SEARCH_LIMIT), cache: combined.slice(SEARCH_LIMIT) };
+}
+
+/**
+ * Run a single page of a Seshat search for one chain room, post-process it, and
+ * advance that room's next_batch in place. An empty reply marks the room
+ * exhausted rather than failing the whole search.
+ */
+async function fetchChainRoomPage(
+    query: ISearchArgs,
+): Promise<{ results: ISearchResult[]; count: number; highlights: string[] }> {
+    const eventIndex = EventIndexPeg.get();
+    const localResult = await eventIndex!.search(query);
+    if (!localResult) {
+        query.next_batch = undefined;
+        return { results: [], count: 0, highlights: [] };
+    }
+    sanitizeSeshatResults(localResult);
+    query.next_batch = localResult.next_batch;
+    return {
+        results: localResult.results ?? [],
+        count: localResult.count ?? 0,
+        highlights: localResult.highlights ?? [],
+    };
+}
+
+/**
+ * Search across an upgraded room's predecessor chain (#32258). The encrypted
+ * rooms in the chain are searched locally via Seshat (which only filters on a
+ * single scalar room_id, so each is queried separately); any chain rooms that
+ * are known to be NON-encrypted are searched on the homeserver (Seshat never
+ * indexes them) — covering the mixed-encryption upgrade case. All sources are
+ * recency-ordered, so a single k-way merge by timestamp yields the page, reusing
+ * the same processRoomEventsSearch + restoreEncryptionInfo path as a single-room
+ * search. Because every non-exhausted source is paged on every call, each
+ * source's frontier stays <= the page minimum, so pagination preserves global
+ * recency order.
+ */
+async function chainSearchProcess(
+    client: MatrixClient,
+    searchTerm: string,
+    seshatRoomIds: string[],
+    serverRoomIds: string[],
+    abortSignal?: AbortSignal,
+): Promise<ISeshatSearchResults> {
+    const result: ISeshatSearchResults = {
+        results: [],
+        highlights: [],
+        cachedEvents: [],
+        seshatChainQueries: [],
+    };
+
+    if (searchTerm === "") return result;
+
+    const queries = seshatRoomIds.map((id) => buildSeshatSearchArgs(searchTerm, id));
+    const [pages, server] = await Promise.all([
+        Promise.all(queries.map(fetchChainRoomPage)),
+        serverRoomIds.length > 0
+            ? serverSideSearch(client, searchTerm, serverRoomIds, abortSignal)
+            : Promise.resolve(undefined),
+    ]);
+
+    let count = 0;
+    let highlights: string[] = [];
+    let pool: ISearchResult[] = [];
+    for (const eventPage of pages) {
+        count += eventPage.count;
+        highlights = highlights.concat(eventPage.highlights);
+        pool = pool.concat(eventPage.results);
+    }
+    if (server) {
+        const serverEvents = server.response.search_categories.room_events;
+        count += serverEvents.count ?? 0;
+        highlights = highlights.concat(serverEvents.highlights ?? []);
+        pool = pool.concat(serverEvents.results ?? []);
+        result._query = server.query;
+        result.serverSideNextBatch = serverEvents.next_batch;
+    }
+
+    const { page, cache } = mergeChainResults(pool, []);
+    const hasMore = cache.length > 0 || queries.some((q) => !!q.next_batch) || !!result.serverSideNextBatch;
+
+    result.seshatChainQueries = queries;
+    result.cachedEvents = cache;
+    result.count = count;
+
+    const response: ISearchResponse = {
+        search_categories: {
+            room_events: {
+                results: page,
+                highlights: Array.from(new Set(highlights)),
+                count,
+                next_batch: hasMore ? LOCAL_CHAIN_NEXT_BATCH : undefined,
+            },
+        },
+    };
+
+    const processedResult = client.processRoomEventsSearch(result, response);
+    restoreEncryptionInfo(processedResult.results);
+
+    return processedResult;
+}
+
+async function chainSearchPagination(
+    client: MatrixClient,
+    searchResult: ISeshatSearchResults,
+): Promise<ISeshatSearchResults> {
+    const queries = searchResult.seshatChainQueries ?? [];
+
+    // Page every chain source that still has a next_batch (Seshat rooms + the optional
+    // homeserver leg); exhausted sources are skipped.
+    const [pages, server] = await Promise.all([
+        Promise.all(
+            queries.map((q) =>
+                q.next_batch ? fetchChainRoomPage(q) : Promise.resolve({ results: [], count: 0, highlights: [] }),
+            ),
+        ),
+        searchResult._query && searchResult.serverSideNextBatch
+            ? client.search({ body: searchResult._query, next_batch: searchResult.serverSideNextBatch })
+            : Promise.resolve(undefined),
+    ]);
+
+    const newResults: ISearchResult[] = pages.flatMap((p) => p.results);
+    if (server) {
+        const serverEvents = server.search_categories.room_events;
+        newResults.push(...(serverEvents.results ?? []));
+        searchResult.serverSideNextBatch = serverEvents.next_batch;
+    }
+
+    const { page, cache } = mergeChainResults(newResults, searchResult.cachedEvents ?? []);
+    searchResult.cachedEvents = cache;
+
+    const hasMore = cache.length > 0 || queries.some((q) => !!q.next_batch) || !!searchResult.serverSideNextBatch;
+
+    const response: ISearchResponse = {
+        search_categories: {
+            room_events: {
+                results: page,
+                highlights: searchResult.highlights ?? [],
+                count: searchResult.count,
+                next_batch: hasMore ? LOCAL_CHAIN_NEXT_BATCH : undefined,
+            },
+        },
+    };
+
+    const oldResultCount = searchResult.results ? searchResult.results.length : 0;
+    const result = client.processRoomEventsSearch(searchResult, response);
+
+    const newResultCount = result.results.length - oldResultCount;
     const newSlice = result.results.slice(Math.max(result.results.length - newResultCount, 0));
     restoreEncryptionInfo(newSlice);
 
@@ -625,14 +951,34 @@ async function eventIndexSearch(
     let searchPromise: Promise<ISearchResults>;
 
     if (roomId !== undefined) {
-        if (await client.getCrypto()?.isEncryptionEnabledInRoom(roomId)) {
-            // The search is for a single encrypted room, use our local
-            // search method.
-            searchPromise = localSearchProcess(client, term, roomId);
+        // Search the room together with its room-upgrade predecessors so pre-upgrade
+        // history is included (#32258). Partition the chain by encryption: a room KNOWN
+        // (loaded) to be non-encrypted lives on the homeserver, not in Seshat; everything
+        // else (encrypted, or an unloaded predecessor that may be encrypted-and-indexed) is
+        // searched locally. This keeps the common encrypted-only chain on Seshat while also
+        // covering a mixed-encryption upgrade.
+        const roomIds = getRoomSearchChain(client, roomId);
+        const crypto = client.getCrypto();
+        const seshatRoomIds: string[] = [];
+        const serverRoomIds: string[] = [];
+        for (const id of roomIds) {
+            if (client.getRoom(id) && !(await crypto?.isEncryptionEnabledInRoom(id))) {
+                serverRoomIds.push(id);
+            } else {
+                seshatRoomIds.push(id);
+            }
+        }
+
+        if (seshatRoomIds.length === 0) {
+            // Entirely (known) non-encrypted chain: server-side search scoped to the chain.
+            searchPromise = serverSideSearchProcess(client, term, roomIds, abortSignal);
+        } else if (seshatRoomIds.length === 1 && serverRoomIds.length === 0) {
+            // Single encrypted room, no predecessors — the common case.
+            searchPromise = localSearchProcess(client, term, seshatRoomIds[0]);
         } else {
-            // The search is for a single non-encrypted room, use the
-            // server-side search.
-            searchPromise = serverSideSearchProcess(client, term, roomId, abortSignal);
+            // Multi-room chain (encrypted predecessors and/or known non-encrypted ones):
+            // Seshat for the local rooms, homeserver for the known non-encrypted ones, merged.
+            searchPromise = chainSearchProcess(client, term, seshatRoomIds, serverRoomIds, abortSignal);
         }
     } else {
         // Search across all rooms, combine a server side search and a
@@ -647,6 +993,15 @@ function eventIndexSearchPagination(
     client: MatrixClient,
     searchResult: ISeshatSearchResults,
 ): Promise<ISeshatSearchResults> {
+    // A multi-room (predecessor chain) search paginates each chain source — the Seshat
+    // rooms and the optional homeserver leg (#32258). Checked first because such a result
+    // may also carry _query (the server leg) which would otherwise mis-route below.
+    if (searchResult.seshatChainQueries) {
+        const promise = chainSearchPagination(client, searchResult);
+        searchResult.pendingRequest = promise;
+        return promise;
+    }
+
     const seshatQuery = searchResult.seshatQuery;
     const serverQuery = searchResult._query;
 
@@ -688,7 +1043,9 @@ export default function eventSearch(
     const eventIndex = EventIndexPeg.get();
 
     if (eventIndex === null) {
-        return serverSideSearchProcess(client, term, roomId, abortSignal);
+        // No local index: search the room plus its predecessor chain server-side (#32258).
+        const roomIds = roomId !== undefined ? getRoomSearchChain(client, roomId) : undefined;
+        return serverSideSearchProcess(client, term, roomIds, abortSignal);
     } else {
         return eventIndexSearch(client, term, roomId, abortSignal);
     }
