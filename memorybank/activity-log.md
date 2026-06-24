@@ -1,5 +1,58 @@
 # Activity Log
 
+## 2026-06-24 (session 10) — Batched multi-phase: 3.2, 6.1, 6.3, 4.1 (+ triage of 1.4/2.3/3.5/6.2)
+
+### Context / pick
+- On `main`, working tree clean, `origin/main` == `main` == `11e2bcf` (sessions 1–9 all pushed). User directive:
+  "handle multiple phases this session to finish quickly, use subagents." So: triage everything remaining in parallel,
+  then implement the real in-repo fixes concurrently on disjoint files.
+
+### Triage (8-agent parallel workflow → structured verdicts; the 3.2 agent errored, researched manually)
+- **fix-now:** 3.2 (#32267), 6.1 (#32362 only), 6.3 (#32018), 4.1 (#32253).
+- **skip-mischaracterized / track-upstream (skeptic check, cf. #32288):**
+  - **1.4 #32426** mute hotkey: ⌘D works for legacy 1:1 (`LegacyCallView.onNativeKeyDown`) but voice rooms/group calls
+    use Element Call as a **cross-origin iframe widget**; the keydown never reaches element-web's document. Reproduces on
+    web. Belongs upstream in element-call. No desktop-file involvement.
+  - **2.3 #32184** Nightly update: `updater.ts` feed handling is correct; failure is native **Squirrel.Mac/ShipIt**
+    bundle-swap, reproduces on mainline, self-heals on retry. Same class as #32404. No JS fix.
+  - **3.5 #32352** tray-exit-during-call: tray `app.quit()` → `beforeQuit` sets `appQuitting=true` → close handler stops
+    hiding → `window-all-closed` → exit. Already force-quits; no in-repo blocker. Ancient (riot-web 1.5.12/Linux).
+  - **6.2 #32351/#32337/#32284** config: the **session-7 shallow-`Object.assign` hypothesis is REFUTED** (high conf).
+    The asar config has no top-level `jitsi`/`integrations`, so `Object.assign` has nothing to clobber, and the renderer
+    deep-merges defaults (`SdkConfig.ts:81` lodash `mergeWith`). Real causes: #32284 = integration-manager + casing,
+    #32337 = upstream SDK race + Electron `.well-known` cache, #32351 = **feature gap** (no system-wide config path).
+
+### Fixes shipped (4 parallel implementation agents, disjoint files, TDD)
+- **3.2 (#32267)** [window-close.ts](../apps/desktop/src/window-close.ts) NEW pure `resolveWindowCloseBehavior` →
+  `quit`/`hide-app`/`hide-window`; darwin close handler now `app.hide()` (⌘W ≡ ⌘H — maintainer dbkr's stated intent;
+  **not** a prompt, which he rejected). Tray/non-darwin path unchanged. 8 tests. Commit `57ef7d5`.
+- **6.1 (#32362)** [save-image.ts](../apps/desktop/src/save-image.ts) NEW `saveImageToFile(url,filePath,session)` uses
+  `webContents.session.fetch()` so the `media-auth.ts` `webRequest` interceptors (URL rewrite + Bearer) apply (was the
+  main-process **global `fetch()`** → 401/404 on authenticated media). #32355 already renderer-fixed. 7 tests. Commit `872c2af`.
+- **6.3 (#32018)** [macos-titlebar.ts](../apps/desktop/src/macos-titlebar.ts) drag strips 13–24px → **32px**; CSS extracted
+  to pure `buildTitleBarCss()`. 11 tests. Commit `d6002f4`.
+- **4.1 (#32253)** [SearchWarning.tsx](../apps/web/src/components/views/elements/SearchWarning.tsx) warns while Seshat is
+  still crawling (`currentRoom() !== null`), `changedCheckpoint`-subscribed auto-clear, new i18n key. 6 tests. Commit `90207fd`.
+
+### Adversarial review (18-agent workflow: 4 fixes × 3 lenses → per-finding skeptic) — 2 confirmed (both low), applied
+- **3.2:** `app.hide()` leaves `BrowserWindow.isVisible()` true (NSApp-level hide), so the `second-instance` relaunch
+  handler's `if (!isVisible()) show()` would skip and leave the window hidden on that (narrow) path. **Fix:** `app.show()`
+  (darwin-only no-op) before the visibility checks. (The common dock-relaunch path already recovers via `app.on("activate")`.)
+- **4.1:** the partial-index warning mounts dynamically mid-session → not announced to screen readers. **Fix:** `role="status"`
+  on that container only (+ a test asserting the role). 6.1 and 6.3 had **zero** findings; 4 other 4.1 findings dismissed
+  as non-blocking (e.g. `currentRoom()` is an imperfect proxy for an unloaded-room checkpoint — accepted, by design).
+
+### Verification
+- Desktop `vitest run`: **171/171** (14 files; +3 new: window-close 8, save-image 7, macos-titlebar 11). `tsc`/`eslint
+  --max-warnings 0`/`prettier --check`/**knip** clean. (Fixed 2 eslint `explicit-function-return-type` nits post-agent.)
+- Web `SearchWarning` Jest **8/8** (re-run independently). Web `tsc`: only the 4 pre-existing vendored matrix-js-sdk
+  errors (none in our file). eslint/prettier/`matrix-i18n-lint` clean.
+- **Not verifiable here (manual macOS QA):** ⌘W app-hide UX, the drag feel, authenticated-media save on a live build.
+
+### Recommended next session
+- **#32351** system-wide config path (a feature; confirm path with maintainers) — the only actionable remnant of 6.2.
+- PR shortlist #33954 / #33955+#33956; **6.4 #32315** smooth-scroll; **3.6 #32273** download-toast freeze (verify repro).
+
 ## 2026-06-24 (session 9) — Phase 3.3: insource window-state restore (#32228 / #32360)
 
 ### Context / pick
