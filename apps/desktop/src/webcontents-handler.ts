@@ -24,6 +24,7 @@ import path from "node:path";
 
 import { _t } from "./language-helper.js";
 import { saveImageToFile } from "./save-image.js";
+import { resolveUserDownloadAction } from "./user-download.js";
 
 const MAILTO_PREFIX = "mailto:";
 
@@ -242,12 +243,26 @@ function onEditableContextMenu(ev: Event, params: ContextMenuParams, webContents
 
 let userDownloadIndex = 0;
 const userDownloadMap = new Map<number, string>(); // Map from id to path
-ipcMain.on("userDownloadAction", function (ev: IpcMainEvent, { id, open = false }) {
-    const path = userDownloadMap.get(id);
-    if (open && path) {
-        void shell.openPath(path);
-    }
+ipcMain.on("userDownloadAction", async function (ev: IpcMainEvent, { id, open = false }) {
+    const pathToOpen = resolveUserDownloadAction({ id, open }, userDownloadMap);
     userDownloadMap.delete(id);
+    if (pathToOpen) {
+        // shell.openPath resolves to a NON-EMPTY error string on failure (empty string == success).
+        // This was previously `void`-discarded, so a failed "Open" was completely silent to the user.
+        // Surface it with an error dialog (like the "Save image as" handler above) and log it, instead of
+        // leaving the user staring at a window where nothing happened. See element-web#32273.
+        // (When the open SUCCEEDS, the perceived "freeze" is the opened app taking foreground focus —
+        // native macOS behaviour, not addressable here.)
+        const error = await shell.openPath(pathToOpen);
+        if (error) {
+            console.error(`Failed to open downloaded file ${pathToOpen}: ${error}`);
+            void dialog.showMessageBox({
+                type: "error",
+                title: _t("download|unable_to_open_title"),
+                message: _t("download|unable_to_open_description"),
+            });
+        }
+    }
 });
 
 export default (webContents: WebContents): void => {

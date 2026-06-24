@@ -44,8 +44,10 @@ import ProtocolHandler from "./protocol.js";
 import { _t, AppLocalization } from "./language-helper.js";
 import { setDisplayMediaCallback } from "./displayMediaCallback.js";
 import { WindowStateManager } from "./window-state.js";
+import { shouldQuitAfterConfirm } from "./confirm-quit.js";
 import { setupMacosTitleBar } from "./macos-titlebar.js";
-import { type Json, loadJsonFile } from "./utils.js";
+import { type Json, type JsonObject, loadJsonFile } from "./utils.js";
+import { deepMergeConfig, loadMergedLocalConfig } from "./config.js";
 import { setupMediaAuth } from "./media-auth.js";
 import { setupMediaPermissions } from "./media-permissions.js";
 import { resolveBackgroundColor } from "./background-color.js";
@@ -128,14 +130,16 @@ app.setPath("userData", userDataPath);
 const homeserverProps = ["default_is_url", "default_hs_url", "default_server_name", "default_server_config"] as const;
 
 function loadLocalConfigFile(): Json {
-    if (LocalConfigLocation) {
-        console.log("Loading local config: " + LocalConfigLocation);
-        return loadJsonFile(LocalConfigLocation);
-    } else {
-        const configDir = app.getPath("userData");
-        console.log(`Loading local config: ${path.join(configDir, LocalConfigFilename)}`);
-        return loadJsonFile(configDir, LocalConfigFilename);
-    }
+    // Read config from (in precedence order) an explicit ELEMENT_DESKTOP_CONFIG_JSON/--config path,
+    // else the per-user userData config, else a machine-wide path for MDM/enterprise deployments.
+    // See config.ts and element-web#32351.
+    return loadMergedLocalConfig({
+        platform: process.platform,
+        userDataPath: app.getPath("userData"),
+        productName: app.getName(),
+        env: process.env,
+        explicitLocation: LocalConfigLocation,
+    });
 }
 
 let loadConfigPromise: Promise<void> | undefined;
@@ -178,7 +182,9 @@ function loadConfig(): Promise<void> {
                     );
             }
 
-            global.vectorConfig = Object.assign(global.vectorConfig, localConfig);
+            // Deep-merge so nested config sections (room_directory, features, setting_defaults,
+            // element_call, …) merge rather than being clobbered by a shallow Object.assign.
+            global.vectorConfig = deepMergeConfig(global.vectorConfig, localConfig as JsonObject);
         } catch (e) {
             if (e instanceof SyntaxError) {
                 await app.whenReady();
@@ -387,9 +393,16 @@ app.on("ready", async () => {
         console.log("No update_base_url is defined: auto update is disabled");
     }
 
+    // Route the menu and tray Quit items through the same warn-before-exit decision as the ⌘Q/Ctrl+Q
+    // keyboard path (#32287). Must be set before AppLocalization builds the initial menus below.
+    tray.setQuitHandler(confirmAndQuit);
+
     // Set up i18n before loading storage as we need translations for dialogs
     global.appLocalization = new AppLocalization({
-        components: [(): void => tray.initApplicationMenu(), (): void => Menu.setApplicationMenu(buildMenuTemplate())],
+        components: [
+            (): void => tray.initApplicationMenu(),
+            (): void => Menu.setApplicationMenu(buildMenuTemplate(confirmAndQuit)),
+        ],
         store,
     });
 
@@ -473,27 +486,13 @@ app.on("ready", async () => {
         // We only care about the exit shortcuts here
         if (!exitShortcutPressed || !global.mainWindow) return;
 
-        // Prevent the default behaviour
+        // Prevent the default behaviour (this also suppresses the menu's Quit accelerator, so the
+        // menu Quit item's click handler never double-fires for the same keypress).
         event.preventDefault();
 
-        // Let's ask the user if they really want to exit the app
-        const shouldWarnBeforeExit = store.shouldWarnBeforeExit();
-        if (shouldWarnBeforeExit) {
-            const shouldCancelCloseRequest =
-                dialog.showMessageBoxSync(global.mainWindow, {
-                    type: "question",
-                    buttons: [
-                        _t("action|cancel"),
-                        _t("action|close_brand", {
-                            brand: global.vectorConfig.brand || "Element",
-                        }),
-                    ],
-                    message: _t("confirm_quit"),
-                    defaultId: 1,
-                    cancelId: 0,
-                }) === 0;
-            if (shouldCancelCloseRequest) return;
-        }
+        // Ask the user if they really want to exit, honouring the warn-before-exit setting. The same
+        // decision drives the menu/tray Quit items via confirmAndQuit().
+        if (!shouldQuitAfterConfirm({ warnBeforeExit: store.shouldWarnBeforeExit(), confirm: confirmQuit })) return;
 
         // Persist the window geometry before exiting: app.exit() terminates immediately and fires no
         // `close` event, so the close-handler flush below would otherwise be skipped on this path.
@@ -587,6 +586,42 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
     global.mainWindow?.show();
 });
+
+/**
+ * Shows the "are you sure you want to quit?" confirmation, returning true if the user chose to
+ * proceed. Shared by every quit entry point so they all present the same dialog. Returns true
+ * (proceed) when there is no window to parent the dialog to.
+ */
+function confirmQuit(): boolean {
+    if (!global.mainWindow) return true;
+    return (
+        dialog.showMessageBoxSync(global.mainWindow, {
+            type: "question",
+            buttons: [
+                _t("action|cancel"),
+                _t("action|close_brand", {
+                    brand: global.vectorConfig.brand || "Element",
+                }),
+            ],
+            message: _t("confirm_quit"),
+            defaultId: 1,
+            cancelId: 0,
+        }) !== 0
+    );
+}
+
+/**
+ * Quit entry point for the app/File-menu Quit item and the tray Quit item. Honours the
+ * warn-before-exit setting exactly like the ⌘Q/Ctrl+Q keyboard path, so File→Quit and tray Quit no
+ * longer silently bypass the confirmation on the platforms where it is the default (Windows/Linux).
+ * Uses app.quit() (not app.exit()) so the window `close` handler still runs and persists the window
+ * geometry. See element-web#32287.
+ */
+function confirmAndQuit(): void {
+    if (shouldQuitAfterConfirm({ warnBeforeExit: store.shouldWarnBeforeExit(), confirm: confirmQuit })) {
+        app.quit();
+    }
+}
 
 function beforeQuit(): void {
     global.appQuitting = true;
