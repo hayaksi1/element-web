@@ -9,6 +9,18 @@ declare module "matrix-seshat" {
     interface IConfig {
         language?: string;
         passphrase?: string;
+        /**
+         * The tokenizer used when building the search index. "language" (default) uses
+         * language-specific stemming and only works for languages with word boundaries;
+         * "ngram" splits text into character n-grams so search works for CJK / mixed-language
+         * text (#32038). The tokenizer is baked into the on-disk schema, so changing it requires
+         * the index to be rebuilt.
+         */
+        tokenizerMode?: "language" | "ngram";
+        /** Minimum n-gram size when `tokenizerMode === "ngram"` (defaults to 2 in the binding). */
+        ngramMinSize?: number;
+        /** Maximum n-gram size when `tokenizerMode === "ngram"` (defaults to 4 in the binding). */
+        ngramMaxSize?: number;
     }
 
     /* eslint-disable camelcase */

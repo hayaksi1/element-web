@@ -339,6 +339,7 @@ export interface Settings {
     "RightPanel.phases": IBaseSetting<IRightPanelForRoomStored | null>;
     "enableEventIndexing": IBaseSetting<boolean>;
     "crawlerSleepTime": IBaseSetting<number>;
+    "tokenizerMode": IBaseSetting<"language" | "ngram">;
     "showCallButtonsInComposer": IBaseSetting<boolean>;
     "ircDisplayNameWidth": IBaseSetting<number>;
     "layout": IBaseSetting<Layout>;
@@ -1285,6 +1286,16 @@ export const SETTINGS: Settings = {
         supportedLevels: LEVELS_DEVICE_ONLY_SETTINGS,
         displayName: _td("settings|security|message_search_sleep_time"),
         default: 3000,
+    },
+    "tokenizerMode": {
+        // DEVICE + CONFIG so a deployment can opt whole communities into n-gram search via
+        // config.json without any UI; getValueAt(DEVICE, …) falls through to the config value.
+        supportedLevels: LEVELS_DEVICE_ONLY_SETTINGS_WITH_CONFIG,
+        displayName: _td("settings|security|message_search_tokenizer_mode"),
+        // "language" stems word-boundary languages (English, German, …); "ngram" indexes character
+        // n-grams so search works for CJK / word-boundary-free / mixed-language text (#32038).
+        // Changing this rebuilds the local search index.
+        default: "language",
     },
     "showCallButtonsInComposer": {
         // Dev note: This is no longer "in composer" but is instead "in room header".

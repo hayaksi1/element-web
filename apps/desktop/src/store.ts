@@ -118,6 +118,12 @@ interface StoreData {
     backgroundColor?: string;
     /** the persisted main-window geometry restored on the next launch (#32228 / #32360) */
     windowState?: PersistedWindowState;
+    /**
+     * the tokenizer mode ("language" | "ngram") the local Seshat search index was last built with.
+     * A change forces the index to be rebuilt, since the tokenizer is baked into the on-disk schema
+     * (#32038).
+     */
+    seshatTokenizerMode?: string;
 }
 
 /**
@@ -298,6 +304,13 @@ class Store extends ElectronStore<StoreData> {
                         isMaximized: { type: "boolean" },
                     },
                     additionalProperties: false,
+                },
+                seshatTokenizerMode: {
+                    // No enum here on purpose: the Store is constructed with clearInvalidConfig:false, so
+                    // an out-of-enum value would make conf reject EVERY store read, not just this key. The
+                    // only writer normalises to "language"|"ngram", and reads re-normalise, so a stray value
+                    // degrades to the language default rather than bricking the app.
+                    type: "string",
                 },
             },
         });
