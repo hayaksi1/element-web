@@ -350,3 +350,53 @@ Continue the phase plan: fix Phase 1.1 — macOS "Couldn't start capturing media
 
 - **0.3** web `StorageManager.tryPersistStorage()` (#32198/#32472/#32108), or **1.2/1.3** screen-share picker
   (#32398/#32075), or **3.1** macOS `warnBeforeExit` default (#32287).
+
+---
+
+## Session 7 (2026-06-24) — Phase 2.2: non-writable install auto-update guidance (#32404)
+
+Continued the phase plan. Picked Phase 2.2 over Phase 5.3 (#32288) after verifying #32288 is mischaracterised
+in the catalogue: macOS uses raw `app.badgeCount` (no cap) in `badge.ts`; the only in-code cap is the
+favicon/Windows overlay (`favicon.ts:148` → `Nk+` for >999), which doesn't match the reporter's "99+". #32404
+is the better-grounded in-repo macOS fix.
+
+### Root cause
+
+On macOS, Squirrel.Mac installs an update by atomically **renaming** a freshly-staged `.app` over the existing
+one. That swap needs write access to the directory that **contains** the bundle (not the old bundle's inode). An
+admin install into `/Applications` run by a non-admin → that dir is read-only → updates download but never
+install (silent failure / endless re-download). The wrapper never detected or surfaced this.
+
+### Fix shipped (TDD)
+
+- `apps/desktop/src/updater.ts`: new exported `isUpdateableLocation()` — darwin-only (else `true`), derives the
+  `.app` from `app.getPath("exe")` (up 3 levels), `fs.access(<containing dir>, W_OK)`; `false` on
+  EACCES/EPERM/EROFS (fail-closed), `true` on other errno e.g. ENOENT in dev (fail-open). `available()` exported
+  and, after EOL checks, calls it; if non-writable → one-time `showToast` (`updater|not_writable_*`, `%(brand)s`)
+  + `return false` so `start()` never sets the feed URL / polls.
+- `apps/desktop/src/i18n/strings/en_EN.json`: new `updater` group (`matrix-gen-i18n` no-diff).
+- `apps/desktop/src/updater.test.ts` (NEW, 8 tests). RED→GREEN.
+
+### Adversarial review (17-agent workflow) — 13 findings, 3 confirmed, all applied
+
+1. **correctness (real):** original predicate checked W_OK on the bundle **and** its parent (AND). Squirrel's
+   rename only needs the **parent** dir; gating on the bundle could false-negative (wrongly disable updates) for
+   an admin-owned read-only bundle in a user-writable folder. **Fixed:** check the containing dir only. Primary
+   #32404 case (`/Applications` non-writable) stays correct.
+2. **test quality (real):** mode arg wasn't pinned — an `F_OK` mutation would silently re-break #32404.
+   **Fixed:** assert `access` called with `fsConstants.W_OK`.
+3. **test quality (real):** `%(brand)s` substitution wiring untested. **Fixed:** assert `_t` called with
+   `{ brand: "Element" }`. (Remaining 10 findings were no-defect confirmations / false positives.)
+
+### Verification
+
+- `vitest run` (apps/desktop): **58 passed / 9 files** (+8 new in updater.test.ts).
+- `tsc --noEmit -p tsconfig.json`: clean. `eslint --max-warnings 0` (changed files): clean. `prettier --check`:
+  clean. `matrix-gen-i18n`/`matrix-i18n-lint`: clean. knip safe (`ignoreExportsUsedInFile:true`; exports used
+  in-file). **Not verifiable here:** real Squirrel.Mac install on a signed build (manual macOS QA).
+
+### Recommended next session
+
+- **Phase 5.3 (#32288)** only after re-confirming against a live build (may be no-op/wontfix — see above).
+- PR-review adopt shortlist (#33954 arm64 AES, #33957 timeline guard — low-effort), or **Phase 3.4** white
+  launch flash (#32260) / **Phase 3.2** Cmd-W orphan prompt (#32267).

@@ -78,6 +78,10 @@
             "unsupported_keyring_use_plaintext": "Use no encryption"
         }
     },
+    "updater": {
+        "not_writable_description": "%(brand)s can't update automatically because it's installed in a location you don't have permission to change. Download the latest version and replace your existing copy, or move %(brand)s to a folder you can write to.",
+        "not_writable_title": "Automatic updates unavailable"
+    },
     "view_menu": {
         "actual_size": "Actual Size",
         "toggle_developer_tools": "Toggle Developer Tools",

@@ -7,7 +7,9 @@ Please see LICENSE files in the repository root for full details.
 
 import { app, autoUpdater, ipcMain } from "electron";
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 import { getSquirrelExecutable } from "./squirrelhooks.js";
 import { _t } from "./language-helper.js";
@@ -117,11 +119,47 @@ export async function start(updateBaseUrl: string): Promise<void> {
 }
 
 /**
+ * On macOS Squirrel.Mac installs an update by atomically renaming a freshly-staged `.app` bundle over
+ * the existing one. That swap needs write access to the directory that *contains* the bundle (it is a
+ * rename within that directory), not to the old bundle's own inode. If an administrator installed the
+ * app into `/Applications` but it is then run by an unprivileged user, that containing directory is not
+ * writable and auto-update silently fails (#32404). Detect that case so the caller can warn the user
+ * instead of repeatedly downloading updates that can never be installed.
+ * @returns True if the install location appears writable (or the check is not applicable).
+ */
+export async function isUpdateableLocation(): Promise<boolean> {
+    // Only macOS suffers the read-only-/Applications problem; Windows Squirrel installs per-user and
+    // Linux has no auto-update, so don't second-guess those.
+    if (process.platform !== "darwin") return true;
+
+    // app.getPath("exe") => /Applications/Element.app/Contents/MacOS/Element
+    // The bundle is three levels up; Squirrel renames the new bundle over it, so the directory that
+    // contains the bundle is the load-bearing thing that must be writable.
+    const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
+    const bundleParent = path.dirname(bundlePath);
+
+    try {
+        await fs.access(bundleParent, fsConstants.W_OK);
+        return true;
+    } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        // A permission / read-only-filesystem error means Squirrel can't replace the bundle.
+        if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+            return false;
+        }
+        // Anything else (e.g. ENOENT when running unpackaged in development) isn't a permission
+        // problem, so fail open rather than disabling updates on a detection glitch.
+        return true;
+    }
+}
+
+/**
  * Check if auto update is available on this platform.
- * Has a side effect of firing showToast on EOL platforms so must only be called once!
+ * Has a side effect of firing showToast on EOL platforms and non-writable installs so must only be
+ * called once!
  * @returns True if auto update is available
  */
-async function available(): Promise<boolean> {
+export async function available(): Promise<boolean> {
     if (process.platform === "linux") {
         // Auto update is not supported on Linux
         console.warn("Auto update not supported on this platform");
@@ -164,6 +202,21 @@ async function available(): Promise<boolean> {
                     description: _t("eol|warning", { brand: getBrand() }),
                 });
             });
+        }
+
+        // If the app lives in a location the current user can't write to (e.g. installed into
+        // /Applications by an admin, then run unprivileged), Squirrel.Mac can never install an update.
+        // Warn the user with actionable guidance and disable auto-update rather than silently failing
+        // and re-downloading the same update forever. (#32404)
+        if (!(await isUpdateableLocation())) {
+            initialisePromise.then(() => {
+                ipcMain.emit("showToast", {
+                    title: _t("updater|not_writable_title"),
+                    description: _t("updater|not_writable_description", { brand: getBrand() }),
+                });
+            });
+            console.warn("Auto update not supported, app is installed in a non-writable location");
+            return false;
         }
     }
 

@@ -34,7 +34,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 | #   | Issue  | Action                                                                                                                                                           | Status                   |
 | --- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | 2.1 | #32303 | **Rewrite `auto-launch.ts`** onto native `app.setLoginItemSettings`/`getLoginItemSettings`; preserve `AutoLaunchState` API + `--hidden`/minimised. + unit tests. | ✅ **done this session** |
-| 2.2 | #32404 | macOS: detect non-writable `/Applications` install; surface clear guidance instead of silent auto-update failure.                                                | ⏳ planned               |
+| 2.2 | #32404 | macOS: detect non-writable install dir (`isUpdateableLocation()` — checks W_OK on the directory **containing** the `.app`, since Squirrel.Mac renames the bundle in place); show a one-time guidance toast (`updater\|not_writable_*`) and disable auto-update instead of silently re-downloading. | ✅ **done (session 7)** |
 | 2.3 | #32184 | Investigate Nightly feed/`releases.json` handling in `updater.ts`.                                                                                               | ⏳ planned               |
 
 ## Phase 3 — Window / lifecycle / quit UX
@@ -138,11 +138,45 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
       query-failure (TDD RED→GREEN). Process: research workflow → TDD → 20-agent adversarial review (17 findings →
       3 confirmed real, all test-quality; fixed) → re-verify.
 
+### Session 7 fixes (2026-06-24)
+
+- ✅ **2.2** Non-writable install auto-update guidance (#32404). Root cause: on macOS Squirrel.Mac installs an
+  update by atomically **renaming** a freshly-staged `.app` over the old one — that swap needs write access to the
+  **directory that contains** the bundle (not the bundle's own inode). When an admin installs into `/Applications`
+  and a non-admin runs it, that dir is read-only, so updates download forever but never install (silent failure).
+    - Change ([updater.ts](../apps/desktop/src/updater.ts)): new exported `isUpdateableLocation(): Promise<boolean>`
+      — darwin-only (returns `true` elsewhere), derives the bundle from `app.getPath("exe")` (`…/Element.app/
+      Contents/MacOS/Element` → up 3 = the `.app`), and `fs.access(<containing dir>, W_OK)`. Returns `false` on
+      `EACCES`/`EPERM`/`EROFS` (fail-closed), `true` on any other errno e.g. `ENOENT` in dev (fail-open). `available()`
+      is now **exported** and, after the existing EOL checks, calls it; if non-writable it fires a **one-time**
+      `ipcMain.emit("showToast", …)` (`updater|not_writable_title`/`_description`, `%(brand)s` like the EOL toasts)
+      and `return false` so `start()` never sets the feed URL or polls (no wasted re-downloads / Squirrel wedge).
+    - i18n ([en_EN.json](../apps/desktop/src/i18n/strings/en_EN.json)): new `updater` group; `matrix-gen-i18n` no-diff.
+    - Tests ([updater.test.ts](../apps/desktop/src/updater.test.ts), NEW, 8): off-darwin short-circuit; checks the
+      **containing dir** with `W_OK` specifically; **does not gate on the bundle inode** (1 access call, never the
+      bundle); EACCES/EROFS/EPERM → false; ENOENT → true (fail-open); `available()` non-writable → false + toast +
+      brand-substitution arg asserted; writable → true + no toast.
+    - **Adversarial review** (17-agent workflow, 13 findings → 3 confirmed): (1) **correctness** — original code
+      checked W_OK on *both* the bundle and its parent (AND); Squirrel's rename only needs the **parent**, so gating
+      on the bundle could false-negative (wrongly disable updates) for an admin-owned read-only bundle in a
+      user-writable dir → **fixed**: check parent only. (2+3) **test quality** — pin the `access` mode to `W_OK`
+      (an `F_OK` mutation would silently re-break #32404) and assert the `_t` brand-substitution arg → **both
+      applied**. Primary #32404 case (`/Applications` non-writable) correct throughout.
+    - Verification: vitest **58/58** (9 files), `tsc -p tsconfig.json` clean, `eslint --max-warnings 0` clean,
+      prettier clean, i18n consistent + lint clean. **Not verifiable here:** real Squirrel.Mac install on a signed
+      build (needs manual macOS QA).
+
 ### Recommended next session
 
-- **Phase 2.2** non-writable `/Applications` auto-update guidance (#32404), or **Phase 5.3** remove the "99+" dock
-  badge cap (#32288, clean small macOS fix); OR pick up the PR-review adopt shortlist (#33954 arm64 AES build flag +
-  #33957 timeline-reset guard, both low-effort — see `upstream-pr-review.md`).
+- **Phase 5.3** remove the "99+" dock badge cap (#32288) — but NOTE: investigation this session found the catalogue
+  mischaracterised it. macOS uses raw `app.badgeCount` (no cap) in [badge.ts](../apps/desktop/src/badge.ts); the
+  only in-code cap is the **favicon/Windows overlay** renderer ([favicon.ts:148](../apps/web/src/favicon.ts) → shows
+  `Nk+` for >999, not "99+"). The reporter's "99+" doesn't match current code — likely already changed upstream or
+  the in-app badge. Re-confirm against a live build before spending effort; it may be a no-op / wontfix.
+- **PR-review adopt shortlist** (see `upstream-pr-review.md`): #33954 arm64 AES build flag + #33957 timeline-reset
+  guard (both low-effort), or #33955+#33956 Seshat backfill resilience (high, complements Phase 0.2).
+- **Phase 3.4** white launch flash (#32260, `backgroundColor`/`show` timing, clean shared fix) or **Phase 3.2**
+  Cmd-W orphan-window prompt (#32267).
 - **Re-scope / skip (session-6 finding):** **Phase 1.2 (#32398)** is largely resolved by the in-tree Electron-42
   `{useSystemPicker:true}` (macOS 15+ uses the native picker; handler not invoked) — residual is upstream/Wayland.
   **Phase 1.3 (#32075)** is a native Wayland/PipeWire segfault (mostly Linux/upstream). Neither is a strong in-repo
