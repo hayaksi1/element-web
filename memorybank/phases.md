@@ -12,22 +12,22 @@ Status keys: ✅ done · 🔜 next · ⏳ planned · ⬆️ upstream/track-only 
 
 The worst class: users silently lose their session / encrypted history.
 
-| #   | Issue                    | Action                                                                                                                                                       | Status                   |
-| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| 0.1 | #32521 / #32715 / #32198 | **Pickle-key transient-decrypt guard** in `store.ts` + `ipc.ts`: distinguish absent vs undecryptable; never overwrite an undecryptable secret. + unit tests. | ✅ **done this session** |
-| 0.2 | #33501                   | Seshat error-dialog **circuit-breaker** in apps/web `EventIndex.ts` (show the dialog once, then stop indexing — no flood after every `/sync`).               | ✅ **done (session 2)**  |
-| 0.3 | #32198 / #32472 / #32108 | Harden web-side `StorageManager.tryPersistStorage()` (act on the `persistent` boolean; warn on desktop; recovery before forced logout).                      | ⏳ planned               |
+| #   | Issue                    | Action                                                                                                                                                                                                                                                                                                                                                                       | Status                   |
+| --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| 0.1 | #32521 / #32715 / #32198 | **Pickle-key transient-decrypt guard** in `store.ts` + `ipc.ts`: distinguish absent vs undecryptable; never overwrite an undecryptable secret. + unit tests.                                                                                                                                                                                                                 | ✅ **done this session** |
+| 0.2 | #33501                   | Seshat error-dialog **circuit-breaker** in apps/web `EventIndex.ts` (show the dialog once, then stop indexing — no flood after every `/sync`).                                                                                                                                                                                                                               | ✅ **done (session 2)**  |
+| 0.3 | #32198 / #32472 / #32108 | Harden web-side `StorageManager.tryPersistStorage()` (act on the `persistent` boolean; warn on desktop). Now async→`Promise<boolean>`, `persisted()` short-circuit, resilient query, desktop-aware `logger.warn` on denial, never rejects. "Recovery before forced logout" deferred (an evicted crypto store can't be recovered; dialog already directs key-backup restore). | ✅ **done (session 5)**  |
 
 ## Phase 1 — Calls / media (screen-share + mic/camera) ★ HIGH
 
 Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
-| #   | Issue           | Action                                                                                                                                                                                                                     | Status     |
-| --- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 1.1 | #32373          | macOS media permissions: `setPermissionCheckHandler`/`RequestHandler` (**fail-open, NOT origin-scoped** so widget/Jitsi media survives), `askForMediaAccess` on darwin, add `NS*UsageDescription` via `mac.extendInfo` in `electron-builder.ts`. + unit tests.                             | ✅ **done (session 4)** |
-| 1.2 | #32398 / #32017 | Screen-share: one picker per platform — gate the custom `openDesktopCapturerSourcePicker` behind `process.platform !== 'darwin'` when `useSystemPicker` is honoured; clean cancel path. (Z-Upstream — verify on macOS 15.) | ⏳ planned |
-| 1.3 | #32075          | Guard the screen-share picker toggle crash (stale `displayMediaCallback`).                                                                                                                                                 | ⏳ planned |
-| 1.4 | #32426          | Wire toggle-mute hotkey through the menu/accelerator path.                                                                                                                                                                 | ⏳ planned |
+| #   | Issue           | Action                                                                                                                                                                                                                                                         | Status                  |
+| --- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| 1.1 | #32373          | macOS media permissions: `setPermissionCheckHandler`/`RequestHandler` (**fail-open, NOT origin-scoped** so widget/Jitsi media survives), `askForMediaAccess` on darwin, add `NS*UsageDescription` via `mac.extendInfo` in `electron-builder.ts`. + unit tests. | ✅ **done (session 4)** |
+| 1.2 | #32398 / #32017 | Screen-share: one picker per platform — gate the custom `openDesktopCapturerSourcePicker` behind `process.platform !== 'darwin'` when `useSystemPicker` is honoured; clean cancel path. (Z-Upstream — verify on macOS 15.)                                     | ⏳ planned              |
+| 1.3 | #32075          | Guard the screen-share picker toggle crash (stale `displayMediaCallback`).                                                                                                                                                                                     | ⏳ planned              |
+| 1.4 | #32426          | Wire toggle-mute hotkey through the menu/accelerator path.                                                                                                                                                                                                     | ⏳ planned              |
 
 ## Phase 2 — Auto-launch & auto-update ★ HIGH (frequent, cross-platform)
 
@@ -106,8 +106,44 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
   11 tests in `media-permissions.test.ts`. Adversarial-review workflow caught a hang-on-`askForMediaAccess`-reject
   regression (callback never fired) → fixed with try/catch + regression test before commit.
 
+### Session 5 fixes (2026-06-24)
+
+- ✅ **0.3** Harden web-side `StorageManager.tryPersistStorage()` (#32198/#32108 confirmed IndexedDB-eviction;
+  #32472 partial). Root cause confirmed via research workflow: `tryPersistStorage()` requested
+  `navigator.storage.persist()` but only **logged** the boolean — never acting on a `false` result. The crypto
+  store (Olm/Megolm + cross-signing keys) lives in IndexedDB; if the origin is not "persistent", Chromium evicts
+  it LRU under storage pressure → `checkConsistency()` "evicted" branch → `StorageEvictedDialog` forced logout
+  (#32198/#32108) and recovery-key re-entry (#32472).
+    - Change ([StorageManager.ts](../apps/web/src/utils/StorageManager.ts)): `tryPersistStorage()` is now
+      `async (): Promise<boolean>`; checks `navigator.storage.persisted()` first and **short-circuits** (avoids
+      re-prompting — onLoggedIn now fires on every session restore via merged PR #31299); a `persisted()` **query
+      failure no longer blocks the request**; on denial calls new `warnPersistenceDenied()` (`logger.warn`,
+      captured by rageshakes; appends a desktop-specific note gated on `window.electron`); wrapped in try/catch so
+      it **never rejects** into the fire-and-forget caller (`MatrixChat.onLoggedIn`, unchanged).
+    - **Deliberate decisions** (scrutinised by adversarial review): (a) desktop "warn" = `logger.warn` ONLY, **no
+      user-facing toast** — `persist()==false` is common-and-usually-benign on a custom-scheme Electron renderer, so
+      a per-login toast would be a false-alarm flood (and maintainers dislike repeated dialogs, cf. Phase 0.2). The
+      real post-eviction user prompt already exists via `checkConsistency → StorageEvictedDialog`. (b) "Recovery
+      before forced logout" **deferred** — an evicted IndexedDB crypto store cannot be recovered; the only path is
+      re-login + key-backup restore, which `error.storage_evicted_description_1` already instructs.
+    - **Limit / follow-up:** this is the realistic **web-side ceiling**; it improves observability + warns but
+      cannot MAKE storage durable. Research confirmed there is **NO clean Electron main-process API** to force
+      per-origin durability (`persistent-storage` is not a grantable permission; no `session` quota-grant method).
+      The only documented lever to coax Chromium's heuristic to grant is **holding the notifications permission**
+      (Element generally has it). A true durability guarantee is not achievable from JS alone — track as a
+      main-process/upstream follow-up.
+    - Tests ([StorageManager-test.ts](../apps/web/test/unit-tests/utils/StorageManager-test.ts)): 11 new (17 total
+      in file) — short-circuit, granted, denied-web vs denied-desktop note, Safari success/reject, unsupported,
+      persist-throws (asserts `logger.error`), persisted-absent, persist-absent→Safari fallback, and resilient
+      query-failure (TDD RED→GREEN). Process: research workflow → TDD → 20-agent adversarial review (17 findings →
+      3 confirmed real, all test-quality; fixed) → re-verify.
+
 ### Recommended next session
 
-- **0.3** harden web-side `StorageManager.tryPersistStorage()` (#32198/#32472/#32108), or
 - **Phase 1.2/1.3** screen-share picker (#32398 double-picker on macOS / #32075 toggle crash), or
-- **Phase 3.1** `warnBeforeExit` default on macOS (#32287).
+- **Phase 3.1** `warnBeforeExit` default on macOS (#32287), or
+- **Phase 2.2** non-writable `/Applications` auto-update guidance (#32404); OR pick up the PR-review adopt
+  shortlist (#33954 + #33957, both low-effort — see `upstream-pr-review.md`).
+- **Main-process follow-up for 0.3:** investigate coaxing Chromium to grant durable storage on desktop (e.g.
+  ensure notifications-permission signal) so `persist()` actually returns true — the only real cure for the
+  IndexedDB-eviction flavour of #32198/#32108.

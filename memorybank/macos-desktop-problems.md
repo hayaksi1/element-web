@@ -86,6 +86,23 @@ Legend: 🔴 Critical · 🟠 Major · 🟡 Minor · ⬆️ upstream/blocked · 
 - **Fix:** distinguish "absent" from "present-but-undecryptable" (typed error); never overwrite an
   undecryptable existing secret. **← FIXED THIS SESSION** (see activity log).
 
+### 🔴 IndexedDB eviction → forced logout / recovery-key re-entry — #32198 / #32108 (also #32472)
+
+- **Root cause (confirmed by maintainer logs):** the crypto store (Olm/Megolm + cross-signing keys) lives in
+  IndexedDB. If the origin is not "persistent" (durable), Chromium evicts it LRU under storage pressure →
+  `checkConsistency()` ([StorageManager.ts:92-98](../apps/web/src/utils/StorageManager.ts)) trips its "evicted"
+  branch ("IndexedDB storage has likely been evicted by the browser!") → `Lifecycle.doSetLoggedIn` shows
+  `StorageEvictedDialog` and forces sign-out (#32198/#32108); re-login then needs the recovery key (#32472).
+  `tryPersistStorage()` requested `navigator.storage.persist()` but **only logged** the boolean — never acting
+  on a `false` result. On a custom-scheme (`vector:`) Electron renderer Chromium's durable-storage heuristic
+  **commonly returns false** (no engagement/bookmark/notification signal), so the eviction risk was silent.
+- **Fix (web-side, Phase 0.3 — FIXED session 5):** `tryPersistStorage()` → `async Promise<boolean>`; check
+  `persisted()` first + short-circuit; query failure no longer blocks the request; warn (`logger.warn`,
+  rageshake-captured, desktop-aware via `window.electron`) on denial; never rejects. **Limit:** there is **no
+  Electron main-process API** to force per-origin durability (`persistent-storage` is not grantable; no session
+  quota-grant); the only lever is the notifications permission. The web change improves observability + warns
+  but cannot itself make storage durable — a true cure needs a main-process/upstream follow-up.
+
 ### 🟠 Jitsi screenshare double-picker on macOS — #32398 (also #32017)
 
 - **Root cause:** [electron-main.ts:527-548](../apps/desktop/src/electron-main.ts) registers
