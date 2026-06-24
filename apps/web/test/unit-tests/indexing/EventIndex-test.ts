@@ -22,6 +22,7 @@ import {
     MatrixEvent,
     type Room,
     ClientEvent,
+    RoomEvent,
     SyncState,
 } from "matrix-js-sdk/src/matrix";
 
@@ -226,6 +227,95 @@ describe("EventIndex", () => {
             await flushPromises();
 
             expect(stopCrawler).toHaveBeenCalled();
+        });
+    });
+
+    describe("onTimelineReset re-seeding (#33957)", () => {
+        const TOKEN = "reset-token";
+
+        async function setUpIndexer(room: Room): Promise<{
+            mockClient: Mocked<MatrixClient>;
+            addCrawlerCheckpoint: jest.Mock;
+        }> {
+            const addCrawlerCheckpoint = jest.fn();
+            const mockIndexingManager = {
+                loadCheckpoints: jest.fn().mockResolvedValue([]),
+                isEventIndexEmpty: jest.fn().mockResolvedValue(false),
+                addCrawlerCheckpoint,
+                removeCrawlerCheckpoint: jest.fn(),
+                commitLiveEvents: jest.fn(),
+            } as any as Mocked<BaseEventIndexManager>;
+            mockPlatformPeg({ getEventIndexingManager: () => mockIndexingManager });
+
+            const mockClient = getMockClientWithEventEmitter({
+                getEventMapper: () => (obj: Partial<IEvent>) => new MatrixEvent(obj),
+                createMessagesRequest: jest.fn(),
+                ...mockClientMethodsRooms([room]),
+                // Override AFTER the spread: mockClientMethodsRooms sets isRoomEncrypted to a stub
+                // returning undefined, which would trip onTimelineReset's encrypted-room guard.
+                isRoomEncrypted: jest.fn().mockReturnValue(true),
+            });
+
+            const indexer = new EventIndex();
+            await indexer.init();
+            // Don't actually start the background crawler loop (avoids real timers in the test).
+            jest.spyOn(indexer, "startCrawler").mockImplementation(() => {});
+
+            return { mockClient, addCrawlerCheckpoint };
+        }
+
+        function makeRoom(unfilteredTimelineSet: object): Room {
+            return {
+                roomId: "!room1:id",
+                getUnfilteredTimelineSet: () => unfilteredTimelineSet,
+                getLiveTimeline: () => ({
+                    getPaginationToken: () => TOKEN,
+                }),
+            } as any as Room;
+        }
+
+        it("ignores resets from thread/filtered timeline sets (no spurious checkpoint)", async () => {
+            const unfilteredTimelineSet = {};
+            const threadTimelineSet = {};
+            const room = makeRoom(unfilteredTimelineSet);
+            const { mockClient, addCrawlerCheckpoint } = await setUpIndexer(room);
+
+            // The SDK re-emits RoomEvent.TimelineReset from thread/filtered timeline sets via its
+            // ReEmitter; these must NOT re-seed the crawl list (the #32119 startup CPU spike).
+            mockClient.emit(RoomEvent.TimelineReset, room, threadTimelineSet as any, false);
+            await flushPromises();
+
+            expect(addCrawlerCheckpoint).not.toHaveBeenCalled();
+        });
+
+        it("seeds a backward gap-fill checkpoint when the room's own live timeline resets", async () => {
+            const unfilteredTimelineSet = {};
+            const room = makeRoom(unfilteredTimelineSet);
+            const { mockClient, addCrawlerCheckpoint } = await setUpIndexer(room);
+
+            mockClient.emit(RoomEvent.TimelineReset, room, unfilteredTimelineSet as any, false);
+            await flushPromises();
+
+            expect(addCrawlerCheckpoint).toHaveBeenCalledWith({
+                roomId: "!room1:id",
+                token: TOKEN,
+                direction: Direction.Backward,
+                fullCrawl: false,
+            });
+        });
+
+        it("still seeds when no timeline set is provided (guards the `timelineSet &&` short-circuit)", async () => {
+            // The pinned SDK always emits a defined timelineSet; this covers the optional-arg contract
+            // so an absent timelineSet does not over-block (only a mismatched set should early-return).
+            const room = makeRoom({});
+            const { mockClient, addCrawlerCheckpoint } = await setUpIndexer(room);
+
+            mockClient.emit(RoomEvent.TimelineReset, room, undefined as any, false);
+            await flushPromises();
+
+            expect(addCrawlerCheckpoint).toHaveBeenCalledWith(
+                expect.objectContaining({ roomId: "!room1:id", direction: Direction.Backward, fullCrawl: false }),
+            );
         });
     });
 });

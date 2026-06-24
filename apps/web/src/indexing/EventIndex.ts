@@ -309,8 +309,14 @@ export default class EventIndex extends EventEmitter {
      * Listens for timeline resets that are caused by a limited timeline to
      * re-add checkpoints for rooms that need to be crawled again.
      */
-    private onTimelineReset = async (room: Room | undefined): Promise<void> => {
+    private onTimelineReset = async (room: Room | undefined, timelineSet?: EventTimelineSet): Promise<void> => {
         if (!room) return;
+        // Thread and filtered timeline sets re-emit RoomEvent.TimelineReset through the SDK's
+        // ReEmitter. Only a reset of the room's own unfiltered live timeline (a genuine history gap
+        // from a limited sync) should re-seed a gap-fill checkpoint; otherwise a long-dead room with
+        // an ancient thread re-inflates the crawl list on every launch (#33957, contributing to the
+        // #32119 startup CPU spike).
+        if (timelineSet && timelineSet !== room.getUnfilteredTimelineSet()) return;
         if (!MatrixClientPeg.safeGet().isRoomEncrypted(room.roomId)) return;
 
         this.logger.debug("Adding a checkpoint because of a limited timeline", room.roomId);
