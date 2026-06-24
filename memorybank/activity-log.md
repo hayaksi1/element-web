@@ -901,3 +901,47 @@ in-repo code path) → TDD implementation in `apps/web/src/Searching.ts` → an 
   `--max-warnings 0` clean, prettier clean, no i18n changes (fixes log via `logger`, no user-facing strings).
 - **Not verifiable here:** real Seshat sqlite round-trip + the actual SDK event-mapper reuse path (the test harness stubs
   `processRoomEventsSearch`, so tests assert on the re-keyed raw objects / captured args) + live macOS render — manual QA.
+
+## Session 16 (2026-06-25) — P1: #33954 arm64 AES build verification (was the only unverified landed change)
+
+Host: this machine is the target — Apple Silicon **M4 Pro / aarch64**, Rust **1.95.0**, Node 24.15, rustup target
+`aarch64-apple-darwin` installed. So #33954 ("needs native arm64 build QA" since session 11) is now QA-able locally.
+
+- **Finding (regression caught):** the **previously-built** `index.node` (Jun 24 19:38, the one in
+  `.hak/hakModules/` and inside `dist/mac-arm64/Element.app`) was built **WITHOUT** the flag — its `aes` crate
+  fingerprint recorded `rustflags: []`, i.e. the shipped artifact used the **software** AES path. #33954's benefit
+  had never actually been compiled into a build. (The flag landed in `hak/matrix-seshat/build.ts` session 11, but no
+  rebuild had exercised it.)
+- **Mechanism proof (standalone):** built a throwaway crate depending on `aes =0.8.4` for `aarch64-apple-darwin`,
+  with and without `RUSTFLAGS="--cfg aes_armv8"`. Both compile clean (exit 0, no errors; aes 0.8.4 self-declares the
+  cfg so **no unexpected-cfg warning**). Disassembly (`otool -tvV`): **WITHOUT flag = 0** ARMv8 AES instructions;
+  **WITH flag = 42** (`aese.16b`/`aesmc.16b`/…). Confirms the crate genuinely gates its ARMv8 hardware backend on
+  `cfg(all(target_arch="aarch64", aes_armv8))` (verified in `aes-0.8.4/src/{lib,autodetect,hazmat}.rs`).
+- **Real seshat rebuild (faithful to build.ts):** ran `yarn run build-bundled` with `RUSTFLAGS="--cfg aes_armv8"`
+  in `.hak/matrix-seshat/aarch64-apple-darwin/build` (= exactly what `build.ts` sets on arm64; `getTargetArch()→arm64`
+  confirmed; mac `wantsStaticSqlCipher()→true`). **Exit 0 in ~36s, no errors, no aes_armv8 warnings.** New
+  `index.node` aes fingerprint now records `rustflags: ['--cfg','aes_armv8']`. ARMv8 AES instruction count in the
+  artifact: **225 → 426** (+201). (The 225 baseline is the bundled **C sqlcipher** which always uses HW AES on arm64;
+  the +201 delta is the **Rust `aes` crate** flipping from software to hardware — exactly what the flag controls.)
+- **Functional smoke test (HW-AES binary, two-process):** writer creates an **encrypted** Seshat index (passphrase →
+  AES encrypt), adds an event, `commit(true)`, exits (releases the single-writer tantivy lock). Reader reopens with
+  the **correct** passphrase → decrypts → `search({search_term:"hardware"})` returns **1 hit with the correct body**;
+  reopen with a **wrong** passphrase is correctly **rejected** (`DatabaseUnlockError("Invalid…")`). Full
+  encrypt→commit→reopen→decrypt→search round-trip works on the hardware-AES binary; key derivation is enforced.
+  (Native arg contract gotcha for future tests: async `search` wants `{ search_term, limit, before_limit,
+  after_limit, order_by_recency }` — snake_case `search_term`, NOT `searchTerm`; the JS `searchSync(term,…)` positional
+  variant downcasts oddly. element-web calls `eventIndex.search(args[0])` from `seshat.ts:204`.)
+- **Artifact state:** propagated the new HW-AES `index.node` to `.hak/hakModules/matrix-seshat/index.node` (what hak's
+  copy step does). The cargo cache is now warm WITH the flag, so a later `corepack pnpm run build:native` is a fast
+  reproducible no-op producing the same HW-AES artifact. **NOTE:** the packaged `dist/mac-arm64/Element.app` still
+  contains the OLD software-AES `index.node` — re-run electron-builder (see build recipe) to ship the HW version.
+- **Still needs the live app (manual QA, in `manual-qa-checklist.md`):** the actual **CPU-drop measurement** under
+  sustained encrypted-room indexing (Activity Monitor on the Seshat thread) — that's the one piece that needs the
+  running GUI + a real workload, not automatable here. Compile + correctness + crypto round-trip are all proven.
+
+### Session 16 (cont.) — P2: manual QA playbook authored (live GUI execution deferred to user)
+
+- P2 ("manual macOS GUI QA of the ~15 not-unit-testable landed fixes") **cannot be executed autonomously** (needs real
+  clicks, multi-monitor, TCC prompts, encrypted rooms). Authored **`memorybank/manual-qa-checklist.md`** — a build+run
+  recipe plus per-issue repro steps and expected results, grouped A–E by priority (data-loss → calls → window/lifecycle
+  → files/config → search). The user runs it against a freshly repackaged build.
