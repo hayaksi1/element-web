@@ -702,3 +702,50 @@ tokenizer (needs the seshat 4.2.0 bump under the offline constraint) untouched.
   matrix-seshat; and **#33048** N-gram tokenizer for CJK search (#32038) after the seshat 4.2.0 bump.
 - **Phase 5:** 5.1 macOS DND/Focus (#32383, needs vetted native module — design/spike); 5.2 Sequoia notification-sound
   stacking (#31996, ⚠️).
+
+---
+
+## Session 13 (2026-06-24) — Phase 4.2 query-correctness bugs (#32341, #32258, #32356) + #32343 triaged upstream (web-only)
+
+Picked up the user's "continue to fix the problems with phases" directive against the Phase 4.2 **remaining** discrete
+query bugs. Process: a 4-agent **triage workflow** (each researched the live GitHub issue via firecrawl + mapped the
+in-repo code path) → TDD implementation in `apps/web/src/Searching.ts` → an 8-dimension (5 review + per-finding verify,
+14 agents) **adversarial review workflow** → applied fixes → re-verify. All changes are **read-path only** (no
+`EventIndex.ts`/`onSyncInner`/#33501 breaker/#33957 guard/reconcile touch).
+
+- ✅ **#32341** "Search failed: unable to search URL in All Rooms". Root cause = tantivy's `field:value` grammar: a term
+  with a colon (`https://github.com`) is parsed as field `https` → `FieldDoesNotExist`; the in-repo amplifier was
+  `combinedSearch()` using `Promise.all`, so the Seshat rejection sank the whole All-Rooms search even though the server
+  leg succeeded. Fix: `combinedSearch()` → `Promise.allSettled` (degrade to the surviving leg; throw only if BOTH fail),
+  and `hardenSeshatSearchTerm()` phrase-wraps a colon-bearing term for the **Seshat leg only** (the homeserver body keeps
+  the raw term). Hardener is closed-phrase-aware (review fix: an unbalanced leading quote is escaped+wrapped, not passed
+  through to another tantivy syntax error).
+- ✅ **#32258** "Upgraded encrypted room search misses pre-upgrade history". Root cause = local search scoped to one
+  `room_id`, never walking the upgrade predecessor chain. Fix: `getRoomSearchChain()` walks `room.findPredecessor()`
+  (cycle-guarded, depth-cap 20); the single-room path **partitions the chain by per-room encryption** — encrypted rooms
+  via Seshat (`chainSearchProcess` runs a per-room Seshat query and k-way merges by recency; paginated per source via a
+  `LOCAL_CHAIN_NEXT_BATCH` sentinel + per-room `next_batch` in `seshatChainQueries`), known non-encrypted predecessors via
+  the homeserver (`filter.rooms`), merged into the same source pool (review fix: the original cut routed the **whole**
+  chain Seshat-only by the current room's encryption, silently dropping an unencrypted predecessor's history).
+- ✅ **#32356** "Search doesn't render edited messages". Root cause = the Seshat match for an edit is the `m.replace`
+  event, which `haveRendererForEvent` drops, so the count says 1 but nothing renders. **CRITICAL review finding:** simply
+  rewriting the edit's content is discarded — the SDK event mapper does `room.findEventById(event_id)` and **reuses the
+  live `m.replace` model** for a loaded room. Fix: **re-key the matched result to its target (original) event id** so the
+  mapper resolves the renderable original (which already carries the aggregated edit when loaded) and, when the original
+  is not loaded, builds a fresh event from the promoted `m.new_content`. Results are de-duped (edit re-keyed to original
+  alongside the original itself → one tile) and an empty `m.new_content` is left untouched (no blank tile). Permalink now
+  targets the original (also improves #17097).
+- ⬆️ **#32343** "Search misses certain non-stopwords" = **UPSTREAM, document-only**: pure native tantivy tokenizer
+  (`SimpleTokenizer`+`LowerCaser`+`RemoveLongFilter` 40-byte drop); no in-repo TS query/tokenization bug. Same family as
+  #32038 / PR #33048 (N-gram tokenizer, gated on the matrix-seshat 4.2.0 bump under the offline constraint). A TS-side
+  term rewrite would diverge the local Seshat term from the verbatim server term and break `combineResponses` merging.
+- **Adversarial review → 7 confirmed findings:** 5 fixed (the #32356 mapper-reuse HIGH; the #32258 mixed-encryption MED;
+  the #32341 unbalanced-quote LOW; the #32356 duplicate-tile MED via dedup; the #32356 empty-content LOW via guard), 2
+  documented as accepted degradation (the #32341 degraded-leg pagination is latent/sticky — sound because each leg ≤
+  SEARCH_LIMIT so the degraded first page never overflows `cachedEvents`). 2 further review findings were verified **not
+  real** (multi-room count double-count; non-encrypted server-chain dropping).
+- **Verify:** `Searching-test` Jest **27/27** (was 3; +24 incl. chain pagination + mixed-encryption), `RoomSearchView-test`
+  + `EventIndex-test` **38/38** (no regression), `tsc` only the 4 pre-existing vendored matrix-js-sdk errors, eslint
+  `--max-warnings 0` clean, prettier clean, no i18n changes (fixes log via `logger`, no user-facing strings).
+- **Not verifiable here:** real Seshat sqlite round-trip + the actual SDK event-mapper reuse path (the test harness stubs
+  `processRoomEventsSearch`, so tests assert on the re-keyed raw objects / captured args) + live macOS render — manual QA.
