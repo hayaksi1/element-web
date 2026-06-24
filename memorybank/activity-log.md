@@ -625,3 +625,80 @@ user-download/webcontents-handler), `tsc`/`eslint`/`prettier`/**knip**/i18n clea
 web tsc (only the 4 pre-existing vendored matrix-js-sdk errors), eslint/prettier/i18n clean. **Not verifiable here:**
 live macOS (quit dialogs, ⌘W, screen-share cancel, download-open dialog/focus), the **arm64 seshat native build**
 (#33954), and real MDM config paths.
+
+## Session 12 (2026-06-24) — Phase 4.2: Seshat backfill completeness + resilience + progress UI (#33955 + #33956)
+
+Directive: "continue to fix the problems with phases." User chose (via AskUserQuestion) **Phase 4.2 — adapt upstream
+PR #33955 (backfill completeness/resilience) + #33956 (indexed/indexing/errored progress UI)** onto our tree, the
+recommended next in-repo, unit-testable phase. Fixes **#32266** (no results despite index), **#32011** (search misses
+messages), strengthens **#32253**; contributes to **#32119** (startup CPU). All web (`apps/web`, Jest).
+
+**Process:** deep research (fetched both PR diffs via `gh pr diff`, mapped every merge point against our tree) →
+careful hand-port (NOT `git apply` — our tree diverged: circuit-breaker #33501 + #33957 timeline guard already present)
+→ comprehensive Jest suite → full verification → **5-dimension adversarial review workflow (19 agents, 13 findings → 6
+confirmed)** → applied 4 (2 code fixes + 3 gate-pinning tests), documented 1 → re-verify.
+
+**Implemented (`apps/web/src/indexing/EventIndex.ts` + ManageEventIndexDialog.tsx + en_EN.json):**
+- **`reconcileMissedRooms()`** (#32266/#32011): once per launch when crypto is ready (gated on `getCrypto()`, retried on
+  a later sync if not), scans joined rooms and seeds a fullCrawl backward checkpoint for every encryption-enabled room
+  with no indexed events and no queued checkpoint. The one-time `addInitialCheckpoints` only covered rooms present at
+  index-creation; rooms joined later / missed (crypto not ready, no token, transient failure) stayed unindexed forever.
+- **Crypto-aware `isRoomIndexable()`** (`isEncryptionEnabledInRoom`, not legacy state `isRoomEncrypted`) added to
+  `onRoomTimeline` (after the cheap gates), `onRoomStateEvent` (rewritten: type-gate → `reconciliationDone` gate to
+  avoid the initial-sync isRoomIndexed flood → indexable → try/catch seed), and `onTimelineReset` (**kept the session-7
+  #33957 `timelineSet !== getUnfilteredTimelineSet()` guard**, added indexable). `unindexableRooms` set tracks
+  state-encrypted-but-can't-speak rooms (excluded, not errored).
+- **Crawler resilience:** permanent 4xx (≥400 <500, except 401/429) → drop checkpoint + `erroredRooms.add`; 401/429/5xx/
+  network → retry (push back). A live event in a given-up room clears errored + re-seeds (bounded to crawl rate). A
+  successful crawl batch clears errored.
+- **Fully-crawled sentinel** (#32119): a backward fullCrawl reaching an empty chunk writes a `fully_crawled`-token
+  sentinel checkpoint via `addHistoricEvents([], marker, checkpoint)` instead of deleting; `init()` splits loaded
+  checkpoints, hydrating `fullyCrawledRooms` and keeping sentinels OUT of the crawl queue. Stops contentless rooms
+  (isRoomIndexed=false forever) being re-crawled every launch. Round-trips through the native seshat wrapper (token is
+  opaque). Non-fullCrawl / forward empty chunks still just delete.
+- **`hasQueuedCheckpoint()` dedup** in `addRoomCheckpoint` (and reconcile's push — review fix) drops exact-duplicate
+  checkpoints stacked by gappy syncs.
+- **#33956 progress UI:** `crawlingRooms()` → **`getIndexingStatus()`** returning `{indexing, indexed, errored}` (joined
+  encrypted rooms only; excludes invites/left + unindexable); `ManageEventIndexDialog.tsx` renders "N indexed, M
+  indexing[, K errored]" (errored line only when >0); new i18n `message_search_room_progress[_errored]`, removed
+  `message_search_pending_rooms` + old placeholders (en_EN only — other locales sync via the translation pipeline, as
+  upstream #33956 did).
+
+**Deliberately OMITTED:** the upstream `window.mxEventIndexDebug` / `listIndexingRooms()` debug hook (untestable dev-only
+tooling needing `window as unknown` casts that fight our lint rules; not part of the correctness fix).
+
+**Adversarial review → 6 confirmed (13 raised; 7 refuted, incl. the "stale-locale i18n" findings correctly rejected as
+faithful-to-upstream pipeline behavior). Applied 4, documented 1:**
+- **(code) per-room containment:** `getMyMembership()`/`isRoomEncrypted()`/`getLiveTimeline().getPaginationToken()` were
+  OUTSIDE reconcile's per-room try/catch → a throw would escape `onSyncInner` and trip our **#33501 global breaker**
+  (upstream has no breaker, so harmless there; in our tree it would stop ALL indexing + pop the dialog). Wrapped the
+  whole per-room body in one log-and-skip try/catch so the port's "per-room error never trips the global breaker"
+  invariant actually holds. + regression test.
+- **(code) reconcile dedup:** reconcile's own checkpoint push bypassed `hasQueuedCheckpoint`, so a concurrent
+  `onRoomStateEvent` seed during one of reconcile's awaits (flag set before the await) could double-queue a room
+  in-memory (wasted crawl, self-correcting). Now reconcile re-checks the LIVE queue via `hasQueuedCheckpoint` before
+  pushing.
+- **(tests) pinned the new crypto gates:** added negative tests for `onTimelineReset` and `onRoomStateEvent`
+  (state-encrypted but crypto-can't-speak → no seed) — previously deleting the gate line passed the suite.
+- **Documented, not fixed (matches upstream, self-heals on restart, rare):** if `isEncryptionEnabledInRoom` transiently
+  throws for one already-encrypted room during the single reconcile pass, that room's history backfill is skipped until
+  next launch (live events still index). Faithful #33955 behavior.
+
+**Verification:** web `EventIndex-test` Jest **29/29** (7 existing reconciled with getMyMembership/getCrypto mocks + 22
+new: reconcile×8, crawler error/sentinel×4 incl. `it.each` permanent[400/403/404]/transient[401/429/500], dedup×1,
+getIndexingStatus×1, onRoomStateEvent×3, onTimelineReset crypto-gate×1, per-room-containment×1), adjacent
+`EventIndexPanel` **10/10**, `tsc -p tsconfig.json` (only the 4 pre-existing vendored matrix-js-sdk errors, 0 in our
+files), eslint/prettier/i18n:lint clean. **Not verifiable here:** real Seshat sqlite sentinel round-trip on desktop, the
+actual /messages crawl against a live homeserver, and the dialog rendering (no ManageEventIndexDialog test harness
+exists — `getIndexingStatus` is unit-tested directly). **Open upstream:** #33955/#33956 are still OPEN; if their API
+shifts before merge, re-reconcile. Remaining Phase 4.2 query bugs (#32341/#32258/#32356/#32343) + #33048 N-gram
+tokenizer (needs the seshat 4.2.0 bump under the offline constraint) untouched.
+
+### Recommended next session (as of session 12)
+- **#33954 native arm64 build QA** — still the one unverified earlier change (build seshat for `aarch64-apple-darwin`,
+  confirm `--cfg aes_armv8`, measure CPU).
+- **Phase 4.2 remainder:** the discrete query-correctness bugs (#32341 search URL in All Rooms, #32258 upgraded-room
+  pre-upgrade history, #32356 edited messages, #32343 non-stopwords) — investigate which are in-repo vs upstream
+  matrix-seshat; and **#33048** N-gram tokenizer for CJK search (#32038) after the seshat 4.2.0 bump.
+- **Phase 5:** 5.1 macOS DND/Focus (#32383, needs vetted native module — design/spike); 5.2 Sequoia notification-sound
+  stacking (#31996, ⚠️).

@@ -54,8 +54,8 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 | #   | Issue                                               | Action                                                                                | Status             |
 | --- | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------ |
-| 4.1 | #32253                                              | Warn the user when searching before indexing is complete.                             | ✅ **done (session 10)**: `SearchWarning.tsx` now shows a polite-live-region notice when the Seshat index exists but is **still crawling** (`EventIndex.currentRoom() !== null`), subscribing to `changedCheckpoint` so it auto-clears. Renderer-only; new i18n `seshat\|warning_kind_search_partial`. The deeper "indexed-but-0-results" reliability is upstream matrix-seshat (out of scope). |
-| 4.2 | #32341 / #32258 / #32266 / #32011 / #32356 / #32343 | Query/index correctness bugs — triage as a batch against `seshat.ts` + matrix-seshat. | ⏳ planned         |
+| 4.1 | #32253                                              | Warn the user when searching before indexing is complete.                             | ✅ **done (session 10)**: `SearchWarning.tsx` now shows a polite-live-region notice when the Seshat index exists but is **still crawling** (`EventIndex.currentRoom() !== null`), subscribing to `changedCheckpoint` so it auto-clears. Renderer-only; new i18n `seshat\|warning_kind_search_partial`. **Session 12 (#33956):** the `ManageEventIndexDialog` progress readout now uses `getIndexingStatus()` → "N indexed, M indexing[, K errored]" (replacing the confusing "N out of M" / "awaiting indexing"). |
+| 4.2 | #32341 / #32258 / #32266 / #32011 / #32356 / #32343 | Query/index correctness bugs — triage as a batch against `seshat.ts` + matrix-seshat. | 🟡 **partial — #32266/#32011 done (session 12)**: adapted upstream **PR #33955** into `apps/web/src/indexing/EventIndex.ts` — once-per-launch `reconcileMissedRooms()` (crypto-ready-gated) seeds a fullCrawl checkpoint for every joined, encryption-enabled room with no indexed events and no queued checkpoint (closes the "joined-later / missed-at-create → unindexed forever → no results despite index" gap); crypto-aware `isRoomIndexable()` on the live/state/reset handlers (keeps the #33957 `timelineSet` guard); permanent-vs-transient crawler error classification + `erroredRooms` (self-healing on a live event); `fully_crawled` sentinel checkpoint so contentless rooms aren't re-crawled every launch; `hasQueuedCheckpoint` dedup. Re-applied on top of our #33501 circuit-breaker (reconcile runs inside `onSyncInner`; per-room body wrapped so a single room can't trip the global breaker — review fix). 29 Jest tests. **Remaining (still ⏳):** #32341 (search URL in All Rooms), #32258 (upgraded-room pre-upgrade history — needs predecessor/tombstone traversal, NOT covered by #33955), #32356 (edited messages), #32343 (non-stopwords) — discrete query bugs to triage in-repo vs upstream matrix-seshat. |
 | 4.3 | #32038 / #32119 / #32112 / #32130                   | i18n tokenization, CPU spikes, packaging, Skylake illegal-instruction.                | ⬆️ mostly upstream; ✅ **#33954 adopted (session 11)**: arm64 `--cfg aes_armv8` RUSTFLAGS in `hak/matrix-seshat/build.ts` (hardware AES on Apple Silicon, ~10-20× CPU saving). Build-flag only — **needs native arm64 build QA** (not unit-testable). |
 | 4.4 | #33957 (→ #32119)                                   | **Adopted upstream PR #33957:** `onTimelineReset` ignores thread/filtered timeline-set resets (only the room's own unfiltered live timeline re-seeds a gap-fill checkpoint) — stops dead rooms re-inflating the crawl list every launch (a contributor to the #32119 startup CPU spike). | ✅ **done (session 7)** |
 
@@ -321,13 +321,17 @@ confirmed findings (4 fix-now + 1 document)** all applied → full re-verificati
   prefers a different exact path or per-variant Linux dirs, that is the only remaining tweak. The deep-merge hardening
   was also folded in.
 - **PR-review adopt shortlist** (see `upstream-pr-review.md`): **#33954 DONE (session 11, needs native build QA)**;
-  remaining: **#33955+#33956** Seshat backfill resilience + progress UI (high effort, complements Phase 0.2 & 4.4) —
-  still open. (#33957 timeline-reset guard already adopted session 7.)
+  **#33955 + #33956 Seshat backfill resilience + progress UI DONE (session 12)** — adapted into `EventIndex.ts` /
+  `ManageEventIndexDialog.tsx` on top of our #33501 breaker + #33957 guard (29 Jest tests; see Phase 4.2 row & session-12
+  activity log). (#33957 timeline-reset guard already adopted session 7.) Remaining shortlist item: **#33048** N-gram
+  tokenizer for CJK search (#32038) — needs the matrix-seshat 4.2.0 bump under the offline/package-locally constraint.
 - **Main-process follow-up for 0.3:** **investigated & closed (session 11, document-only):** no Electron API forces
   per-origin durable storage; notifications are already granted fail-open (`media-permissions.ts`) yet
   `persist()` still returns false (the JS handlers don't feed Chromium's `DurableStoragePermissionContext`), and
   scheme privileges don't participate in the heuristic. The web-side ceiling (Phase 0.3 `StorageManager` hardening) +
   `StorageEvictedDialog` recovery remain the realistic mitigations. Only an upstream Electron feature or migrating off
   the `vector://` scheme would change it.
-- **Still planned / untouched:** Phase 4.2 Seshat query-correctness cluster; Phase 5.1 macOS DND/Focus (needs a vetted
-  native module); Phase 5.2 Sequoia notification-sound stacking; Phase 3.7/3.8 (Electron-bump / upstream).
+- **Still planned / untouched:** Phase 4.2 **remaining** query-correctness bugs (#32341 search-URL-in-All-Rooms, #32258
+  upgraded-room pre-upgrade history, #32356 edited messages, #32343 non-stopwords — the backfill-completeness half
+  #32266/#32011 is DONE session 12); Phase 5.1 macOS DND/Focus (needs a vetted native module); Phase 5.2 Sequoia
+  notification-sound stacking; Phase 3.7/3.8 (Electron-bump / upstream).

@@ -55,6 +55,16 @@ const CRAWLER_IDLE_TIME = 5000;
 // The maximum number of events our crawler should fetch in a single crawl.
 const EVENTS_PER_CRAWL = 100;
 
+/**
+ * Sentinel pagination token used to mark a room as fully crawled. When a backward
+ * fullCrawl reaches the start of history we replace its checkpoint with one bearing
+ * this token; it persists the "fully crawled" high-water mark in Seshat's sqlite
+ * (alongside real checkpoints) instead of in client-side storage. It is never a
+ * real Matrix pagination token, and such sentinel checkpoints are kept out of the
+ * live crawl queue so we never paginate from it.
+ */
+const FULLY_CRAWLED_TOKEN = "fully_crawled";
+
 interface ICrawler {
     cancel(): void;
 }
@@ -89,6 +99,48 @@ export default class EventIndex extends EventEmitter {
      */
     private indexingErrored = false;
 
+    /**
+     * Guards the one-shot reconciliation pass. Set true only once it has actually
+     * run (i.e. once crypto was ready), so that if crypto isn't ready on the
+     * first sync we retry on a later sync rather than skipping reconciliation.
+     */
+    private reconciliationDone = false;
+
+    /**
+     * Joined rooms that carry an `m.room.encryption` state event but for which
+     * encryption isn't actually enabled per the crypto module, so they can never
+     * be indexed (we can't "speak" their encryption). Populated by the
+     * reconciliation pass (which already does the async crypto check). These are
+     * deliberately ignored - not crawled and not surfaced in the UI - just like
+     * rooms we've only been invited to / left.
+     */
+    private readonly unindexableRooms = new Set<string>();
+
+    /**
+     * Joined rooms the crawler has actually given up on indexing: it hit a
+     * permanent failure (e.g. a 403/404/400 from /messages) so the checkpoint was
+     * dropped and won't be retried. Cleared once the room successfully crawls
+     * again (e.g. after rejoining). Surfaced as the "errored" count in the UI - a
+     * real problem, as opposed to rooms we deliberately skip (invites /
+     * can't-speak encryption).
+     */
+    private readonly erroredRooms = new Set<string>();
+
+    /**
+     * Rooms whose backward fullCrawl has reached the very start of their history
+     * - i.e. we've indexed everything there is to index. The high-water mark for
+     * "fully crawled": it matters most for rooms with no indexable content, which
+     * otherwise look "unindexed" (isRoomIndexed === false) forever and get
+     * re-crawled on every restart.
+     *
+     * Persisted in Seshat's own sqlite as a sentinel crawler checkpoint (token
+     * {@link FULLY_CRAWLED_TOKEN}) rather than client-side storage, so it lives
+     * and dies atomically with the index it describes. Hydrated from
+     * `loadCheckpoints()` at init; sentinels are filtered out of the live crawl
+     * queue so we never try to paginate from the fake token.
+     */
+    private readonly fullyCrawledRooms = new Set<string>();
+
     private readonly logger;
 
     public constructor() {
@@ -108,10 +160,33 @@ export default class EventIndex extends EventEmitter {
             this.needsInitialCheckpoints = true;
         }
 
-        this.crawlerCheckpoints = await indexManager.loadCheckpoints();
+        // loadCheckpoints returns both real crawl checkpoints and our fully-crawled
+        // sentinel markers. Split them: sentinels hydrate the fully-crawled set and
+        // must NOT enter the crawl queue (their token is fake), real ones drive the
+        // crawler. Because the markers live in the same DB as the index, an empty /
+        // reset index simply has none - no stale-marker cleanup needed.
+        const loadedCheckpoints = await indexManager.loadCheckpoints();
+        this.crawlerCheckpoints = [];
+        for (const checkpoint of loadedCheckpoints) {
+            if (checkpoint.token === FULLY_CRAWLED_TOKEN) {
+                this.fullyCrawledRooms.add(checkpoint.roomId);
+            } else {
+                this.crawlerCheckpoints.push(checkpoint);
+            }
+        }
         this.logger.debug("Loaded checkpoints", JSON.stringify(this.crawlerCheckpoints));
 
         this.registerListeners();
+    }
+
+    /** The sentinel checkpoint that marks a room as fully crawled in Seshat's DB. */
+    private fullyCrawledMarker(roomId: string): ICrawlerCheckpoint {
+        return {
+            roomId,
+            token: FULLY_CRAWLED_TOKEN,
+            fullCrawl: true,
+            direction: Direction.Backward,
+        };
     }
 
     /**
@@ -202,6 +277,114 @@ export default class EventIndex extends EventEmitter {
     }
 
     /**
+     * Reconciliation pass (runs once per launch, once crypto is ready).
+     *
+     * The one-time `addInitialCheckpoints` only seeds rooms that exist and have a
+     * back-pagination token at the single moment it runs (when the index is first
+     * created). Any encrypted room joined later, or missed then (e.g. crypto not
+     * yet ready, no token yet, or a transient failure), never gets a checkpoint -
+     * the crawler only re-seeds on a *new* m.room.encryption event or a gappy
+     * sync, neither of which fires for a quiet already-encrypted room. There is
+     * otherwise no mechanism to notice such rooms, so they stay unindexed forever
+     * (#32266, #32011).
+     *
+     * This pass closes that gap: it finds joined, encryption-enabled rooms that
+     * have no events indexed and no checkpoint queued, and seeds a fullCrawl
+     * checkpoint for each.
+     */
+    public async reconcileMissedRooms(): Promise<void> {
+        const indexManager = PlatformPeg.get()?.getEventIndexingManager();
+        if (!indexManager) return;
+        const client = MatrixClientPeg.safeGet();
+
+        const queued = new Set<string>(this.crawlerCheckpoints.map((c) => c.roomId));
+        if (this.currentCheckpoint) queued.add(this.currentCheckpoint.roomId);
+
+        const rooms = client.getRooms();
+        let recovered = 0;
+        let scanned = 0;
+
+        for (const room of rooms) {
+            // Yield occasionally so the many isRoomIndexed reads don't monopolise
+            // Seshat's small connection pool and starve the live writer.
+            if (++scanned % 20 === 0) await sleep(10);
+
+            // Per-room work is wrapped so a single misbehaving room can never throw
+            // out of reconcileMissedRooms: this runs inside `onSyncInner`, whose
+            // `.catch` is the #33501 global circuit-breaker - an escape would stop
+            // indexing for the WHOLE session and pop the error dialog. Every per-room
+            // failure must instead be logged-and-skipped.
+            try {
+                // Only joined rooms - invites/leaves can't be crawled (the server
+                // returns 403) and shouldn't count as indexable.
+                if (room.getMyMembership() !== KnownMembership.Join) continue;
+
+                // Only rooms with E2EE actually enabled (per the crypto module, not
+                // the legacy state-only check).
+                const encEnabled = Boolean(await client.getCrypto()?.isEncryptionEnabledInRoom(room.roomId));
+                if (!encEnabled) {
+                    // A joined room with a legacy m.room.encryption marker but no
+                    // crypto-enabled encryption: nothing we can index. Record it so it's
+                    // ignored rather than treated as a problem.
+                    if (client.isRoomEncrypted(room.roomId)) this.unindexableRooms.add(room.roomId);
+                    continue;
+                }
+                // We can speak its encryption again, if we couldn't on a prior pass.
+                this.unindexableRooms.delete(room.roomId);
+
+                // Already fully crawled in a previous session - don't re-seed it, even
+                // if it has no indexable content (which would otherwise keep it
+                // isRoomIndexed=false and re-seeded forever).
+                if (this.fullyCrawledRooms.has(room.roomId)) continue;
+
+                // Already queued for crawling, or already has events indexed - nothing to do.
+                if (queued.has(room.roomId)) continue;
+                if (await indexManager.isRoomIndexed(room.roomId)) continue;
+
+                // This room should have been indexed but wasn't. Recover it.
+                const timeline = room.getLiveTimeline();
+                const token = timeline.getPaginationToken(Direction.Backward);
+
+                if (!token) {
+                    // No token: index whatever is in the live timeline directly,
+                    // mirroring addRoomCheckpoint's fallback.
+                    await this.addEventsFromLiveTimeline(timeline);
+                    recovered += 1;
+                    continue;
+                }
+                const checkpoint: ICrawlerCheckpoint = {
+                    roomId: room.roomId,
+                    token,
+                    fullCrawl: true,
+                    direction: Direction.Backward,
+                };
+                // Re-check the LIVE queue (not the snapshot above): onRoomStateEvent may
+                // have seeded this room during one of our awaits, so dedup against an
+                // exact duplicate the same way addRoomCheckpoint does.
+                if (this.hasQueuedCheckpoint(checkpoint)) continue;
+                await indexManager.addCrawlerCheckpoint(checkpoint);
+                this.crawlerCheckpoints.push(checkpoint);
+                recovered += 1;
+            } catch (e) {
+                // Best-effort: never let one room abort the pass or trip the breaker.
+                this.logger.warn(`reconcileMissedRooms: skipping ${room.roomId}`, e);
+            }
+        }
+
+        this.logger.debug(`reconcileMissedRooms: recovered ${recovered} missed rooms`);
+    }
+
+    /**
+     * Whether we should index a room: it must have E2EE that the crypto module
+     * actually supports. This is the crypto-aware check (`isEncryptionEnabledInRoom`),
+     * not the legacy state-only `isRoomEncrypted`, so rooms with an unsupported /
+     * "can't speak" encryption algorithm (or no encryption) are excluded.
+     */
+    private async isRoomIndexable(roomId: string): Promise<boolean> {
+        return Boolean(await MatrixClientPeg.safeGet().getCrypto()?.isEncryptionEnabledInRoom(roomId));
+    }
+
+    /**
      * The sync event listener.
      */
     private onSync = (state: SyncState, prevState: SyncState | null, data?: SyncStateData): void => {
@@ -222,6 +405,18 @@ export default class EventIndex extends EventEmitter {
 
             // Start the crawler if it's not already running.
             this.startCrawler();
+
+            // Reconciliation: once per launch, as soon as crypto is ready, seed
+            // checkpoints for joined encrypted rooms that were missed by the
+            // one-time initial checkpointing and have no events and no checkpoint.
+            // Gate on `getCrypto()` rather than a timer: `isEncryptionEnabledInRoom`
+            // is only reliable once crypto has loaded, and if it isn't ready on
+            // this sync we simply retry on a later one (the flag is only set once
+            // the pass actually runs).
+            if (!this.reconciliationDone && MatrixClientPeg.safeGet().getCrypto()) {
+                this.reconciliationDone = true;
+                await this.reconcileMissedRooms();
+            }
 
             // Commit any queued up live events
             await indexManager.commitLiveEvents();
@@ -259,7 +454,8 @@ export default class EventIndex extends EventEmitter {
 
         const client = MatrixClientPeg.safeGet();
 
-        // We only index encrypted rooms locally.
+        // Cheap sync gate first: we only index encrypted rooms locally. This
+        // rejects the (many) unencrypted-room events without any async work.
         if (!client.isRoomEncrypted(ev.getRoomId()!)) return;
 
         if (ev.isRedaction()) {
@@ -271,17 +467,36 @@ export default class EventIndex extends EventEmitter {
             return;
         }
 
+        // Only now (for an event we'd actually index) pay for the async,
+        // crypto-aware check, so we skip rooms whose encryption we can't speak.
+        if (!(await this.isRoomIndexable(ev.getRoomId()!))) return;
+
         await client.decryptEventIfNeeded(ev);
 
         await this.addLiveEventToIndex(ev);
     };
 
     private onRoomStateEvent = async (ev: MatrixEvent, state: RoomState): Promise<void> => {
-        if (!MatrixClientPeg.safeGet().isRoomEncrypted(state.roomId)) return;
+        if (ev.getType() !== EventType.RoomEncryption) return;
+        // Until the reconciliation pass has run it owns seeding the startup set of
+        // encrypted rooms. Acting here as well would fire a concurrent
+        // isRoomIndexed for every room as initial sync replays each
+        // m.room.encryption event - thousands at once, exhausting Seshat's small
+        // connection pool. After reconciliation this only handles rooms that get
+        // newly encrypted mid-session (rare, no flood).
+        if (!this.reconciliationDone) return;
 
-        if (ev.getType() === EventType.RoomEncryption && !(await this.isRoomIndexed(state.roomId))) {
-            this.logger.debug("Adding a checkpoint for a newly encrypted room", state.roomId);
-            this.addRoomCheckpoint(state.roomId, true);
+        // Only seed a checkpoint if the new encryption config is one the crypto
+        // module supports - don't attempt rooms whose encryption we can't speak.
+        if (!(await this.isRoomIndexable(state.roomId))) return;
+
+        try {
+            if (!(await this.isRoomIndexed(state.roomId))) {
+                this.logger.debug("Adding a checkpoint for a newly encrypted room", state.roomId);
+                this.addRoomCheckpoint(state.roomId, true);
+            }
+        } catch (e) {
+            this.logger.warn("Error checking/seeding newly encrypted room", state.roomId, e);
         }
     };
 
@@ -317,7 +532,10 @@ export default class EventIndex extends EventEmitter {
         // an ancient thread re-inflates the crawl list on every launch (#33957, contributing to the
         // #32119 startup CPU spike).
         if (timelineSet && timelineSet !== room.getUnfilteredTimelineSet()) return;
+        // Cheap sync gate first, then the async crypto-aware check so we don't
+        // re-seed rooms whose encryption the crypto module can't speak.
         if (!MatrixClientPeg.safeGet().isRoomEncrypted(room.roomId)) return;
+        if (!(await this.isRoomIndexable(room.roomId))) return;
 
         this.logger.debug("Adding a checkpoint because of a limited timeline", room.roomId);
 
@@ -404,6 +622,20 @@ export default class EventIndex extends EventEmitter {
         };
 
         await indexManager.addEventToIndex(e, profile);
+
+        // If we'd given up on this room (errored) but it's now delivering
+        // indexable live events, it's clearly accessible again. Clear the errored
+        // flag so it stops counting as errored, and re-seed a history backfill to
+        // retry what we'd previously failed to fetch. We clear *before* re-seeding
+        // so further live events don't pile up retries while this crawl is in
+        // flight (if the backfill fails again the crawler will re-flag it, and the
+        // next live event will retry - bounded to the crawl rate, not the event rate).
+        const roomId = ev.getRoomId();
+        if (roomId && this.erroredRooms.has(roomId)) {
+            this.erroredRooms.delete(roomId);
+            this.logger.debug("Re-attempting a previously given-up room after a live event", roomId);
+            await this.addRoomCheckpoint(roomId, true);
+        }
     }
 
     /**
@@ -448,6 +680,18 @@ export default class EventIndex extends EventEmitter {
             direction: Direction.Backward,
         };
 
+        // Don't queue an *exact* duplicate of a checkpoint we already have. This
+        // path fires on every gappy sync (onTimelineReset), and for an active
+        // room the backward token is often unchanged between gaps, so without
+        // this guard the same cursor stacks up many times in the in-memory queue
+        // (the DB already dedupes it via a UNIQUE constraint), wasting crawler
+        // cycles re-walking the same range. Distinct gap-fillers (different
+        // tokens) are unaffected, so we never drop coverage of a real gap.
+        if (this.hasQueuedCheckpoint(checkpoint)) {
+            this.logger.debug("Skipping duplicate checkpoint", JSON.stringify(checkpoint));
+            return;
+        }
+
         this.logger.debug("Adding checkpoint", JSON.stringify(checkpoint));
 
         try {
@@ -457,6 +701,21 @@ export default class EventIndex extends EventEmitter {
         }
 
         this.crawlerCheckpoints.push(checkpoint);
+    }
+
+    /**
+     * Whether the in-memory crawl queue (or the checkpoint currently being
+     * processed) already contains an exact duplicate of the given checkpoint -
+     * same room, token, direction and fullCrawl flag.
+     */
+    private hasQueuedCheckpoint(cp: ICrawlerCheckpoint): boolean {
+        const matches = (c: ICrawlerCheckpoint): boolean =>
+            c.roomId === cp.roomId &&
+            c.token === cp.token &&
+            c.direction === cp.direction &&
+            Boolean(c.fullCrawl) === Boolean(cp.fullCrawl);
+        if (this.currentCheckpoint && matches(this.currentCheckpoint)) return true;
+        return this.crawlerCheckpoints.some(matches);
     }
 
     /**
@@ -535,12 +794,22 @@ export default class EventIndex extends EventEmitter {
                     checkpoint.direction,
                 );
             } catch (e) {
-                if (e instanceof HTTPError && e.httpStatus === 403) {
+                // A permanent client error (e.g. 403 no-access, 404 room gone,
+                // 400 bad request) won't be fixed by retrying, so give up on the
+                // room and surface it as "errored". Rate-limit (429) and auth
+                // (401) are transient, as are 5xx / network errors - those keep
+                // retrying so a temporary outage never permanently abandons rooms.
+                const status = e instanceof HTTPError ? e.httpStatus : undefined;
+                const permanent =
+                    status !== undefined && status >= 400 && status < 500 && status !== 429 && status !== 401;
+
+                if (permanent) {
                     this.logger.debug(
-                        "Removing checkpoint as we don't have ",
-                        "permissions to fetch messages from this room.",
+                        `Giving up on room ${checkpoint.roomId}: permanent error ${status} fetching messages`,
                         JSON.stringify(checkpoint),
                     );
+                    // Terminal failure: give up on this room and mark it errored.
+                    this.erroredRooms.add(checkpoint.roomId);
                     try {
                         await indexManager.removeCrawlerCheckpoint(checkpoint);
                     } catch (e) {
@@ -553,6 +822,7 @@ export default class EventIndex extends EventEmitter {
                     continue;
                 }
 
+                // Transient error - retry.
                 this.logger.warn(`Error crawling using checkpoint ${JSON.stringify(checkpoint)}:`, e);
                 this.crawlerCheckpoints.push(checkpoint);
                 continue;
@@ -565,10 +835,23 @@ export default class EventIndex extends EventEmitter {
 
             if (res.chunk.length === 0) {
                 this.logger.debug("Done with the checkpoint", JSON.stringify(checkpoint));
-                // We got to the start/end of our timeline, lets just
-                // delete our checkpoint and go back to sleep.
+                // We got to the start/end of our timeline. A backward fullCrawl
+                // reaching an empty chunk means we've hit the start of the room's
+                // history: it's fully crawled. Atomically swap its checkpoint for a
+                // sentinel marker so reconciliation won't re-seed it next launch
+                // (relevant mainly for rooms with no indexable content, which stay
+                // isRoomIndexed=false). Otherwise just delete and go back to sleep.
                 try {
-                    await indexManager.removeCrawlerCheckpoint(checkpoint);
+                    if (checkpoint.fullCrawl && checkpoint.direction === Direction.Backward) {
+                        await indexManager.addHistoricEvents(
+                            [],
+                            this.fullyCrawledMarker(checkpoint.roomId),
+                            checkpoint,
+                        );
+                        this.fullyCrawledRooms.add(checkpoint.roomId);
+                    } else {
+                        await indexManager.removeCrawlerCheckpoint(checkpoint);
+                    }
                 } catch (e) {
                     this.logger.warn("Error removing checkpoint", JSON.stringify(checkpoint), e);
                 }
@@ -653,6 +936,10 @@ export default class EventIndex extends EventEmitter {
                 }
 
                 const eventsAlreadyAdded = await indexManager.addHistoricEvents(events, newCheckpoint, checkpoint);
+
+                // We successfully crawled a batch for this room, so it's no longer
+                // errored (e.g. it was re-seeded after a rejoin).
+                this.erroredRooms.delete(checkpoint.roomId);
 
                 // We didn't get a valid new checkpoint from the server, nothing
                 // to do here anymore.
@@ -1017,36 +1304,54 @@ export default class EventIndex extends EventEmitter {
         }
     }
 
-    public crawlingRooms(): {
-        /** The rooms that we are currently crawling. */
-        crawlingRooms: Set<string>;
+    /**
+     * Cheap, synchronous breakdown of the encrypted rooms we're a member of:
+     *  - `indexing`: joined encrypted rooms that have a crawler checkpoint, i.e.
+     *    are still being back-filled;
+     *  - `indexed`: joined encrypted rooms with no checkpoint, i.e. fully crawled
+     *    (the crawler removes a room's checkpoint once it reaches the start of its
+     *    history);
+     *  - `errored`: joined rooms the crawler has actually errored on and given up
+     *    (a permanent failure such as a 403 from /messages - see {@link erroredRooms}).
+     *
+     * Rooms we deliberately don't index are ignored entirely (not counted): ones
+     * we've only been invited to / have left, and ones whose encryption the crypto
+     * module can't speak ({@link unindexableRooms}).
+     *
+     * This relies on the reconciliation pass having seeded checkpoints for every
+     * missed joined+encrypted room, so "no checkpoint" reliably means "done"
+     * rather than "never started". It is in-memory only (no Seshat IPC), so it's
+     * cheap enough to call on every refresh.
+     */
+    public getIndexingStatus(): { indexing: number; indexed: number; errored: number } {
+        const client = MatrixClientPeg.safeGet();
 
-        /** All the encrypted rooms known by the MatrixClient. */
-        totalRooms: Set<string>;
-    } {
-        const totalRooms = new Set<string>();
-        const crawlingRooms = new Set<string>();
+        const checkpointed = new Set<string>(this.crawlerCheckpoints.map((c) => c.roomId));
+        if (this.currentCheckpoint) checkpointed.add(this.currentCheckpoint.roomId);
 
-        this.crawlerCheckpoints.forEach((checkpoint, index) => {
-            crawlingRooms.add(checkpoint.roomId);
-        });
+        let indexing = 0;
+        let indexed = 0;
+        let errored = 0;
 
-        if (this.currentCheckpoint !== null) {
-            crawlingRooms.add(this.currentCheckpoint.roomId);
+        for (const room of client.getRooms()) {
+            if (!client.isRoomEncrypted(room.roomId)) continue;
+            // Ignore rooms we aren't a member of (invites/left) entirely.
+            if (room.getMyMembership() !== KnownMembership.Join) continue;
+            // Ignore rooms whose encryption we can't speak - we deliberately don't
+            // index them, so they aren't a problem to surface.
+            if (this.unindexableRooms.has(room.roomId)) continue;
+
+            if (checkpointed.has(room.roomId)) {
+                // Being crawled (this also covers errored rooms that have been
+                // re-seeded and are retrying).
+                indexing += 1;
+            } else if (this.erroredRooms.has(room.roomId)) {
+                errored += 1;
+            } else {
+                indexed += 1;
+            }
         }
 
-        const client = MatrixClientPeg.safeGet();
-        const rooms = client.getRooms();
-
-        const isRoomEncrypted = (room: Room): boolean => {
-            return client.isRoomEncrypted(room.roomId);
-        };
-
-        const encryptedRooms = rooms.filter(isRoomEncrypted);
-        encryptedRooms.forEach((room, index) => {
-            totalRooms.add(room.roomId);
-        });
-
-        return { crawlingRooms, totalRooms };
+        return { indexing, indexed, errored };
     }
 }
