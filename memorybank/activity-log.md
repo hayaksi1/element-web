@@ -1008,3 +1008,53 @@ only** (web stays opt-in), **scope = full plan 1–5**, **Phase 2 = complement t
   `matrix-js-sdk` to the allowlist. `--preserve-symlinks` is NOT a fix (breaks corepack + pnpm nested resolution).
   Working command shape:
   `corepack pnpm -C apps/web exec jest <testfile> --transformIgnorePatterns 'node_modules/.pnpm/(?!(matrix-js-sdk|mime|uuid|p-retry|is-network-error|react-merge-refs|is-ip|ip-regex|super-regex|function-timeout|time-span|convert-hrtime|clone-regexp|is-regexp|matrix-web-i18n|await-lock|react-virtuoso|lodash|domutils|domhandler|domelementtype|dom-serializer|entities)).+$'`
+
+## Session 18 (2026-06-25) — Room search Phase 1B: web ⌘F discoverability toast (TDD + verified)
+
+User re-reported "⌘F doesn't work" and asked to continue. **Root-caused via systematic debugging:** Phase 1 is
+correct — `ctrlFForSearch` default `!!IS_ELECTRON`, `roomBindings()` gate works, bindings recomputed live per
+keystroke (no stale cache), `window.electron` genuinely exposed by `apps/desktop/src/preload.cts:39` so on a *rebuilt*
+desktop app the shortcut works. The user confirmed they were on a **desktop app not yet rebuilt** → fix simply not
+compiled in. Action for user: **rebuild the desktop app** to pick up the (uncommitted) Phase 1 change.
+
+User decision: implement **Phase 1B** (web toast), keep desktop default-on.
+
+### What was DONE this session (all UNCOMMITTED)
+
+- ✅ **Phase 1B (TDD, RED→GREEN, fully verified)** — on the **web** build, pressing Ctrl/Cmd+F while in-room search
+  is disabled now shows a **one-time, non-modal toast** offering to enable it, WITHOUT preventing the browser's
+  native find-on-page (#33360). Files:
+  - NEW `apps/web/src/toasts/InRoomSearchNudgeToast.ts` — `showInRoomSearchNudgeIfNeeded(ev)` gate (returns early on
+    Electron, when `ctrlFForSearch` already on, when already shown, or when the combo isn't Ctrl/Cmd+F via
+    `isKeyComboMatch({key:Key.F, ctrlOrCmdKey:true})`), and `showInRoomSearchNudgeToast()` using
+    `ToastStore.addOrReplaceToast` + `GenericToast` (primary "Enable" → `setValue("ctrlFForSearch", null, ACCOUNT,
+    true)`, secondary "Dismiss"; priority 30). Marks a device-local "shown" flag on display so it never nags twice.
+  - `apps/web/src/settings/Settings.tsx`: NEW device-only setting `ctrlFForSearchNudgeShown`
+    (`LEVELS_DEVICE_ONLY_SETTINGS`, default false) + its `IBaseSetting<boolean>` interface entry.
+  - `apps/web/src/components/structures/LoggedInView.tsx`: call `showInRoomSearchNudgeIfNeeded(ev)` from
+    `onNativeKeyDown` (the nothing-focused/`document.body` path only, after `onKeyDown`, no preventDefault).
+  - `apps/web/src/i18n/strings/en_EN.json`: NEW `room|search|nudge_title` ("Search this room") +
+    `room|search|nudge_description`.
+  - Tests: NEW `apps/web/test/unit-tests/toasts/InRoomSearchNudgeToast-test.ts` (5: shows/marks-shown, skips when
+    enabled, skips when already shown, ignores wrong key, primary-click enables setting) + 2 new wiring tests in
+    `LoggedInView-test.tsx` (shows nudge when disabled, no nudge when enabled).
+
+### Verification (this session)
+
+- jest (with the documented `--transformIgnorePatterns` workaround): toast 5/5, LoggedInView suite 35/35 (incl. the
+  2 new), KeyBindingsDefaults 2/2, PreferencesUserSettingsTab snapshot 9/9 — all pass.
+- `pnpm -C apps/web run i18n:lint` clean; eslint `--max-warnings 0` clean; prettier `--check` clean.
+- `tsc --noEmit`: 0 app-source errors (only the 4 pre-existing `node_modules/matrix-js-sdk` env-quirk errors).
+
+### Parallel-work note (user opened a separate session for Phase 2)
+
+- Advised: run Phase 2 in a **separate git worktree** (`git worktree add ../element-phase2 -b phase2-search`) so the
+  two sessions don't clobber each other's uncommitted edits. Only real overlap = `en_EN.json` (both add i18n keys)
+  and `memorybank/` — trivial conflicts, resolve via `pnpm i18n`. Phase 1/1B is uncommitted; the Phase 2 worktree
+  branches from HEAD and won't include it (fine — no logic overlap; commit Phase 1+1B first if a shared base is
+  needed).
+
+### WHERE I LEFT OFF — Phase 2 next (unchanged from Session 17 plan)
+
+- Phase 2 (in-timeline match stepping + "k of N" + live highlight, COMPLEMENT to `RoomSearchView`) → P3 from:/date
+  filters → P4 searchable media tabs → P5 reach/ranking/health-check. See `search-improvement-plan.md` §5.
