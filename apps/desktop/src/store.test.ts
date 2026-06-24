@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { expect, describe, it, beforeAll, beforeEach, vi } from "vitest";
+import { expect, describe, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import { safeStorage } from "electron";
 
 import Store, { SafeStorageDecryptionError } from "./store.js";
@@ -122,5 +122,61 @@ describe("Store secret encryption (safeStorage)", () => {
             });
             await expect(store.isSecretUndecryptable(KEY)).resolves.toBe(true);
         });
+    });
+});
+
+describe("shouldWarnBeforeExit (#32287)", () => {
+    const originalPlatform = process.platform;
+    function setPlatform(platform: NodeJS.Platform): void {
+        Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    }
+
+    const store = (): Store => Store.instance!;
+
+    beforeAll(() => {
+        // Self-contained: don't depend on the suite above having initialised the singleton
+        // (e.g. when running only this describe via a test name filter).
+        if (!Store.instance) Store.initialize(undefined);
+    });
+
+    beforeEach(() => {
+        backing.clear();
+    });
+
+    afterEach(() => {
+        setPlatform(originalPlatform);
+    });
+
+    it("defaults to NOT warning on macOS (⌘Q quitting immediately is the native convention)", () => {
+        setPlatform("darwin");
+        expect(store().shouldWarnBeforeExit()).toBe(false);
+    });
+
+    it("defaults to warning on Windows", () => {
+        setPlatform("win32");
+        expect(store().shouldWarnBeforeExit()).toBe(true);
+    });
+
+    it("defaults to warning on Linux", () => {
+        setPlatform("linux");
+        expect(store().shouldWarnBeforeExit()).toBe(true);
+    });
+
+    it("honours an explicit opt-in on macOS over the platform default", () => {
+        setPlatform("darwin");
+        store().set("warnBeforeExit", true);
+        expect(store().shouldWarnBeforeExit()).toBe(true);
+    });
+
+    it("honours an explicit opt-out on Windows over the platform default", () => {
+        setPlatform("win32");
+        store().set("warnBeforeExit", false);
+        expect(store().shouldWarnBeforeExit()).toBe(false);
+    });
+
+    it("honours an explicit opt-out on Linux over the platform default", () => {
+        setPlatform("linux");
+        store().set("warnBeforeExit", false);
+        expect(store().shouldWarnBeforeExit()).toBe(false);
     });
 });
