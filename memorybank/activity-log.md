@@ -395,8 +395,35 @@ install (silent failure / endless re-download). The wrapper never detected or su
   clean. `matrix-gen-i18n`/`matrix-i18n-lint`: clean. knip safe (`ignoreExportsUsedInFile:true`; exports used
   in-file). **Not verifiable here:** real Squirrel.Mac install on a signed build (manual macOS QA).
 
+### Session 7 (cont.) — Phase 4.4: adopt upstream PR #33957 (timeline-reset re-seed guard, → #32119)
+
+Continued in the same session. Adopted the low-effort PR-review shortlist item #33957.
+
+- **Root cause:** `apps/web/src/indexing/EventIndex.ts` `onTimelineReset` seeded a backward gap-fill checkpoint
+  on **every** `RoomEvent.TimelineReset`. matrix-js-sdk (pinned **41.8.0**) emits it as
+  `(room, timelineSet, resetAllTimelines)` and **re-emits** via its ReEmitter from thread/filtered
+  `EventTimelineSet`s, so any room with one ancient thread re-inflated the crawl list on every launch →
+  contributes to the #32119 startup CPU spike.
+- **Fix (faithful port of #33957):** `onTimelineReset(room, timelineSet?: EventTimelineSet)` early-returns when
+  `timelineSet && timelineSet !== room.getUnfilteredTimelineSet()` (only the room's own unfiltered live timeline
+  re-seeds). Pre-existing `isRoomEncrypted` guard + `addRoomCheckpoint(roomId, false)` unchanged, run after the new
+  guard. `EventTimelineSet` was already imported; SDK emit signature confirmed via its `.d.ts`.
+- **Tests** (`apps/web/test/unit-tests/indexing/EventIndex-test.ts`, Jest, +3, RED→GREEN): thread/filtered set
+  reset → no checkpoint; own live-timeline reset → backward `fullCrawl:false` checkpoint; undefined timelineSet →
+  still seeds (guards the `timelineSet &&` short-circuit). **Test-harness gotcha hit & fixed:** `mockClientMethodsRooms`
+  sets `isRoomEncrypted: jest.fn()` (→ undefined) — the override must come **after** the spread or the encrypted-room
+  guard short-circuits (caught via RED diagnosis: all-0-calls).
+- **Adversarial review** (13-agent workflow, 10 findings → 1 confirmed, low/cosmetic): reworded the
+  undefined-timelineSet test's "(legacy emitters)" label (pinned SDK never emits undefined `timelineSet`; the test is
+  valid branch coverage of the short-circuit). Applied.
+- **Verification:** EventIndex Jest **7/7**; `eslint --max-warnings 0` + prettier clean on both files; `tsc` only the
+  4 pre-existing node_modules/matrix-js-sdk crypto-wasm errors (none in changed files). **Web Jest local-run:** used
+  the `scratchpad/webjest.sh` helper (recreated; appends `matrix-js-sdk` to `transformIgnorePatterns`; Jest 30
+  `--testPathPatterns`).
+
 ### Recommended next session
 
 - **Phase 5.3 (#32288)** only after re-confirming against a live build (may be no-op/wontfix — see above).
-- PR-review adopt shortlist (#33954 arm64 AES, #33957 timeline guard — low-effort), or **Phase 3.4** white
-  launch flash (#32260) / **Phase 3.2** Cmd-W orphan prompt (#32267).
+- PR-review adopt shortlist remainder: **#33954** arm64 AES build flag (validate seshat pin/toolchain first), or the
+  larger **#33955+#33956** Seshat backfill resilience (Phase 4.2). Or **Phase 3.4** white launch flash (#32260) /
+  **Phase 3.2** Cmd-W orphan prompt (#32267).
