@@ -24,7 +24,7 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
 
 | #   | Issue           | Action                                                                                                                                                                                                                     | Status     |
 | --- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 1.1 | #32373          | macOS media permissions: `setPermissionCheckHandler`/`RequestHandler` (scoped to app origin), `askForMediaAccess` on darwin, add `NS*UsageDescription` in `electron-builder.ts`. + unit tests.                             | 🔜 next    |
+| 1.1 | #32373          | macOS media permissions: `setPermissionCheckHandler`/`RequestHandler` (**fail-open, NOT origin-scoped** so widget/Jitsi media survives), `askForMediaAccess` on darwin, add `NS*UsageDescription` via `mac.extendInfo` in `electron-builder.ts`. + unit tests.                             | ✅ **done (session 4)** |
 | 1.2 | #32398 / #32017 | Screen-share: one picker per platform — gate the custom `openDesktopCapturerSourcePicker` behind `process.platform !== 'darwin'` when `useSystemPicker` is honoured; clean cancel path. (Z-Upstream — verify on macOS 15.) | ⏳ planned |
 | 1.3 | #32075          | Guard the screen-share picker toggle crash (stale `displayMediaCallback`).                                                                                                                                                 | ⏳ planned |
 | 1.4 | #32426          | Wire toggle-mute hotkey through the menu/accelerator path.                                                                                                                                                                 | ⏳ planned |
@@ -89,7 +89,25 @@ Blocks core real-time comms; #32398 is the single highest-impact issue (97).
   the error dialog **once**, sets an `indexingErrored` flag, stops the crawler, and skips further indexing —
   fixing the dialog flood (#33501, S-Critical). Tests added to `EventIndex-test.ts` (now 4 pass).
 
+### Session 4 fixes
+
+(Session 3 was an upstream-PR review with no code changes — see `upstream-pr-review.md`.)
+
+- ✅ **1.1** macOS mic/cam permissions (#32373, S-Critical). Two-part root cause confirmed via research workflow:
+  (a) packaged Info.plist lacked `NSCameraUsageDescription`/`NSMicrophoneUsageDescription` → under hardened
+  runtime macOS never raises the TCC prompt; (b) main process never proactively called `askForMediaAccess`.
+  Fix: new `apps/desktop/src/media-permissions.ts` `setupMediaPermissions()` — registers **fail-open**
+  `setPermissionRequestHandler` + `setPermissionCheckHandler` and, for `media` on darwin, bridges to TCC via
+  `systemPreferences.askForMediaAccess` (audio→mic, video→cam, only when `not-determined`, de-duped, try/catch
+  so the callback ALWAYS fires). Wired into `electron-main.ts` after `setupMediaAuth`. Added `mac.extendInfo`
+  usage strings in `electron-builder.ts`. **Key constraint:** the handler is deliberately NOT origin-scoped —
+  widgets/Jitsi request media from remote-origin iframes (`isMainFrame=false`, `webContents=null` in the check
+  handler), so origin-gating would have broken widget calls; fail-open preserves the prior grant-all baseline.
+  11 tests in `media-permissions.test.ts`. Adversarial-review workflow caught a hang-on-`askForMediaAccess`-reject
+  regression (callback never fired) → fixed with try/catch + regression test before commit.
+
 ### Recommended next session
 
-- **1.1** macOS media (mic/cam) permissions (#32373) — `electron-main.ts` permission handlers + `NS*UsageDescription`.
-- Then **0.3** harden web-side `StorageManager.tryPersistStorage()`, or **Phase 1.2/1.3** screen-share.
+- **0.3** harden web-side `StorageManager.tryPersistStorage()` (#32198/#32472/#32108), or
+- **Phase 1.2/1.3** screen-share picker (#32398 double-picker on macOS / #32075 toggle crash), or
+- **Phase 3.1** `warnBeforeExit` default on macOS (#32287).

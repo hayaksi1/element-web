@@ -1,5 +1,38 @@
 # Activity Log
 
+## 2026-06-24 — Upstream PR review (no code changes)
+
+### Goal
+Review open `element-hq/element-web` PRs for improvements relevant to the macOS-desktop remediation
+effort; note good ones in the memory bank for implementation after user confirmation.
+
+### Method
+Multi-agent workflow (28 subagents): dumped all **95 open PRs**, curated **13 overlapping candidates**,
+analyzed each (PR body + full diff + local-code cross-check), adversarially **verified** every verdict,
+ran a dedicated **Seshat-cluster-vs-our-circuit-breaker** impact analysis (incl. an empirical 3-way
+merge), then synthesized. The `A-Electron` label is **not applied to PRs** (issues only), so overlap was
+judged by content.
+
+### Key finding
+The fresh **Seshat cluster #33954–#33958** (all by maintainer ara4n, 2026-06-24) targets **#32119**
+(CPU spike) + index completeness — our **Phase 4** — and is **complementary, NOT a supersession** of our
+Phase 0.2 circuit-breaker (3d5ce8b, #33501 = error-*dialog* flood). Verified: `onSync` auto-merges
+cleanly with #33955; only a trivial private-field block conflict (keep both). Path: **combine**.
+
+### Output (notes only — nothing implemented)
+- New: [upstream-pr-review.md](upstream-pr-review.md) — adopt shortlist, Seshat cluster verdict,
+  per-PR notes, ordered next actions.
+- Adopt/adapt shortlist: **#33954** (arm64 AES build flag, low), **#33957** (timeline-reset guard, low),
+  **#33955+#33956** (backfill resilience + progress UI, high), **#33048** (N-gram tokenizer for #32038,
+  medium). Track: #33958, #33932, #32804, #33951, #33637. Skip: #33635, #33699, #33724.
+- Corrected two wrong curator mappings: #33637→#32288 (wrong platform+direction) and #33699→#32355/#32362.
+
+### Verification
+- No source changed; working tree clean before this review. PR/diff facts pulled via `gh` against
+  `element-hq/element-web`. All recommendations are pending the user's confirmation before implementation.
+
+---
+
 ## 2026-06-24 — macOS Desktop issue research + first critical fixes
 
 ### Goal
@@ -104,3 +137,54 @@ memory bank with a prioritised phase plan, and fix the highest-priority problems
 ### Recommended next session (unchanged priority)
 - **Phase 1.1** macOS media (mic/cam) permissions (#32373) — `electron-main.ts` + `electron-builder.ts`.
 - Then **Phase 0.3** web `StorageManager.tryPersistStorage()`, or **1.2/1.3** screen-share picker.
+
+## 2026-06-24 (session 4) — Phase 1.1 macOS mic/cam permissions (#32373)
+
+(Session 3 was a no-code upstream-PR review; see `memorybank/upstream-pr-review.md`.)
+
+### Goal
+Continue the phase plan: fix Phase 1.1 — macOS "Couldn't start capturing media" (mic/cam), #32373, S-Critical.
+
+### Research (multi-agent workflow, firecrawl + context7 + Explore)
+- Verified the catalogue was stale: `apps/desktop/src/media-auth.ts` already exists but is **misleadingly
+  named** — it handles authenticated media *download* URLs (rewrites `/media/v3/` → `/client/v1/media/`, adds
+  Bearer header), NOT mic/cam permissions. Confirmed NO `setPermissionRequestHandler`/`setPermissionCheckHandler`/
+  `askForMediaAccess` anywhere under `apps/desktop/src`.
+- Confirmed two-part root cause: (a) packaged Info.plist lacks `NSCameraUsageDescription`/
+  `NSMicrophoneUsageDescription` → hardened runtime → macOS never raises the TCC prompt (silent deny/crash);
+  (b) main process never calls `systemPreferences.askForMediaAccess`, so Chromium getUserMedia is denied before
+  the OS prompts. The existing `build/entitlements.mac.plist` device.camera/audio-input entitlements are
+  necessary but NOT sufficient (usage strings are Info.plist keys, added via electron-builder `mac.extendInfo`).
+- Critical design constraint surfaced by research: with NO handler today, Electron defaults to **grant-all**.
+  Registering a handler overrides that for ALL permission types, so it must be **fail-open**; and media must
+  **NOT** be origin-gated because widgets/Jitsi request media from remote-origin iframes (`isMainFrame=false`,
+  `webContents=null` in the sync check handler). Origin-gating would have broken widget/Jitsi calls.
+
+### Fix shipped (TDD)
+- NEW `apps/desktop/src/media-permissions.ts` — `setupMediaPermissions()`:
+  - `setPermissionRequestHandler` (async): for `permission === "media"` on `darwin`, map `details.mediaTypes`
+    (audio→microphone, video→camera), de-dupe, and for each `not-determined` device `await askForMediaAccess`.
+    Wrapped in try/catch so the native TCC call throwing never strands the request. Then **always** `callback(true)`
+    (fail-open) — so non-media perms, off-darwin, and widget media keep the prior grant-all baseline.
+  - `setPermissionCheckHandler(() => true)` — sync, fail-open, origin-agnostic (tolerates null webContents).
+- Wired `setupMediaPermissions()` into `electron-main.ts` `app.ready` right after `setupMediaAuth`.
+- `electron-builder.ts`: added `mac.extendInfo` with `NSCameraUsageDescription`/`NSMicrophoneUsageDescription`
+  (plain purpose strings, no `$(PRODUCT_NAME)` macro — electron-builder doesn't expand it in extendInfo).
+- Tests `apps/desktop/src/media-permissions.test.ts` (11): registration, mic/cam prompts, no re-prompt when
+  granted, no askForMediaAccess off-darwin, fail-open non-media, remote-origin widget media granted, null
+  webContents check, **never-hangs-on-reject**, empty mediaTypes.
+
+### Adversarial review (workflow) — caught a real regression before commit
+- 3 reviewers + per-finding skeptic verifiers (10 agents). 1 of 7 findings confirmed real (high):
+  if `askForMediaAccess` rejected, the async handler aborted before `callback(true)` → getUserMedia hangs
+  forever (worse than before). Fixed with try/catch + a RED→GREEN regression test. 6 findings dismissed as
+  false positives / acceptable.
+
+### Verification
+- `vitest run` (apps/desktop): **44 passed / 8 files** (+11 new in media-permissions.test.ts).
+- `tsc --noEmit -p tsconfig.json`: clean (0). `eslint --max-warnings 0` (4 changed files): clean.
+  `prettier --check`: clean. Not verifiable here: real macOS TCC prompt on a signed build (needs manual QA).
+
+### Recommended next session
+- **0.3** web `StorageManager.tryPersistStorage()` (#32198/#32472/#32108), or **1.2/1.3** screen-share picker
+  (#32398/#32075), or **3.1** macOS `warnBeforeExit` default (#32287).

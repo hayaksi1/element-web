@@ -45,6 +45,7 @@ import { setDisplayMediaCallback } from "./displayMediaCallback.js";
 import { setupMacosTitleBar } from "./macos-titlebar.js";
 import { type Json, loadJsonFile } from "./utils.js";
 import { setupMediaAuth } from "./media-auth.js";
+import { setupMediaPermissions } from "./media-permissions.js";
 import { getBuildConfig } from "./build-config.js";
 import { getAsarPath } from "./asar.js";
 import { getIconPath } from "./icon.js";
@@ -548,6 +549,7 @@ app.on("ready", async () => {
     ); // Use Mac OS 15+ native picker
 
     setupMediaAuth(global.mainWindow);
+    setupMediaPermissions();
 });
 
 app.on("window-all-closed", () => {
