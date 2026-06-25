@@ -31,9 +31,9 @@ import { RoomSearchOrderToggle } from "../right_panel/RoomSearchOrderToggle";
 interface Props {
     /** The room being searched; mounts the member-scoped `from:` filter keyed by its id. */
     room: Room;
-    /** The active search term. Controlled — the parent debounces {@link Props.onSearchChange}. */
+    /** The term of the currently-running search (what the backend was last asked for); "" before the first search. */
     term: string;
-    /** Report a new term to the parent (RoomView debounces it into a search). */
+    /** Commit a search for the given term. Called on Enter (not while typing); the parent runs it immediately. */
     onSearchChange: (term: string) => void;
     /** End the search and restore the normal room header. */
     onCancel: () => void;
@@ -81,8 +81,9 @@ const RoomSearchHeader: React.FC<Props> = ({
 }) => {
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // The input is controlled but the parent's onSearchChange is debounced, so we keep the typed value locally and
-    // sync it down when the term prop changes (e.g. a session re-hydrated after a cross-room stepping remount).
+    // The input is controlled locally; a search is only committed on Enter (not while typing), so we keep the typed
+    // value here and sync it down when the term prop changes (e.g. a session re-hydrated after a cross-room remount,
+    // or the committed term updating after an Enter).
     const [searchValue, setSearchValue] = useState(term);
     useEffect(() => {
         setSearchValue(term);
@@ -102,14 +103,26 @@ const RoomSearchHeader: React.FC<Props> = ({
             onCancel();
             return;
         }
-        // Step the in-room match cursor without leaving the box: Enter → next (older), Shift+Enter → previous. Ignore
-        // the Enter that confirms an in-progress IME composition so CJK input is not hijacked.
+        // Enter drives the search. Ignore the Enter that confirms an in-progress IME composition so CJK input is not
+        // hijacked. An empty box is a no-op.
         if (e.key === Key.ENTER && !e.nativeEvent?.isComposing) {
             e.preventDefault();
-            defaultDispatcher.dispatch<SearchMatchStepPayload>({
-                action: Action.SearchMatchStep,
-                direction: e.shiftKey ? "previous" : "next",
-            });
+            // Compare and commit the trimmed term consistently so surrounding whitespace can't make an
+            // already-searched term look "new" (which would re-search instead of stepping to the next match).
+            const trimmed = searchValue.trim();
+            if (!trimmed) return;
+            if (trimmed !== term) {
+                // The box holds a term that has not been searched yet → run the search now (search on Enter, not
+                // while typing).
+                onSearchChange(trimmed);
+            } else {
+                // The current term is already searched → Enter steps to the next (older) match, Shift+Enter to the
+                // previous (newer) one, without leaving the box.
+                defaultDispatcher.dispatch<SearchMatchStepPayload>({
+                    action: Action.SearchMatchStep,
+                    direction: e.shiftKey ? "previous" : "next",
+                });
+            }
         }
     };
 
@@ -126,8 +139,8 @@ const RoomSearchHeader: React.FC<Props> = ({
                             placeholder={_t("room|search|placeholder")}
                             name="room_message_search"
                             onChange={(e) => {
+                                // Typing only updates the local value; the search is committed on Enter (onKeyDown).
                                 setSearchValue(e.currentTarget.value);
-                                onSearchChange(e.currentTarget.value);
                             }}
                             value={searchValue}
                             className="mx_no_textinput"

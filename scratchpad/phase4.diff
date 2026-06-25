@@ -1,0 +1,807 @@
+diff --git a/apps/web/res/css/_components.pcss b/apps/web/res/css/_components.pcss
+index 0c27571..d566385 100644
+--- a/apps/web/res/css/_components.pcss
++++ b/apps/web/res/css/_components.pcss
+@@ -237,6 +237,7 @@
+ @import "./views/right_panel/_EncryptionInfo.pcss";
+ @import "./views/right_panel/_ExtensionsCard.pcss";
+ @import "./views/right_panel/_PinnedMessagesCard.pcss";
++@import "./views/right_panel/_RoomFilesView.pcss";
+ @import "./views/right_panel/_RoomSummaryCard.pcss";
+ @import "./views/right_panel/_ThreadPanel.pcss";
+ @import "./views/right_panel/_TimelineCard.pcss";
+diff --git a/apps/web/res/css/views/right_panel/_RoomFilesView.pcss b/apps/web/res/css/views/right_panel/_RoomFilesView.pcss
+new file mode 100644
+index 0000000..8a83832
+--- /dev/null
++++ b/apps/web/res/css/views/right_panel/_RoomFilesView.pcss
+@@ -0,0 +1,30 @@
++/*
++Copyright 2026 Element Creations Ltd.
++
++SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++Please see LICENSE files in the repository root for full details.
++*/
++
++.mx_RoomFilesView_header {
++    display: flex;
++    flex-direction: column;
++    gap: var(--cpd-space-2x);
++    padding: var(--cpd-space-2x) var(--cpd-space-4x) var(--cpd-space-3x);
++    box-sizing: border-box;
++    width: 100%;
++    border-bottom: 1px solid var(--cpd-color-gray-400);
++
++    .mx_RoomFilesView_tabs {
++        /* The typed media tabs scroll horizontally rather than wrap in the narrow right panel. */
++        overflow-x: auto;
++        scrollbar-width: none;
++
++        &::-webkit-scrollbar {
++            display: none;
++        }
++    }
++
++    .mx_RoomFilesView_search {
++        width: 100%;
++    }
++}
+diff --git a/apps/web/src/components/structures/FilePanel.tsx b/apps/web/src/components/structures/FilePanel.tsx
+index 0cecad0..2ee5860 100644
+--- a/apps/web/src/components/structures/FilePanel.tsx
++++ b/apps/web/src/components/structures/FilePanel.tsx
+@@ -27,14 +27,12 @@ import EventIndexPeg from "../../indexing/EventIndexPeg";
+ import { _t } from "../../languageHandler";
+ import SearchWarning, { WarningKind } from "../views/elements/SearchWarning";
+ import BaseCard from "../views/right_panel/BaseCard";
+-import TimelinePanel from "./TimelinePanel";
+ import Spinner from "../views/elements/Spinner";
+-import { Layout } from "../../settings/enums/Layout";
+ import RoomContext, { TimelineRenderingType } from "../../contexts/RoomContext";
+ import Measured from "../views/elements/Measured";
+ import EmptyState from "../views/right_panel/EmptyState";
+ import { ScopedRoomContextProvider } from "../../contexts/ScopedRoomContext.tsx";
+-import { EventPresentationContextProvider } from "../../utils/EventPresentationContextProvider";
++import { RoomFilesView } from "../views/right_panel/RoomFilesView";
+ 
+ interface IProps {
+     roomId: string;
+@@ -287,17 +285,11 @@ class FilePanel extends React.Component<IProps, IState> {
+                     >
+                         <Measured sensor={this.card} onMeasurement={this.onMeasurement} />
+                         <SearchWarning isRoomEncrypted={isRoomEncrypted} kind={WarningKind.Files} />
+-                        <EventPresentationContextProvider layout={Layout.Group}>
+-                            <TimelinePanel
+-                                manageReadReceipts={false}
+-                                manageReadMarkers={false}
+-                                timelineSet={this.state.timelineSet}
+-                                showUrlPreview={false}
+-                                onPaginationRequest={this.onPaginationRequest}
+-                                empty={emptyState}
+-                                layout={Layout.Group}
+-                            />
+-                        </EventPresentationContextProvider>
++                        <RoomFilesView
++                            timelineSet={this.state.timelineSet}
++                            onPaginationRequest={this.onPaginationRequest}
++                            empty={emptyState}
++                        />
+                     </BaseCard>
+                 </ScopedRoomContextProvider>
+             );
+diff --git a/apps/web/src/components/structures/TimelinePanel.tsx b/apps/web/src/components/structures/TimelinePanel.tsx
+index d7cc3f7..51a8c91 100644
+--- a/apps/web/src/components/structures/TimelinePanel.tsx
++++ b/apps/web/src/components/structures/TimelinePanel.tsx
+@@ -148,6 +148,13 @@ interface IProps {
+     hideThreadedMessages?: boolean;
+     disableGrouping?: boolean;
+ 
++    /**
++     * Optional predicate restricting which loaded events are *displayed* (e.g. the FilePanel's media-type tabs +
++     * in-tab search, Phase 4). Only the rendered list is filtered; pagination, scroll and read-marker logic still
++     * operate over the full timeline window. When omitted, every event is shown (existing behaviour).
++     */
++    eventFilter?: (event: MatrixEvent) => boolean;
++
+     /**
+      * Enable updating the read receipts and markers on user activity.
+      * @default true
+@@ -1849,7 +1856,9 @@ class TimelinePanel extends React.Component<IProps, IState> {
+         // If the state is PREPARED or CATCHUP, we're still waiting for the js-sdk to sync with
+         // the HS and fetch the latest events, so we are effectively forward paginating.
+         const forwardPaginating = this.state.forwardPaginating || this.syncImpliesForwardPaginating;
+-        const events = this.state.events;
++        // Only the *displayed* list is filtered; this.state.events stays the full window so pagination/scroll/
++        // read-marker bookkeeping is unaffected (Phase 4 media tabs + in-tab search).
++        const events = this.props.eventFilter ? this.state.events.filter(this.props.eventFilter) : this.state.events;
+         return (
+             <MessagePanel
+                 ref={this.messagePanel}
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+new file mode 100644
+index 0000000..b8cab6f
+--- /dev/null
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+@@ -0,0 +1,101 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import React, { type JSX, type ReactNode, useMemo } from "react";
++import { type EventTimelineSet, type TimelineWindow } from "matrix-js-sdk/src/matrix";
++import { ChatFilter, Form, Search } from "@vector-im/compound-web";
++import { Flex, useCreateAutoDisposedViewModel, useViewModel } from "@element-hq/web-shared-components";
++
++import { _t } from "../../../languageHandler";
++import { Layout } from "../../../settings/enums/Layout";
++import TimelinePanel from "../../structures/TimelinePanel";
++import { EventPresentationContextProvider } from "../../../utils/EventPresentationContextProvider";
++import { RoomFilesViewModel } from "../../../viewmodels/right_panel/RoomFilesViewModel";
++import { buildFileEventFilter, FILE_CATEGORY_TABS, FileCategory } from "../../../utils/FileCategory";
++
++interface Props {
++    /** The filtered (files/media) timeline set built by {@link FilePanel}. */
++    timelineSet: EventTimelineSet;
++    /**
++     * Pagination override (Seshat-backed for encrypted rooms), forwarded straight to TimelinePanel. Declared with
++     * method syntax to mirror TimelinePanel's bivariant signature, so FilePanel's `Direction`-typed handler is
++     * assignable.
++     */
++    onPaginationRequest(this: void, timelineWindow: TimelineWindow, direction: string, size: number): Promise<boolean>;
++    /** Empty-state node rendered when the (filtered) timeline has nothing to show. */
++    empty: ReactNode;
++}
++
++const TAB_LABELS: Record<FileCategory, TranslationKey> = {
++    [FileCategory.All]: "file_panel|tab_all",
++    [FileCategory.Media]: "file_panel|tab_media",
++    [FileCategory.Files]: "file_panel|tab_files",
++    [FileCategory.Music]: "file_panel|tab_music",
++    [FileCategory.Voice]: "file_panel|tab_voice",
++};
++
++/**
++ * The body of the FilePanel: a Telegram-style row of typed media tabs (All / Media / Files / Music / Voice) plus an
++ * in-tab filename/caption search, driving a {@link TimelinePanel} over the room's shared-media timeline (search
++ * Phase 4).
++ *
++ * MVVM v2: tab selection + search term live in {@link RoomFilesViewModel}; the timeline display predicate is derived
++ * from the snapshot via the pure {@link buildFileEventFilter} and handed to TimelinePanel's `eventFilter`. No
++ * indexing change is involved — media filenames are already indexed; this only filters the *displayed* list.
++ */
++export function RoomFilesView({ timelineSet, onPaginationRequest, empty }: Props): JSX.Element {
++    const vm = useCreateAutoDisposedViewModel(() => new RoomFilesViewModel());
++    const { activeCategory, searchTerm } = useViewModel(vm);
++
++    const eventFilter = useMemo(() => buildFileEventFilter(activeCategory, searchTerm), [activeCategory, searchTerm]);
++
++    return (
++        <>
++            <div className="mx_RoomFilesView_header">
++                <Flex
++                    as="div"
++                    role="listbox"
++                    aria-label={_t("file_panel|tabs_label")}
++                    align="center"
++                    gap="var(--cpd-space-2x)"
++                    className="mx_RoomFilesView_tabs"
++                >
++                    {FILE_CATEGORY_TABS.map((category) => (
++                        <ChatFilter
++                            key={category}
++                            role="option"
++                            selected={category === activeCategory}
++                            onClick={() => vm.setCategory(category)}
++                        >
++                            {_t(TAB_LABELS[category])}
++                        </ChatFilter>
++                    ))}
++                </Flex>
++                <Form.Root className="mx_RoomFilesView_search" onSubmit={(e) => e.preventDefault()}>
++                    <Search
++                        placeholder={_t("file_panel|search_placeholder")}
++                        name="file_search"
++                        value={searchTerm}
++                        onChange={(e) => vm.setSearchTerm(e.currentTarget.value)}
++                    />
++                </Form.Root>
++            </div>
++            <EventPresentationContextProvider layout={Layout.Group}>
++                <TimelinePanel
++                    manageReadReceipts={false}
++                    manageReadMarkers={false}
++                    timelineSet={timelineSet}
++                    showUrlPreview={false}
++                    onPaginationRequest={onPaginationRequest}
++                    empty={empty}
++                    layout={Layout.Group}
++                    eventFilter={eventFilter}
++                />
++            </EventPresentationContextProvider>
++        </>
++    );
++}
+diff --git a/apps/web/src/i18n/strings/en_EN.json b/apps/web/src/i18n/strings/en_EN.json
+index 73f27c9..5e7b280 100644
+--- a/apps/web/src/i18n/strings/en_EN.json
++++ b/apps/web/src/i18n/strings/en_EN.json
+@@ -1290,7 +1290,14 @@
+         "empty_description": "Attach files from chat or just drag and drop them anywhere in a room.",
+         "empty_heading": "No files visible in this room",
+         "guest_note": "You must <a>register</a> to use this functionality",
+-        "peek_note": "You must join the room to see its files"
++        "peek_note": "You must join the room to see its files",
++        "search_placeholder": "Search by file name",
++        "tab_all": "All",
++        "tab_files": "Files",
++        "tab_media": "Media",
++        "tab_music": "Music",
++        "tab_voice": "Voice",
++        "tabs_label": "Filter files by type"
+     },
+     "forward": {
+         "filter_placeholder": "Search for rooms or people",
+diff --git a/apps/web/src/utils/FileCategory.ts b/apps/web/src/utils/FileCategory.ts
+new file mode 100644
+index 0000000..0a434a6
+--- /dev/null
++++ b/apps/web/src/utils/FileCategory.ts
+@@ -0,0 +1,89 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import { EventType, type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
++
++import { isVoiceMessage } from "./EventUtils";
++
++/**
++ * Telegram-style typed media tabs for the {@link FilePanel} (search Phase 4).
++ *
++ * {@link All} is a tab selector only (every media event); {@link getFileCategory} never returns it. A "Links" tab is
++ * intentionally absent in v1 — the FilePanel data source (`contains_url` server filter / Seshat `loadFileEvents`)
++ * returns events with a `content.url` *field* (media), not messages with hyperlinks in their body text, so a real
++ * Links tab needs a separate link-extraction data source. See `memorybank/search-phase4-plan.md`.
++ */
++export enum FileCategory {
++    All = "all",
++    Media = "media",
++    Files = "files",
++    Music = "music",
++    Voice = "voice",
++}
++
++/** The media tabs in display order (All first, then the typed categories). */
++export const FILE_CATEGORY_TABS: readonly FileCategory[] = [
++    FileCategory.All,
++    FileCategory.Media,
++    FileCategory.Files,
++    FileCategory.Music,
++    FileCategory.Voice,
++] as const;
++
++/**
++ * Classify a media event into one of the typed categories, or `null` if it is not a shared-media event.
++ *
++ * Voice messages (`m.audio` carrying the MSC3245/MSC2516 voice flag) are split out from {@link FileCategory.Music}.
++ * Never returns {@link FileCategory.All} (that is a tab selector, not a classification).
++ */
++export function getFileCategory(ev: MatrixEvent): FileCategory | null {
++    if (ev.getType() !== EventType.RoomMessage) return null;
++
++    switch (ev.getContent().msgtype) {
++        case MsgType.Image:
++        case MsgType.Video:
++            return FileCategory.Media;
++        case MsgType.File:
++            return FileCategory.Files;
++        case MsgType.Audio:
++            return isVoiceMessage(ev) ? FileCategory.Voice : FileCategory.Music;
++        default:
++            return null;
++    }
++}
++
++/**
++ * Whether an event belongs under the given tab. {@link FileCategory.All} matches any media event; a typed category
++ * matches only its own classification.
++ */
++export function eventMatchesCategory(ev: MatrixEvent, category: FileCategory): boolean {
++    const eventCategory = getFileCategory(ev);
++    if (eventCategory === null) return false;
++    return category === FileCategory.All || eventCategory === category;
++}
++
++/**
++ * Whether an event matches the in-tab text filter. An empty/whitespace term matches everything. Otherwise a
++ * case-insensitive substring match against both the `filename` field and the `body` caption (so either the real
++ * file name or a caption finds the event).
++ */
++export function eventMatchesFileSearch(ev: MatrixEvent, rawTerm: string): boolean {
++    const term = rawTerm.trim().toLowerCase();
++    if (!term) return true;
++
++    const content = ev.getContent();
++    const haystack = [content.filename, content.body].filter(Boolean).join(" ").toLowerCase();
++    return haystack.includes(term);
++}
++
++/**
++ * Build the display predicate for the FilePanel timeline from the active tab and search term: an event shows iff it
++ * belongs to the category AND matches the search term.
++ */
++export function buildFileEventFilter(category: FileCategory, searchTerm: string): (ev: MatrixEvent) => boolean {
++    return (ev) => eventMatchesCategory(ev, category) && eventMatchesFileSearch(ev, searchTerm);
++}
+diff --git a/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.ts b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.ts
+new file mode 100644
+index 0000000..6357758
+--- /dev/null
++++ b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.ts
+@@ -0,0 +1,43 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import { BaseViewModel } from "@element-hq/web-shared-components";
++
++import { FileCategory } from "../../utils/FileCategory";
++
++/**
++ * Reactive state for the FilePanel's typed media tabs (search Phase 4): which tab is active and the in-tab search
++ * term. Both are pure view state — the actual event classification/filtering lives in pure helpers
++ * ({@link buildFileEventFilter}) so the View stays dumb.
++ */
++export interface RoomFilesSnapshot {
++    /** The currently-selected media tab. */
++    activeCategory: FileCategory;
++    /** The in-tab filename/caption search term (raw, untrimmed). */
++    searchTerm: string;
++}
++
++/**
++ * MVVM-v2 view model backing the FilePanel's media tab bar + in-tab search (search Phase 4 — "typed, searchable
++ * shared-media tabs"). Holds only the tab selection and search term; the {@link RoomFilesView} derives the timeline
++ * display predicate from this snapshot.
++ */
++export class RoomFilesViewModel extends BaseViewModel<RoomFilesSnapshot, void> {
++    public constructor() {
++        super(undefined, { activeCategory: FileCategory.All, searchTerm: "" });
++    }
++
++    /** Switch the active media tab. */
++    public setCategory = (activeCategory: FileCategory): void => {
++        this.snapshot.merge({ activeCategory });
++    };
++
++    /** Update the in-tab search term. */
++    public setSearchTerm = (searchTerm: string): void => {
++        this.snapshot.merge({ searchTerm });
++    };
++}
+diff --git a/apps/web/test/unit-tests/components/structures/TimelinePanel-test.tsx b/apps/web/test/unit-tests/components/structures/TimelinePanel-test.tsx
+index ec312a1..fe3815a 100644
+--- a/apps/web/test/unit-tests/components/structures/TimelinePanel-test.tsx
++++ b/apps/web/test/unit-tests/components/structures/TimelinePanel-test.tsx
+@@ -518,6 +518,33 @@ describe("TimelinePanel", () => {
+         expect(forceUpdateSpy).toHaveBeenCalledTimes(1);
+     });
+ 
++    describe("eventFilter", () => {
++        it("renders only events matching the eventFilter predicate", async () => {
++            const [, room, events] = setupTestData(); // two events
++
++            const { container } = render(
++                <TimelinePanel
++                    {...getProps(room, events)}
++                    eventFilter={(ev: MatrixEvent) => ev.getId() === events[1].getId()}
++                />,
++                clientAndSDKContextRenderOptions(client, sdkContext),
++            );
++
++            await waitFor(() => expectEvents(container, [events[1]]));
++        });
++
++        it("renders all events when no eventFilter is supplied", async () => {
++            const [, room, events] = setupTestData();
++
++            const { container } = render(
++                <TimelinePanel {...getProps(room, events)} />,
++                clientAndSDKContextRenderOptions(client, sdkContext),
++            );
++
++            await waitFor(() => expectEvents(container, [events[0], events[1]]));
++        });
++    });
++
+     describe("onRoomTimeline", () => {
+         it("ignores events for other timelines", () => {
+             const [client, room, events] = setupTestData();
+diff --git a/apps/web/test/unit-tests/components/structures/__snapshots__/FilePanel-test.tsx.snap b/apps/web/test/unit-tests/components/structures/__snapshots__/FilePanel-test.tsx.snap
+index 6a45b1d..9b11a74 100644
+--- a/apps/web/test/unit-tests/components/structures/__snapshots__/FilePanel-test.tsx.snap
++++ b/apps/web/test/unit-tests/components/structures/__snapshots__/FilePanel-test.tsx.snap
+@@ -45,6 +45,86 @@ exports[`FilePanel renders empty state 1`] = `
+         </div>
+       </button>
+     </div>
++    <div
++      class="mx_RoomFilesView_header"
++    >
++      <div
++        aria-label="Filter files by type"
++        class="_flex_4dswl_9 mx_RoomFilesView_tabs"
++        role="listbox"
++        style="--mx-flex-display: flex; --mx-flex-direction: row; --mx-flex-align: center; --mx-flex-justify: start; --mx-flex-gap: var(--cpd-space-2x); --mx-flex-wrap: nowrap;"
++      >
++        <button
++          aria-selected="true"
++          class="_chat-filter_5qdp0_8"
++          role="option"
++          tabindex="0"
++        >
++          All
++        </button>
++        <button
++          aria-selected="false"
++          class="_chat-filter_5qdp0_8"
++          role="option"
++          tabindex="0"
++        >
++          Media
++        </button>
++        <button
++          aria-selected="false"
++          class="_chat-filter_5qdp0_8"
++          role="option"
++          tabindex="0"
++        >
++          Files
++        </button>
++        <button
++          aria-selected="false"
++          class="_chat-filter_5qdp0_8"
++          role="option"
++          tabindex="0"
++        >
++          Music
++        </button>
++        <button
++          aria-selected="false"
++          class="_chat-filter_5qdp0_8"
++          role="option"
++          tabindex="0"
++        >
++          Voice
++        </button>
++      </div>
++      <form
++        class="_root_1o4d9_17 mx_RoomFilesView_search"
++      >
++        <label
++          class="_label_1o4d9_60 _field_1o4d9_27 _search_1lktl_8"
++          for="react-use-id-2"
++        >
++          <svg
++            class="_icon_1lktl_37"
++            fill="currentColor"
++            height="20"
++            viewBox="0 0 24 24"
++            width="20"
++            xmlns="http://www.w3.org/2000/svg"
++          >
++            <path
++              d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++            />
++          </svg>
++          <input
++            class="_input_1lktl_52"
++            id="react-use-id-2"
++            name="file_search"
++            placeholder="Search by file name"
++            type="search"
++            value=""
++          />
++        </label>
++      </form>
++    </div>
+     <div
+       class="mx_RoomView_messagePanel mx_RoomView_messageListWrapper"
+     >
+diff --git a/apps/web/test/unit-tests/components/views/right_panel/RoomFilesView-test.tsx b/apps/web/test/unit-tests/components/views/right_panel/RoomFilesView-test.tsx
+new file mode 100644
+index 0000000..64b739d
+--- /dev/null
++++ b/apps/web/test/unit-tests/components/views/right_panel/RoomFilesView-test.tsx
+@@ -0,0 +1,83 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import React from "react";
++import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
++import { render, screen, fireEvent } from "jest-matrix-react";
++
++import { RoomFilesView } from "../../../../../src/components/views/right_panel/RoomFilesView";
++import { mkEvent, stubClient } from "../../../../test-utils";
++
++// Stub TimelinePanel so we can capture the `eventFilter` predicate it is handed without rendering a real timeline.
++let mockLastTimelineProps: { eventFilter?: (ev: MatrixEvent) => boolean } = {};
++jest.mock("../../../../../src/components/structures/TimelinePanel", () => ({
++    __esModule: true,
++    default: (props: { eventFilter?: (ev: MatrixEvent) => boolean }) => {
++        mockLastTimelineProps = props;
++        return null;
++    },
++}));
++
++const mkMedia = (msgtype: string, content: Record<string, unknown> = {}): MatrixEvent =>
++    mkEvent({
++        type: "m.room.message",
++        user: "@me:server",
++        room: "!room:server",
++        content: { msgtype, body: "file", ...content },
++        event: true,
++    });
++
++const renderView = (): void => {
++    render(<RoomFilesView timelineSet={{} as never} onPaginationRequest={jest.fn()} empty={<div />} />);
++};
++
++describe("RoomFilesView", () => {
++    beforeEach(() => {
++        stubClient();
++        mockLastTimelineProps = {};
++    });
++
++    it("renders the media tabs with All selected by default", () => {
++        renderView();
++
++        for (const label of ["All", "Media", "Files", "Music", "Voice"]) {
++            expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
++        }
++        expect(screen.getByRole("option", { name: "All" })).toHaveAttribute("aria-selected", "true");
++        expect(screen.getByRole("option", { name: "Voice" })).toHaveAttribute("aria-selected", "false");
++    });
++
++    it("hands TimelinePanel a predicate that shows any media but not plain text under All", () => {
++        renderView();
++
++        const filter = mockLastTimelineProps.eventFilter!;
++        expect(filter(mkMedia(MsgType.Image))).toBe(true);
++        expect(filter(mkMedia(MsgType.Text))).toBe(false);
++    });
++
++    it("narrows the predicate to the selected tab", () => {
++        renderView();
++
++        fireEvent.click(screen.getByRole("option", { name: "Voice" }));
++
++        expect(screen.getByRole("option", { name: "Voice" })).toHaveAttribute("aria-selected", "true");
++        const filter = mockLastTimelineProps.eventFilter!;
++        expect(filter(mkMedia(MsgType.Audio, { "org.matrix.msc3245.voice": {} }))).toBe(true);
++        expect(filter(mkMedia(MsgType.Image))).toBe(false);
++        expect(filter(mkMedia(MsgType.Audio))).toBe(false); // music, not voice
++    });
++
++    it("applies the in-tab search term to the predicate", () => {
++        renderView();
++
++        fireEvent.change(screen.getByPlaceholderText("Search by file name"), { target: { value: "cat" } });
++
++        const filter = mockLastTimelineProps.eventFilter!;
++        expect(filter(mkMedia(MsgType.Image, { body: "cat.png" }))).toBe(true);
++        expect(filter(mkMedia(MsgType.Image, { body: "dog.png" }))).toBe(false);
++    });
++});
+diff --git a/apps/web/test/unit-tests/utils/FileCategory-test.ts b/apps/web/test/unit-tests/utils/FileCategory-test.ts
+new file mode 100644
+index 0000000..18bc0ae
+--- /dev/null
++++ b/apps/web/test/unit-tests/utils/FileCategory-test.ts
+@@ -0,0 +1,138 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
++
++import {
++    FileCategory,
++    FILE_CATEGORY_TABS,
++    getFileCategory,
++    eventMatchesCategory,
++    eventMatchesFileSearch,
++    buildFileEventFilter,
++} from "../../../src/utils/FileCategory";
++import { mkEvent } from "../../test-utils";
++
++const ROOM = "!room:server";
++const USER = "@me:server";
++
++function mkMedia(msgtype: string, content: Record<string, unknown> = {}): MatrixEvent {
++    return mkEvent({
++        type: "m.room.message",
++        user: USER,
++        room: ROOM,
++        content: { msgtype, body: "file", ...content },
++        event: true,
++    });
++}
++
++describe("FileCategory", () => {
++    describe("getFileCategory", () => {
++        it("classifies m.image and m.video as Media", () => {
++            expect(getFileCategory(mkMedia(MsgType.Image))).toBe(FileCategory.Media);
++            expect(getFileCategory(mkMedia(MsgType.Video))).toBe(FileCategory.Media);
++        });
++
++        it("classifies m.file as Files", () => {
++            expect(getFileCategory(mkMedia(MsgType.File))).toBe(FileCategory.Files);
++        });
++
++        it("classifies a plain m.audio as Music", () => {
++            expect(getFileCategory(mkMedia(MsgType.Audio))).toBe(FileCategory.Music);
++        });
++
++        it("classifies a voice-flagged m.audio as Voice, not Music", () => {
++            const voice = mkMedia(MsgType.Audio, { "org.matrix.msc3245.voice": {} });
++            expect(getFileCategory(voice)).toBe(FileCategory.Voice);
++        });
++
++        it("classifies a legacy msc2516 voice m.audio as Voice", () => {
++            const voice = mkMedia(MsgType.Audio, { "org.matrix.msc2516.voice": {} });
++            expect(getFileCategory(voice)).toBe(FileCategory.Voice);
++        });
++
++        it("returns null for a non-media text message", () => {
++            expect(getFileCategory(mkMedia(MsgType.Text))).toBeNull();
++        });
++
++        it("returns null for a non-message event type", () => {
++            const sticker = mkEvent({ type: "m.sticker", user: USER, room: ROOM, content: { body: "x" }, event: true });
++            expect(getFileCategory(sticker)).toBeNull();
++        });
++    });
++
++    describe("eventMatchesCategory", () => {
++        it("matches any media event under the All tab", () => {
++            expect(eventMatchesCategory(mkMedia(MsgType.Image), FileCategory.All)).toBe(true);
++            expect(eventMatchesCategory(mkMedia(MsgType.File), FileCategory.All)).toBe(true);
++            expect(eventMatchesCategory(mkMedia(MsgType.Audio), FileCategory.All)).toBe(true);
++        });
++
++        it("excludes non-media events even under the All tab", () => {
++            expect(eventMatchesCategory(mkMedia(MsgType.Text), FileCategory.All)).toBe(false);
++        });
++
++        it("matches only the exact category for typed tabs", () => {
++            const image = mkMedia(MsgType.Image);
++            expect(eventMatchesCategory(image, FileCategory.Media)).toBe(true);
++            expect(eventMatchesCategory(image, FileCategory.Files)).toBe(false);
++            expect(eventMatchesCategory(image, FileCategory.Voice)).toBe(false);
++        });
++    });
++
++    describe("eventMatchesFileSearch", () => {
++        it("matches everything for an empty or whitespace term", () => {
++            const ev = mkMedia(MsgType.Image, { body: "vacation.png" });
++            expect(eventMatchesFileSearch(ev, "")).toBe(true);
++            expect(eventMatchesFileSearch(ev, "   ")).toBe(true);
++        });
++
++        it("matches the filename case-insensitively as a substring", () => {
++            const ev = mkMedia(MsgType.Image, { body: "Vacation-Beach.png" });
++            expect(eventMatchesFileSearch(ev, "beach")).toBe(true);
++            expect(eventMatchesFileSearch(ev, "BEACH")).toBe(true);
++            expect(eventMatchesFileSearch(ev, "mountain")).toBe(false);
++        });
++
++        it("searches both the filename field and the body caption", () => {
++            // Split-format media: filename = real name, body = caption.
++            const ev = mkMedia(MsgType.File, { filename: "report-q3.pdf", body: "the quarterly numbers" });
++            expect(eventMatchesFileSearch(ev, "report-q3")).toBe(true);
++            expect(eventMatchesFileSearch(ev, "quarterly")).toBe(true);
++            expect(eventMatchesFileSearch(ev, "missing")).toBe(false);
++        });
++    });
++
++    describe("buildFileEventFilter", () => {
++        it("combines category and search with AND", () => {
++            const filter = buildFileEventFilter(FileCategory.Media, "cat");
++            expect(filter(mkMedia(MsgType.Image, { body: "cat.png" }))).toBe(true);
++            // right category, wrong name
++            expect(filter(mkMedia(MsgType.Image, { body: "dog.png" }))).toBe(false);
++            // right name, wrong category
++            expect(filter(mkMedia(MsgType.File, { body: "cat.png" }))).toBe(false);
++        });
++
++        it("with All + empty term passes every media event and rejects non-media", () => {
++            const filter = buildFileEventFilter(FileCategory.All, "");
++            expect(filter(mkMedia(MsgType.Video))).toBe(true);
++            expect(filter(mkMedia(MsgType.Text))).toBe(false);
++        });
++    });
++
++    describe("FILE_CATEGORY_TABS", () => {
++        it("lists All first then the typed categories in display order", () => {
++            expect(FILE_CATEGORY_TABS).toEqual([
++                FileCategory.All,
++                FileCategory.Media,
++                FileCategory.Files,
++                FileCategory.Music,
++                FileCategory.Voice,
++            ]);
++        });
++    });
++});
+diff --git a/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts b/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
+new file mode 100644
+index 0000000..0569783
+--- /dev/null
++++ b/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
+@@ -0,0 +1,48 @@
++/*
++ * Copyright 2026 Element Creations Ltd.
++ *
++ * SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++ * Please see LICENSE files in the repository root for full details.
++ */
++
++import { RoomFilesViewModel } from "../../../../src/viewmodels/right_panel/RoomFilesViewModel";
++import { FileCategory } from "../../../../src/utils/FileCategory";
++
++describe("RoomFilesViewModel", () => {
++    it("starts on the All tab with an empty search term", () => {
++        const vm = new RoomFilesViewModel();
++        expect(vm.getSnapshot()).toEqual({ activeCategory: FileCategory.All, searchTerm: "" });
++    });
++
++    it("setCategory updates the active category and notifies subscribers", () => {
++        const vm = new RoomFilesViewModel();
++        const listener = jest.fn();
++        vm.subscribe(listener);
++
++        vm.setCategory(FileCategory.Voice);
++
++        expect(vm.getSnapshot().activeCategory).toBe(FileCategory.Voice);
++        expect(listener).toHaveBeenCalledTimes(1);
++    });
++
++    it("setSearchTerm updates the term and notifies subscribers", () => {
++        const vm = new RoomFilesViewModel();
++        const listener = jest.fn();
++        vm.subscribe(listener);
++
++        vm.setSearchTerm("report");
++
++        expect(vm.getSnapshot().searchTerm).toBe("report");
++        expect(listener).toHaveBeenCalledTimes(1);
++    });
++
++    it("does not notify when the category is unchanged", () => {
++        const vm = new RoomFilesViewModel();
++        const listener = jest.fn();
++        vm.subscribe(listener);
++
++        vm.setCategory(FileCategory.All);
++
++        expect(listener).not.toHaveBeenCalled();
++    });
++});

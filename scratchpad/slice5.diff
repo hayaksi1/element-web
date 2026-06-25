@@ -1,0 +1,484 @@
+diff --git a/apps/web/res/css/views/rooms/_EventTile.pcss b/apps/web/res/css/views/rooms/_EventTile.pcss
+index 967f282..c27494f 100644
+--- a/apps/web/res/css/views/rooms/_EventTile.pcss
++++ b/apps/web/res/css/views/rooms/_EventTile.pcss
+@@ -66,6 +66,13 @@ $left-gutter: 64px;
+         }
+     }
+ 
++    /* The live tile currently focused while stepping through search matches (Phase 2 slice 5). A subtle,
++       persistent background so the active match stands out in the live timeline. Dedicated class (not the
++       transient URL-jump `mx_EventTile_selected` flash) so it persists for as long as the match stays focused. */
++    &.mx_EventTile_searchHighlightActive .mx_EventTile_line {
++        background-color: $event-selected-color;
++    }
++
+     .mx_MessageTimestamp_lateIcon {
+         position: absolute;
+         right: 100%;
+diff --git a/apps/web/src/components/structures/MessagePanel.tsx b/apps/web/src/components/structures/MessagePanel.tsx
+index 32ea0a3..2d3ee3e 100644
+--- a/apps/web/src/components/structures/MessagePanel.tsx
++++ b/apps/web/src/components/structures/MessagePanel.tsx
+@@ -809,9 +809,11 @@ export default class MessagePanel extends React.Component<IProps, IState> {
+         const highlight = eventId === this.props.highlightedEventId;
+ 
+         // While stepping through search matches in the live timeline, highlight the matched terms in the body of
+-        // the focused match only (the same `mx_EventTile_searchHighlight` styling used in the results list).
+-        const searchHighlights =
+-            eventId === this.props.searchHighlightEventId ? this.props.searchHighlights : undefined;
++        // the focused match only (the same `mx_EventTile_searchHighlight` styling used in the results list), and
++        // mark that whole tile as the active stepping match so it stands out (`mx_EventTile_searchHighlightActive`).
++        const isSearchHighlightMatch =
++            this.props.searchHighlightEventId !== undefined && eventId === this.props.searchHighlightEventId;
++        const searchHighlights = isSearchHighlightMatch ? this.props.searchHighlights : undefined;
+ 
+         const readReceipts = this.readReceiptsByEvent.get(eventId);
+ 
+@@ -841,6 +843,7 @@ export default class MessagePanel extends React.Component<IProps, IState> {
+                 lastSuccessful={wrappedEvent.lastSuccessfulWeSent}
+                 isSelectedEvent={highlight}
+                 highlights={searchHighlights}
++                isSearchHighlightMatch={isSearchHighlightMatch}
+                 getRelationsForEvent={this.props.getRelationsForEvent}
+                 showReactions={this.props.showReactions}
+                 layout={this.props.layout}
+diff --git a/apps/web/src/components/structures/RoomView.tsx b/apps/web/src/components/structures/RoomView.tsx
+index 57fbcfc..0b2ae82 100644
+--- a/apps/web/src/components/structures/RoomView.tsx
++++ b/apps/web/src/components/structures/RoomView.tsx
+@@ -2049,6 +2049,18 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
+         });
+     };
+ 
++    private onBackToSearchResults = (): void => {
++        // Return from live-timeline match stepping to the results list while keeping the search session alive
++        // (term, promise, matches). Unlike onCancelSearchClick, `search` is preserved. Reset the stepper cursor so
++        // no match is focused (the "k of N loaded" counter reads "0 of N" again), and flip back to Search mode so
++        // the body re-renders RoomSearchView instead of the live timeline.
++        this.searchNavVm.setMatches(this.state.search?.matches ?? []);
++        this.setState((state) => ({
++            timelineRenderingType: TimelineRenderingType.Search,
++            search: state.search ? { ...state.search, currentMatchIndex: undefined } : undefined,
++        }));
++    };
++
+     // jump down to the bottom of this room, where new events are arriving
+     private jumpToLiveTimeline = (): void => {
+         if (this.state.initialEventId && this.state.isInitialEventHighlighted) {
+@@ -2532,6 +2544,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
+                         searchInfo={this.state.search}
+                         navigationVm={this.searchNavVm}
+                         onCancelClick={this.onCancelSearchClick}
++                        onBackToResults={this.onBackToSearchResults}
+                         onSearchScopeChange={this.onSearchScopeChange}
+                         isRoomEncrypted={isRoomEncrypted}
+                     />
+diff --git a/apps/web/src/components/views/rooms/EventTile.tsx b/apps/web/src/components/views/rooms/EventTile.tsx
+index 0be412a..ed5b102 100644
+--- a/apps/web/src/components/views/rooms/EventTile.tsx
++++ b/apps/web/src/components/views/rooms/EventTile.tsx
+@@ -191,6 +191,12 @@ export interface EventTileProps {
+     /** Whether this is the currently selected event. */
+     isSelectedEvent?: boolean;
+ 
++    /**
++     * Whether this tile is the search match currently focused while stepping through results in the live
++     * timeline. Drives the `mx_EventTile_searchHighlightActive` class. See Searching.ts / RoomView search stepping.
++     */
++    isSearchHighlightMatch?: boolean;
++
+     /** Resize observer used by the parent timeline, if any. */
+     resizeObserver?: ResizeObserver;
+ 
+@@ -903,6 +909,7 @@ export class UnwrappedEventTile extends React.Component<EventTileProps, IState>
+                     isRedacted: this.props.isRedacted,
+                 }),
+                 isSelected: this.props.isSelectedEvent || !!this.state.interaction.contextMenu,
++                isSearchHighlightMatch: this.props.isSearchHighlightMatch,
+                 isLast: this.props.last,
+                 isLastInSection: this.props.lastInSection,
+                 isContextual: this.props.contextual,
+diff --git a/apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx b/apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
+index e0b28a4..29cc45d 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
+@@ -9,6 +9,7 @@ Please see LICENSE files in the repository root for full details.
+ import React from "react";
+ import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/search";
+ import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
++import ListIcon from "@vector-im/compound-design-tokens/assets/web/icons/list-view";
+ import { IconButton, Link } from "@vector-im/compound-web";
+ import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
+ 
+@@ -28,6 +29,12 @@ interface Props {
+     navigationVm?: SearchMatchNavigationViewModel;
+     onSearchScopeChange(this: void, scope: SearchScope): void;
+     onCancelClick(this: void): void;
++    /**
++     * Return from live-timeline match stepping to the search results list, keeping the search session alive.
++     * Only surfaced (as a button) while a match is focused; distinct from {@link onCancelClick}, which ends the
++     * search entirely.
++     */
++    onBackToResults?(this: void): void;
+ }
+ 
+ const RoomSearchAuxPanel: React.FC<Props> = ({
+@@ -36,10 +43,10 @@ const RoomSearchAuxPanel: React.FC<Props> = ({
+     navigationVm,
+     onSearchScopeChange,
+     onCancelClick,
++    onBackToResults,
+ }) => {
+     const scope = searchInfo?.scope ?? SearchScope.Room;
+-    // While stepping matches in the live timeline, the "k of N" stepper is the source of truth for position,
+-    // so we hide the (differently-counted) "N results found" summary to avoid showing two conflicting totals.
++    // True while a match is focused in the live timeline (stepping). Used to surface the "back to results" affordance.
+     const isSteppingMatch = (searchInfo?.currentMatchIndex ?? -1) >= 0;
+ 
+     return (
+@@ -49,7 +56,10 @@ const RoomSearchAuxPanel: React.FC<Props> = ({
+                 <div className="mx_RoomSearchAuxPanel_summary">
+                     <SearchIcon width="24px" height="24px" />
+                     <div className="mx_RoomSearchAuxPanel_summary_text">
+-                        {isSteppingMatch ? null : searchInfo?.count !== undefined ? (
++                        {/* We keep the backend "N results found" summary visible alongside the "k of N loaded"
++                            stepper; the stepper's "loaded" label disambiguates the two (differently-counted)
++                            denominators (backend estimate vs. locally-loaded steppable matches). */}
++                        {searchInfo?.count !== undefined ? (
+                             _t(
+                                 "room|search|summary",
+                                 { count: searchInfo.count },
+@@ -64,6 +74,15 @@ const RoomSearchAuxPanel: React.FC<Props> = ({
+                     </div>
+                 </div>
+                 <div className="mx_RoomSearchAuxPanel_buttons">
++                    {isSteppingMatch && onBackToResults && (
++                        <IconButton
++                            onClick={onBackToResults}
++                            tooltip={_t("room|search|back_to_results")}
++                            aria-label={_t("room|search|back_to_results")}
++                        >
++                            <ListIcon width="20px" height="20px" />
++                        </IconButton>
++                    )}
+                     {navigationVm && <SearchMatchNavigation vm={navigationVm} />}
+                     <Link
+                         onClick={() =>
+diff --git a/apps/web/src/i18n/strings/en_EN.json b/apps/web/src/i18n/strings/en_EN.json
+index ef57823..394b001 100644
+--- a/apps/web/src/i18n/strings/en_EN.json
++++ b/apps/web/src/i18n/strings/en_EN.json
+@@ -2121,6 +2121,7 @@
+         "room_is_low_priority": "This is a low priority room",
+         "search": {
+             "all_rooms_button": "Search all rooms",
++            "back_to_results": "Back to results",
+             "nudge_description": "Enable the in-room search shortcut to search this conversation instead of your browser's find-on-page.",
+             "nudge_title": "Search this room",
+             "placeholder": "Search messages…",
+diff --git a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileDerivedState.ts b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileDerivedState.ts
+index 3291f43..49efd44 100644
+--- a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileDerivedState.ts
++++ b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileDerivedState.ts
+@@ -417,6 +417,8 @@ export interface EventTileClassState {
+     isHighlighted: boolean;
+     /** Whether the tile is selected or has an open context menu. */
+     isSelected: boolean;
++    /** Whether the tile is the search match currently focused while stepping in the live timeline. */
++    isSearchHighlightMatch?: boolean;
+     /** Whether the tile is a continuation of the previous event. */
+     isContinuation?: boolean;
+     /** The Matrix event type for event-type class derivation. */
+@@ -456,6 +458,7 @@ export function getEventTileClassState({
+     isSending,
+     isHighlighted,
+     isSelected,
++    isSearchHighlightMatch,
+     isContinuation,
+     eventType,
+     isCallInvite,
+@@ -482,6 +485,7 @@ export function getEventTileClassState({
+         mx_EventTile_sending: !isEditing && isSending,
+         mx_EventTile_highlight: isHighlighted,
+         mx_EventTile_selected: isSelected,
++        mx_EventTile_searchHighlightActive: isSearchHighlightMatch,
+         mx_EventTile_continuation: isContinuation || isCallInvite || ElementCallEventType.matches(eventType),
+         mx_EventTile_last: isLast,
+         mx_EventTile_lastInSection: isLastInSection,
+diff --git a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.ts b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.ts
+index a1240dc..d94457a 100644
+--- a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.ts
++++ b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.ts
+@@ -104,6 +104,8 @@ export interface EventTileDisplayInput {
+     isHighlighted: boolean;
+     /** Whether the tile is selected or has an open context menu. */
+     isSelected: boolean;
++    /** Whether the tile is the search match currently focused while stepping in the live timeline. */
++    isSearchHighlightMatch?: boolean;
+     /** Whether the tile is the last event in the timeline. */
+     isLast?: boolean;
+     /** Whether the tile is the last event in its section. */
+@@ -621,6 +623,7 @@ export class EventTileViewModel extends BaseViewModel<EventTileRenderState, Even
+             isSending,
+             isHighlighted: display.isHighlighted,
+             isSelected: display.isSelected,
++            isSearchHighlightMatch: display.isSearchHighlightMatch,
+             isContinuation,
+             eventType,
+             isCallInvite,
+diff --git a/apps/web/test/unit-tests/components/structures/MessagePanel-test.tsx b/apps/web/test/unit-tests/components/structures/MessagePanel-test.tsx
+index 81aa8c7..1e8002a 100644
+--- a/apps/web/test/unit-tests/components/structures/MessagePanel-test.tsx
++++ b/apps/web/test/unit-tests/components/structures/MessagePanel-test.tsx
+@@ -876,6 +876,27 @@ describe("MessagePanel", function () {
+ 
+             expect(container.getElementsByClassName("mx_EventTile_searchHighlight").length).toEqual(0);
+         });
++
++        it("marks only the focused match's tile as the active stepping match", () => {
++            const events = mkHighlightEvents();
++            const { container } = render(
++                getComponent({ events, searchHighlightEventId: "$match0", searchHighlights: ["boat"] }),
++                clientAndSDKContextRenderOptions(client, sdkContext),
++            );
++
++            const active = container.getElementsByClassName("mx_EventTile_searchHighlightActive");
++            expect(active.length).toEqual(1);
++        });
++
++        it("marks no tile active when not stepping", () => {
++            const events = mkHighlightEvents();
++            const { container } = render(
++                getComponent({ events }),
++                clientAndSDKContextRenderOptions(client, sdkContext),
++            );
++
++            expect(container.getElementsByClassName("mx_EventTile_searchHighlightActive").length).toEqual(0);
++        });
+     });
+ });
+ 
+diff --git a/apps/web/test/unit-tests/components/structures/RoomView-test.tsx b/apps/web/test/unit-tests/components/structures/RoomView-test.tsx
+index d3ab3d7..a0e876b 100644
+--- a/apps/web/test/unit-tests/components/structures/RoomView-test.tsx
++++ b/apps/web/test/unit-tests/components/structures/RoomView-test.tsx
+@@ -319,7 +319,7 @@ describe("RoomView", () => {
+             // guard — it reads "0 of 2" (and stepping could then reach the predecessor) if the current-room filter
+             // is removed. The predecessor match stays in the full result set (see the extractSearchMatches test)
+             // but is excluded from the "k of N" stepper.
+-            await screen.findByText("0 of 1");
++            await screen.findByText("0 of 1", { exact: false });
+ 
+             // Spy installed before stepping so the negative assertion below is evaluated across the whole flow.
+             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+@@ -379,7 +379,7 @@ describe("RoomView", () => {
+                 }),
+             );
+ 
+-            await screen.findByText("0 of 2");
++            await screen.findByText("0 of 2", { exact: false });
+             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+ 
+             // Step to the older match. The stepper jumps purely by event id: it dispatches ViewRoom with
+@@ -388,9 +388,9 @@ describe("RoomView", () => {
+             // outside the loaded window. This test pins the dispatch contract + session survival only; the actual
+             // back-pagination lives in matrix-js-sdk (and is mocked away here), so it is not asserted.
+             await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $newer (index 0)
+-            await screen.findByText("1 of 2");
++            await screen.findByText("1 of 2", { exact: false });
+             await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $older (index 1)
+-            await screen.findByText("2 of 2");
++            await screen.findByText("2 of 2", { exact: false });
+ 
+             expect(dispatchSpy).toHaveBeenCalledWith(
+                 expect.objectContaining({
+@@ -406,6 +406,63 @@ describe("RoomView", () => {
+             expect(roomViewRef.current!.state.search).toBeDefined();
+             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(1);
+         });
++
++        it("returns from stepping to the results list without tearing down the search session", async () => {
++            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
++
++            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
++            const makeResult = (eventId: string, body: string, ts: number) =>
++                SearchResult.fromJson(
++                    {
++                        rank: 1,
++                        result: {
++                            room_id: room.roomId,
++                            event_id: eventId,
++                            sender: cli.getSafeUserId(),
++                            origin_server_ts: ts,
++                            content: { body, msgtype: "m.text" },
++                            type: EventType.RoomMessage,
++                        },
++                        context: { profile_info: {}, events_before: [], events_after: [] },
++                    },
++                    eventMapper,
++                );
++
++            const roomViewRef = createRef<RoomView>();
++            await mountRoomView(roomViewRef);
++            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
++
++            act(() =>
++                roomViewRef.current!.setState({
++                    timelineRenderingType: TimelineRenderingType.Search,
++                    search: {
++                        searchId: 1,
++                        roomId: room.roomId,
++                        term: "match",
++                        scope: SearchScope.Room,
++                        promise: Promise.resolve({
++                            results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
++                            highlights: [],
++                            count: 2,
++                        }),
++                    },
++                }),
++            );
++
++            await screen.findByText("0 of 2", { exact: false });
++            // Step into the live timeline (Room mode), then return to the results list via the affordance.
++            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
++            await screen.findByText("1 of 2", { exact: false });
++            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
++
++            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
++
++            // Back in Search mode (results list re-renders) with no active match, but the search session — term,
++            // promise, navigation VM — is preserved (distinct from cancelling, which clears `search` entirely).
++            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
++            expect(roomViewRef.current!.state.search).toBeDefined();
++            expect(roomViewRef.current!.state.search!.currentMatchIndex).toBeUndefined();
++        });
+     });
+ 
+     it("gets a room view store from MultiRoomViewStore when given a room ID", async () => {
+@@ -1279,7 +1336,7 @@ describe("RoomView", () => {
+             );
+ 
+             // Once results arrive, the counter + arrows render in the header (browsing, Search render mode).
+-            await screen.findByText("0 of 2");
++            await screen.findByText("0 of 2", { exact: false });
+             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+ 
+             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+@@ -1298,7 +1355,7 @@ describe("RoomView", () => {
+ 
+             // The counter advances, we switch to the live (Room) timeline, and the search session survives the
+             // jump rather than being torn down like a clicked result.
+-            await screen.findByText("1 of 2");
++            await screen.findByText("1 of 2", { exact: false });
+             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+             expect(roomViewRef.current!.state.search).toBeDefined();
+             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(0);
+diff --git a/apps/web/test/unit-tests/components/views/rooms/RoomSearchAuxPanel-test.tsx b/apps/web/test/unit-tests/components/views/rooms/RoomSearchAuxPanel-test.tsx
+index 3d6e4ae..9b3335e 100644
+--- a/apps/web/test/unit-tests/components/views/rooms/RoomSearchAuxPanel-test.tsx
++++ b/apps/web/test/unit-tests/components/views/rooms/RoomSearchAuxPanel-test.tsx
+@@ -37,12 +37,13 @@ describe("RoomSearchAuxPanel", () => {
+             />,
+         );
+ 
+-        expect(screen.getByText("0 of 2")).toBeInTheDocument();
++        // `exact: false` so this stays robust to the shared-components stepper label ("… loaded").
++        expect(screen.getByText("0 of 2", { exact: false })).toBeInTheDocument();
+         expect(screen.getByRole("button", { name: "Next match" })).toBeInTheDocument();
+         expect(screen.getByRole("button", { name: "Previous match" })).toBeInTheDocument();
+     });
+ 
+-    it("should hide the results-count summary while stepping a match (counter is the source of truth)", () => {
++    it("should keep the results-count summary visible while stepping a match (keep both, stepper labelled loaded)", () => {
+         const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+         navigationVm.setMatches([
+             { roomId: "!r:e", eventId: "$a" },
+@@ -67,8 +68,58 @@ describe("RoomSearchAuxPanel", () => {
+             />,
+         );
+ 
+-        expect(screen.queryByText("results found", { exact: false })).not.toBeInTheDocument();
+-        expect(screen.getByText("1 of 2")).toBeInTheDocument();
++        // We now keep BOTH the backend "N results found" summary and the "k of N loaded" stepper visible while
++        // stepping (the stepper's "loaded" label disambiguates the two denominators), instead of hiding the summary.
++        expect(screen.getByText("results found", { exact: false })).toBeInTheDocument();
++        expect(screen.getByText("1 of 2", { exact: false })).toBeInTheDocument();
++    });
++
++    it("shows a back-to-results button while stepping and invokes onBackToResults when clicked", () => {
++        const onBackToResults = jest.fn();
++        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
++        navigationVm.setMatches([{ roomId: "!r:e", eventId: "$a" }]);
++        navigationVm.next(); // step to the first match
++
++        render(
++            <RoomSearchAuxPanel
++                searchInfo={{
++                    searchId: 1234,
++                    count: 1,
++                    term: "abcd",
++                    scope: SearchScope.Room,
++                    promise: new Promise(() => {}),
++                    currentMatchIndex: 0,
++                }}
++                isRoomEncrypted={false}
++                onSearchScopeChange={jest.fn()}
++                onCancelClick={jest.fn()}
++                onBackToResults={onBackToResults}
++                navigationVm={navigationVm}
++            />,
++        );
++
++        screen.getByRole("button", { name: "Back to results" }).click();
++        expect(onBackToResults).toHaveBeenCalled();
++    });
++
++    it("does not show the back-to-results button when not stepping", () => {
++        render(
++            <RoomSearchAuxPanel
++                searchInfo={{
++                    searchId: 1234,
++                    count: 5,
++                    term: "abcd",
++                    scope: SearchScope.Room,
++                    promise: new Promise(() => {}),
++                }}
++                isRoomEncrypted={false}
++                onSearchScopeChange={jest.fn()}
++                onCancelClick={jest.fn()}
++                onBackToResults={jest.fn()}
++            />,
++        );
++
++        expect(screen.queryByRole("button", { name: "Back to results" })).not.toBeInTheDocument();
+     });
+ 
+     it("should not render match navigation when there are no matches", () => {
+diff --git a/packages/shared-components/src/i18n/strings/en_EN.json b/packages/shared-components/src/i18n/strings/en_EN.json
+index 2580d77..07b6d73 100644
+--- a/packages/shared-components/src/i18n/strings/en_EN.json
++++ b/packages/shared-components/src/i18n/strings/en_EN.json
+@@ -81,7 +81,7 @@
+         "jump_to_date_prompt": "Pick a date to jump to",
+         "pinned_message_badge": "Pinned message",
+         "search": {
+-            "match_position": "%(current)s of %(total)s",
++            "match_position": "%(current)s of %(total)s loaded",
+             "next_match": "Next match",
+             "previous_match": "Previous match"
+         },
+diff --git a/packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.test.tsx b/packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.test.tsx
+index fb7bf00..6e51081 100644
+--- a/packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.test.tsx
++++ b/packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.test.tsx
+@@ -39,7 +39,7 @@ describe("SearchMatchNavigation", () => {
+ 
+     it("renders the k-of-N counter and enabled arrows", () => {
+         renderNav({ current: 2, total: 5, canPrevious: true, canNext: true });
+-        expect(screen.getByText("2 of 5")).toBeInTheDocument();
++        expect(screen.getByText("2 of 5 loaded")).toBeInTheDocument();
+         expect(screen.getByRole("button", { name: "Previous match" })).toBeEnabled();
+         expect(screen.getByRole("button", { name: "Next match" })).toBeEnabled();
+     });

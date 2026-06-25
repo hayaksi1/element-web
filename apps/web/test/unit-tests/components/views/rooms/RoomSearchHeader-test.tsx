@@ -78,15 +78,30 @@ describe("RoomSearchHeader", () => {
         jest.restoreAllMocks();
     });
 
-    it("renders a focused search input that reports changes", async () => {
+    it("does not run a search while typing, only committing it on Enter", async () => {
         const onSearchChange = jest.fn();
         renderHeader({ onSearchChange, autoFocus: true });
 
         const input = screen.getByPlaceholderText("Search messages…");
         expect(input).toHaveFocus();
 
-        await userEvent.type(input, "g");
-        expect(onSearchChange).toHaveBeenCalledWith("g");
+        await userEvent.type(input, "gemini");
+        // Typing must not trigger a search (Bug #1: search waits for Enter).
+        expect(onSearchChange).not.toHaveBeenCalled();
+
+        await userEvent.keyboard("{Enter}");
+        expect(onSearchChange).toHaveBeenCalledTimes(1);
+        expect(onSearchChange).toHaveBeenCalledWith("gemini");
+    });
+
+    it("does nothing on Enter when the input is empty", async () => {
+        const onSearchChange = jest.fn();
+        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+        renderHeader({ onSearchChange, autoFocus: true });
+
+        await userEvent.keyboard("{Enter}");
+        expect(onSearchChange).not.toHaveBeenCalled();
+        expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ action: Action.SearchMatchStep }));
     });
 
     it("cancels the search when the cancel button is clicked", async () => {
@@ -105,11 +120,14 @@ describe("RoomSearchHeader", () => {
         expect(onCancel).toHaveBeenCalled();
     });
 
-    it("steps to the next match on Enter and the previous on Shift+Enter", async () => {
+    it("steps matches on Enter/Shift+Enter once the typed term is already searched", async () => {
+        const onSearchChange = jest.fn();
         const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
-        renderHeader({ autoFocus: true });
+        // term="abcd" means the box value (synced from term) matches what was already searched, so Enter steps.
+        renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
 
         await userEvent.keyboard("{Enter}");
+        expect(onSearchChange).not.toHaveBeenCalled();
         expect(dispatchSpy).toHaveBeenCalledWith(
             expect.objectContaining({ action: Action.SearchMatchStep, direction: "next" }),
         );
@@ -119,6 +137,31 @@ describe("RoomSearchHeader", () => {
         expect(dispatchSpy).toHaveBeenCalledWith(
             expect.objectContaining({ action: Action.SearchMatchStep, direction: "previous" }),
         );
+    });
+
+    it("steps (not re-searches) when only surrounding whitespace differs from the searched term", async () => {
+        const onSearchChange = jest.fn();
+        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+        renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
+
+        // Box now holds "abcd " (a trailing space). Trimmed it equals the searched term, so Enter must step, not
+        // fire a redundant search.
+        await userEvent.type(screen.getByPlaceholderText("Search messages…"), " ");
+        await userEvent.keyboard("{Enter}");
+
+        expect(onSearchChange).not.toHaveBeenCalled();
+        expect(dispatchSpy).toHaveBeenCalledWith(
+            expect.objectContaining({ action: Action.SearchMatchStep, direction: "next" }),
+        );
+    });
+
+    it("commits the trimmed term when searching on Enter", async () => {
+        const onSearchChange = jest.fn();
+        renderHeader({ onSearchChange, autoFocus: true });
+
+        await userEvent.type(screen.getByPlaceholderText("Search messages…"), "  gemini  ");
+        await userEvent.keyboard("{Enter}");
+        expect(onSearchChange).toHaveBeenCalledWith("gemini");
     });
 
     it("shows the results-count summary", () => {

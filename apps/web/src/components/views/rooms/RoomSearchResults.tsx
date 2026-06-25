@@ -14,6 +14,9 @@ import BaseAvatar from "../avatars/BaseAvatar";
 import AccessibleButton from "../elements/AccessibleButton";
 import Spinner from "../elements/Spinner";
 
+/** Distance (px) from the bottom of the list at which we start loading the next page (Telegram-style infinite scroll). */
+const LOAD_MORE_THRESHOLD_PX = 80;
+
 interface Props {
     /** Ordered (newest-first) result preview rows; parallel to the live-stepping match list. */
     previews: SearchResultPreview[];
@@ -21,8 +24,12 @@ interface Props {
     inProgress: boolean;
     /** The search error, if the request failed. */
     error?: Error;
+    /** Whether more result pages remain; gates the infinite-scroll "load more" (search Phase 7). */
+    hasMore: boolean;
     /** Jump the live timeline to result row `index` (reuses the {@link SearchMatch} stepping path). */
     onResultClick: (index: number) => void;
+    /** Load the next page of results; called when the list is scrolled near the bottom (search Phase 7). */
+    onLoadMore: () => void;
     /** Resolve a sender's display name for a row (RoomView resolves it against the matched room's members). */
     getSenderName: (preview: SearchResultPreview) => string;
 }
@@ -32,7 +39,25 @@ interface Props {
  * (search Phase 6). Each row shows the sender (avatar + name), the matched message preview and its date; clicking a
  * row jumps the live timeline to that message via the existing match-stepping path.
  */
-const RoomSearchResults: React.FC<Props> = ({ previews, inProgress, error, onResultClick, getSenderName }) => {
+const RoomSearchResults: React.FC<Props> = ({
+    previews,
+    inProgress,
+    error,
+    hasMore,
+    onResultClick,
+    onLoadMore,
+    getSenderName,
+}) => {
+    // Telegram-style infinite scroll: ask the parent to load the next page as the user nears the bottom. Gated on
+    // hasMore (no more pages → nothing to do) and !inProgress (a page is already loading → avoid a duplicate fetch).
+    const onScroll = (e: React.UIEvent<HTMLDivElement>): void => {
+        if (!hasMore || inProgress) return;
+        const el = e.currentTarget;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_MORE_THRESHOLD_PX) {
+            onLoadMore();
+        }
+    };
+
     let body: JSX.Element;
     if (error) {
         body = (
@@ -74,11 +99,21 @@ const RoomSearchResults: React.FC<Props> = ({ previews, inProgress, error, onRes
                         </AccessibleButton>
                     );
                 })}
+                {/* Spinner appended below the loaded rows while the next page is paginating in (search Phase 7). */}
+                {inProgress && (
+                    <div className="mx_RoomSearchResults_loadingMore" role="status">
+                        <Spinner />
+                    </div>
+                )}
             </div>
         );
     }
 
-    return <div className="mx_RoomSearchResults">{body}</div>;
+    return (
+        <div className="mx_RoomSearchResults" onScroll={onScroll}>
+            {body}
+        </div>
+    );
 };
 
 export default RoomSearchResults;

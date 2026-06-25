@@ -1298,6 +1298,11 @@ export interface SearchInfo {
      */
     count?: number;
     /**
+     * Whether more result pages remain to be paginated in (the backend returned a `next_batch` token). Drives the
+     * Telegram-style results dropdown's infinite scroll (search Phase 7).
+     */
+    hasMore?: boolean;
+    /**
      * Ordered list of match locations (display order) used to step through matches in the live timeline.
      */
     matches?: SearchMatch[];

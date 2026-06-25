@@ -43,7 +43,7 @@ import {
 import { KnownMembership } from "matrix-js-sdk/src/types";
 import { logger } from "matrix-js-sdk/src/logger";
 import { type CallState, type MatrixCall } from "matrix-js-sdk/src/webrtc/call";
-import { debounce, throttle } from "lodash";
+import { throttle } from "lodash";
 import { CryptoEvent } from "matrix-js-sdk/src/crypto-api";
 import { type ViewRoomOpts } from "@matrix-org/react-sdk-module-api/lib/lifecycles/RoomViewLifecycle";
 import { type RoomViewProps } from "@element-hq/element-web-module-api";
@@ -469,6 +469,8 @@ function searchInfoFromSession(session: SearchSession): SearchInfo {
         previews: session.previews,
         currentMatchIndex: session.currentMatchIndex,
         highlights: session.highlights,
+        // Carry whether more result pages remain so the dropdown's infinite scroll keeps working after a remount (Phase 7).
+        hasMore: session.hasMore,
         error: session.error,
     };
 }
@@ -491,6 +493,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
     private roomView = createRef<HTMLDivElement>();
     private searchResultsPanel = createRef<ScrollPanel>();
+    // The kept-mounted RoomSearchView (data engine) registers its pagination trigger here, so the visible
+    // Telegram-style results dropdown can load the next page on scroll-to-bottom (search Phase 7).
+    private searchLoadMore: (() => Promise<boolean>) | null = null;
     private messagePanel: TimelinePanel | null = null;
     // Drives the in-timeline "k of N" search match stepper (header arrows). Always present; renders nothing
     // until it has matches.
@@ -1962,18 +1967,26 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // store holds the full, ordered cross-room match list. Stepping through pages beyond the loaded results is
         // still deferred (the stepper covers the loaded result page).
         const canStep = !inProgress && searchResults !== null;
-        const matches = canStep && searchResults ? extractSearchMatches(searchResults) : [];
+        // Fresh derivations are computed only on a settled result set; `undefined` during the in-progress interim so
+        // the values below fall back to the prior ones (no list flash while a "load more" page is loading — Phase 7).
+        const freshMatches = canStep && searchResults ? extractSearchMatches(searchResults) : undefined;
         // Result preview rows for the Telegram-style dropdown (Phase 6), ordered in lockstep with `matches`.
-        const previews = canStep && searchResults ? extractSearchResultPreviews(searchResults) : [];
-        const highlights =
+        const freshPreviews = canStep && searchResults ? extractSearchResultPreviews(searchResults) : undefined;
+        const freshHighlights =
             canStep && searchResults ? extractSearchHighlights(searchResults, this.state.search!.term) : undefined;
+        // More pages exist while the backend hands back a next_batch token; drives the dropdown's infinite scroll
+        // (search Phase 7). Preserve the prior value during the interim so it never momentarily reads "no more".
+        const hasMore = searchResults ? !!searchResults.next_batch : this.state.search?.hasMore;
+        // Preserve the prior backend count (e.g. "54 results found") during the interim so it does not blank out.
+        const count = searchResults?.count ?? this.state.search?.count;
 
         SearchSessionStore.instance.updateResults({
             inProgress,
-            matches: canStep ? matches : undefined,
-            previews: canStep ? previews : undefined,
-            highlights: canStep ? highlights : undefined,
-            count: searchResults?.count,
+            matches: freshMatches,
+            previews: freshPreviews,
+            highlights: freshHighlights,
+            count,
+            hasMore,
             error: error ?? undefined,
         });
 
@@ -1985,13 +1998,17 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 // denominators — do not "fix" one to match the other. The results-list summary shows `count`; the
                 // "k of N" live stepper shows `matches.length` (labelled "loaded"). They can legitimately diverge
                 // (>SEARCH_LIMIT hits; rooms hidden because we lack their state). See slice 5.
-                count: searchResults?.count,
-                matches: canStep ? matches : undefined,
+                count,
+                // Keep the prior matches/previews/highlights during the in-progress interim (e.g. a "load more"
+                // round-trip), so the dropdown keeps showing the already-loaded rows instead of flashing empty.
+                matches: freshMatches ?? this.state.search?.matches,
                 // Result preview rows for the Telegram-style dropdown (Phase 6), parallel to `matches`.
-                previews: canStep ? previews : undefined,
+                previews: freshPreviews ?? this.state.search?.previews,
                 // Terms to highlight in the focused match's live tile while stepping (slice 2). Mirrors the
                 // enrichment the results list applies so the live highlight matches the result-tile highlight.
-                highlights: canStep ? highlights : undefined,
+                highlights: freshHighlights ?? this.state.search?.highlights,
+                // Whether more result pages remain to be paginated into the dropdown (search Phase 7).
+                hasMore,
                 // The stepper cursor is reset whenever the result set changes; keep view-state in sync with the store.
                 currentMatchIndex: undefined,
                 error: error ?? undefined,
@@ -2021,6 +2038,19 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             scroll_into_view: true,
             metricsTrigger: undefined, // we stay within the same search session
         });
+    };
+
+    // Load the next page of results when the Telegram-style dropdown is scrolled to the bottom (search Phase 7). The
+    // kept-mounted RoomSearchView owns the real searchPagination call (registered via onLoadMoreReady); the larger
+    // set flows back through onSearchUpdate, which recomputes previews/matches over the full accumulation. No-op once
+    // there are no more pages (the data engine guards on next_batch).
+    private onSearchLoadMore = (): void => {
+        void this.searchLoadMore?.();
+    };
+
+    // Stable callback so RoomSearchView's registration effect does not re-run every render (search Phase 7).
+    private setSearchLoadMore = (loadMore: (() => Promise<boolean>) | null): void => {
+        this.searchLoadMore = loadMore;
     };
 
     // Click a row in the Telegram-style results dropdown (Phase 6): jump the live timeline to it. Previews are
@@ -2158,9 +2188,11 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         defaultDispatcher.fire(Action.ViewRoomDirectory);
     };
 
-    private onSearchChange = debounce((term: string): void => {
+    // Search runs on Enter (RoomSearchHeader commits the typed term), so there is no keystroke stream to debounce —
+    // run the search immediately.
+    private onSearchChange = (term: string): void => {
         this.onSearch(term);
-    }, 300);
+    };
 
     private onCancelSearchClick = (): Promise<void> => {
         // Cancelling is the only path that ends (and aborts) the search session. It also closes the top-of-chat
@@ -2311,14 +2343,10 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
      * We pass it down to the scroll panel.
      */
     public handleScrollKey = (ev: React.KeyboardEvent | KeyboardEvent): void => {
-        let panel: ScrollPanel | TimelinePanel | undefined;
-        if (this.searchResultsPanel.current) {
-            panel = this.searchResultsPanel.current;
-        } else if (this.messagePanel) {
-            panel = this.messagePanel;
-        }
-
-        panel?.handleScrollKey(ev);
+        // The live timeline owns keyboard scrolling. The search results are now a bounded dropdown overlay (search
+        // Phase 7) and the old full-list RoomSearchView is kept mounted only as a hidden data engine, so PageUp/Down
+        // should drive the visible conversation, not the hidden panel.
+        this.messagePanel?.handleScrollKey(ev);
     };
 
     /**
@@ -2787,7 +2815,6 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // if we have search results, we keep the messagepanel (so that it preserves its
         // scroll state), but hide it.
         let searchResultsPanel;
-        let hideMessagePanel = false;
 
         if (this.state.search && !isSteppingSearchMatch) {
             // RoomSearchView is kept mounted as the data engine — it awaits the search promise, processes results
@@ -2796,26 +2823,34 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             // top of it; a row click jumps the live timeline to that match.
             searchResultsPanel = (
                 <div className="mx_RoomView_searchResultsWrapper">
-                    <RoomSearchView
-                        key={this.state.search.searchId}
-                        ref={this.searchResultsPanel}
-                        term={this.state.search.term}
-                        scope={this.state.search.scope}
-                        promise={this.state.search.promise}
-                        inProgress={!!this.state.search.inProgress}
-                        className={this.messagePanelClassNames}
-                        onUpdate={this.onSearchUpdate}
-                    />
+                    {/* The old results list stays mounted, but visually hidden, purely as the data engine: it awaits
+                        the search promise, enriches results (threads/highlights) and drives onSearchUpdate. It also
+                        owns the real pagination (searchPagination), which we trigger on demand (onLoadMoreReady) when the
+                        visible dropdown is scrolled to the bottom (search Phase 7). */}
+                    <div className="mx_RoomView_searchDataEngine">
+                        <RoomSearchView
+                            key={this.state.search.searchId}
+                            ref={this.searchResultsPanel}
+                            term={this.state.search.term}
+                            scope={this.state.search.scope}
+                            promise={this.state.search.promise}
+                            inProgress={!!this.state.search.inProgress}
+                            className={this.messagePanelClassNames}
+                            onUpdate={this.onSearchUpdate}
+                            onLoadMoreReady={this.setSearchLoadMore}
+                        />
+                    </div>
                     <RoomSearchResults
                         previews={this.state.search.previews ?? []}
                         inProgress={!!this.state.search.inProgress}
                         error={this.state.search.error}
+                        hasMore={!!this.state.search.hasMore}
                         onResultClick={this.onSearchResultClick}
+                        onLoadMore={this.onSearchLoadMore}
                         getSenderName={this.getSearchResultSenderName}
                     />
                 </div>
             );
-            hideMessagePanel = true;
         }
 
         let highlightedEventId: string | undefined;
@@ -2846,7 +2881,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                             !this.state.wasContextSwitch && this.props.enableReadReceiptsAndMarkersOnActivity
                         }
                         manageReadMarkers={!this.state.isPeeking}
-                        hidden={hideMessagePanel}
+                        // Keep the live conversation visible behind the Telegram-style search dropdown (search Phase 7);
+                        // the dropdown is a bounded overlay, not a full-screen takeover.
+                        hidden={false}
                         highlightedEventId={highlightedEventId}
                         searchHighlights={searchHighlights}
                         searchHighlightEventId={searchHighlightEventId}
