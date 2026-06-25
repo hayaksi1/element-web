@@ -1,5 +1,63 @@
 # Activity Log
 
+## 2026-06-25 (session 24) — Search Phase 3 slice 1: jump-to-date in the search header (MSC3030) + desktop default-on
+
+Directive: "continue the task, read memorybank." Phase 2 (slices 1–6) confirmed complete & pushed (`origin/main` =
+`6ef35f8`; the earlier "ahead 1" was a stale tracking ref). **User decisions (AskUserQuestion):** Phase 3 = **jump-to-date
+first** (slice 1); `from:` backend = client-side post-filter (slice 2); slice-1 shape = **search-bar control + flip
+`feature_jump_to_date` desktop-default-on**; placement = **search bar header beside the input**.
+
+### Plan correction (Understand workflow, 6 agents → verified by hand)
+`search-improvement-plan.md` was **wrong** that "jump-to-date is unused / MSC3030 unwired." A complete jump-to-date
+ALREADY EXISTS: `DateSeparatorViewModel.pickDate` → `client.timestampToEvent(roomId, ts, Direction.Forward)` →
+`dispatch(ViewRoom{event_id,highlighted})`, surfaced on timeline date separators + `/jumptodate`, gated by labs flag
+`feature_jump_to_date` (default off) + `ServerSupportUnstableFeatureController` (MSC3030). So slice 1 = **surface it in
+search + enable on desktop**, not a from-scratch build (mirrors Phase 1's hidden-feature fix). Full design in
+**`memorybank/search-phase3-plan.md`**.
+
+### Shipped (TDD RED→GREEN per task)
+- **A — settings flip.** `feature_jump_to_date` default `false` → `!!IS_ELECTRON` ([Settings.tsx:559]). Controller
+  unchanged → desktop-on **iff** server supports MSC3030; web + unsupporting servers stay off. Tests: Electron/web
+  default + a controller-instance lock (review finding).
+- **B — extract `jumpToDateInRoom`.** New `apps/web/src/utils/jumpToDate.tsx` = the verbatim `pickDate` body
+  (timestampToEvent + room-switch guard + ViewRoom + error dialogs + bug-report). `DateSeparatorViewModel.pickDate`
+  now delegates; `onBugReport` + the jump-only imports removed (existing 36 DateSeparator tests stay green = regression
+  proof). +9 util tests.
+- **C — search-header control.** New `apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx`: a calendar
+  `IconButton` + the **reused** shared `DateSeparatorContextMenuView` (newly exported from the shared barrel), driven by
+  a per-room `DateSeparatorViewModel` (`useCreateAutoDisposedViewModel`), rendered only when `jumpToEnabled`. Mounted in
+  `RoomSummaryCardView` header beside `<Search>` (Flex + flex-1 Box; `.mx_RoomSummaryCard_searchInput{min-width:0}`),
+  **keyed by `room.roomId`** so the VM tracks the room. New i18n `room|search|jump_to_date_button`. +4 component +2
+  mounting tests.
+
+### Crux (verified, no extra wiring)
+A date pick dispatches a **plain** `Action.ViewRoom`+`event_id` (NOT a stepping jump). RoomView's slice-6 clear gate
+([RoomView.tsx:840-848]) turns a non-stepping focused-event during Search into "end search → Room mode → live timeline
+at that event" — so jump-to-date works identically whether or not a text search is active. Zero search-exit wiring.
+
+### Adversarial review (5-lens workflow → per-finding Opus verify; 13 agents)
+8 findings → **3 confirmed (all low, all test-quality — no runtime bugs), 5 refuted.** refactor-parity returned EMPTY
+(extraction is behaviourally exact). Applied all 3: (1) assert the setting keeps its MSC3030 controller; (2) cover the
+non-NOT_FOUND `MatrixError` + `HTTPError` error branches; (3) a keyed-remount test proving a room switch rebinds the VM.
+Refuted (correctly): "re-pick same date = no-op" (resetJumpToEvent flips `scroll_into_view`→false so a re-pick re-fires);
+frozen `ts`/Date.now() (cosmetic); lifecycle untested (covered at the hook level); date-separators-now-interactive
+(intended + MSC3030-gated, has tests); `highlighted:true` not asserted (gate keys on event_id, structurally guaranteed).
+
+### Verification (all green)
+Affected web Jest: featureJumpToDateDefault 3, jumpToDate 9, DateSeparatorViewModel 36, RoomSearchJumpToDate 4,
+RoomSummaryCardView 25, RightPanel 22 — all pass. shared-components vitest logic 15/15 (the 5 `DateSeparatorView.stories`
+**visual** pixel-snapshots fail identically with my change stashed → pre-existing env flakes, unrelated). `tsc` only the
+4 vendored matrix-js-sdk errors; eslint `--max-warnings 0` + prettier + i18n clean. Jest via `scratchpad/webjest.sh`.
+**Local-only gotcha:** `DateSeparatorContextMenuView` is consumed from the shared-components **dist**, so a
+`pnpm -C packages/shared-components run build` was needed to test locally; dist is gitignored (CI rebuilds), so the commit
+carries only the src barrel export. **Not verifiable here:** real MSC3030 server round-trip on a live desktop build.
+
+### WHERE I LEFT OFF — Phase 3 slice 2 next
+- **Slice 2 — `from:`/sender filter** (Compound chip/member-picker in the search header; homeserver `IRoomEventFilter.senders`
+  + Seshat client-side post-filter w/ over-fetch — decision locked). Then jump-to-date polish if wanted → Phase 4 media
+  tabs → Phase 5 reach/ranking. PostHog metric for the search calendar still deferred (analytics-events schema gap).
+- Slice 1 committed this session; **push pending user OK** (per recent convention).
+
 ## 2026-06-25 (session 23) — Search Phase 2 slice 6: cross-room/all-rooms/predecessor stepping via a SearchSessionStore (+ stale-initialEventId fix)
 
 Directive: "continue the task, read memorybank." Slices 1–5 committed (HEAD `d1998d7`, working tree clean — the

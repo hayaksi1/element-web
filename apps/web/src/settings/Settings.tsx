@@ -553,7 +553,10 @@ export const SETTINGS: Settings = {
         displayName: _td("labs|jump_to_date"),
         supportedLevels: LEVELS_DEVICE_ONLY_SETTINGS_WITH_CONFIG_PRIORITISED,
         supportedLevelsAreOrdered: true,
-        default: false,
+        // Default jump-to-date on for the desktop app (matching the in-room search ⌘F gate), so the search-header
+        // calendar and timeline date separators "just work" like Telegram. Web stays opt-in. The controller below
+        // still forces this off when the homeserver lacks MSC3030, so a non-supporting server never shows broken UI.
+        default: !!IS_ELECTRON,
         controller: new ServerSupportUnstableFeatureController(
             "feature_jump_to_date",
             defaultWatchManager,

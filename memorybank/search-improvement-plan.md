@@ -134,6 +134,10 @@ Goal: the defining Telegram behavior — step through matches **in the live conv
   arbitrary historical matches needs contextual loading + Seshat-result→live-event mapping for encrypted rooms.
 
 ### Phase 3 — Structured filters: `from:` sender + jump-to-date *(Medium-Large, ~2-3 wks, MEDIUM risk)*
+> **Correction (session 24, slice 1 DONE):** the §4/§5 claim that jump-to-date is "None in search / MSC3030 unused" is
+> **wrong** — a full jump-to-date already exists (`DateSeparatorViewModel` + `timestampToEvent`, behind labs flag
+> `feature_jump_to_date`). Slice 1 surfaced it in the search header + flipped the flag desktop-default-on. `from:`/sender
+> is now slice 2. See `search-phase3-plan.md`.
 - Filter UI: **Compound filter chips** in the search header (preferred over a `from:@user before:…` DSL, which collides
   with literal `:` text — already a Seshat hazard handled by `hardenSeshatSearchTerm`).
 - Homeserver leg: set `senders` on `IRoomEventFilter` (already supported by Matrix `/search`).
