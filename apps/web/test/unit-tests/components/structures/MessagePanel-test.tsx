@@ -876,6 +876,29 @@ describe("MessagePanel", function () {
 
             expect(container.getElementsByClassName("mx_EventTile_searchHighlight").length).toEqual(0);
         });
+
+        it("marks only the focused match's tile as the active stepping match", () => {
+            const events = mkHighlightEvents();
+            // No searchHighlights here: the active-tile class depends solely on searchHighlightEventId, so this
+            // proves the tile-level mark is decoupled from the inner per-term highlight.
+            const { container } = render(
+                getComponent({ events, searchHighlightEventId: "$match0" }),
+                clientAndSDKContextRenderOptions(client, sdkContext),
+            );
+
+            const active = container.getElementsByClassName("mx_EventTile_searchHighlightActive");
+            expect(active.length).toEqual(1);
+        });
+
+        it("marks no tile active when not stepping", () => {
+            const events = mkHighlightEvents();
+            const { container } = render(
+                getComponent({ events }),
+                clientAndSDKContextRenderOptions(client, sdkContext),
+            );
+
+            expect(container.getElementsByClassName("mx_EventTile_searchHighlightActive").length).toEqual(0);
+        });
     });
 });
 

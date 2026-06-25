@@ -39,7 +39,7 @@ describe("SearchMatchNavigation", () => {
 
     it("renders the k-of-N counter and enabled arrows", () => {
         renderNav({ current: 2, total: 5, canPrevious: true, canNext: true });
-        expect(screen.getByText("2 of 5")).toBeInTheDocument();
+        expect(screen.getByText("2 of 5 loaded")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Previous match" })).toBeEnabled();
         expect(screen.getByRole("button", { name: "Next match" })).toBeEnabled();
     });

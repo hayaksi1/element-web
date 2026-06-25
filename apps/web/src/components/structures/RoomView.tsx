@@ -2049,6 +2049,27 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         });
     };
 
+    private onBackToSearchResults = (): void => {
+        // Return from live-timeline match stepping to the results list while keeping the search session alive
+        // (term, promise, matches) — unlike onCancelSearchClick, `search` is preserved. Flipping currentMatchIndex
+        // back to undefined makes the body re-render RoomSearchView instead of the live timeline.
+        //
+        // setMatches resets the stepper cursor for the synchronous frame (counter -> "0 of N loaded"); leaving Search
+        // mode remounts RoomSearchView, whose onSearchUpdate then re-derives the same matches, so this is belt-and-braces.
+        //
+        // Known limitation (deferred to Slice 6 / SearchSessionStore): this leaves the RoomViewStore's initial event
+        // id pointing at the last-stepped match, and `getInitialEventId() ?? this.state.initialEventId`
+        // (onRoomViewStoreUpdate) keeps it sticky — so clicking that SAME result again is a no-op (the result-click
+        // clear gate keys on an initialEventId *change*). Clearing it here is unsafe: the store still holds it, so the
+        // next store update would trip the gate and tear the search down. The correct fix is the result-click-gate
+        // rework Slice 6 performs when it lifts the search session out of this component.
+        this.searchNavVm.setMatches(this.state.search?.matches ?? []);
+        this.setState((state) => ({
+            timelineRenderingType: TimelineRenderingType.Search,
+            search: state.search ? { ...state.search, currentMatchIndex: undefined } : undefined,
+        }));
+    };
+
     // jump down to the bottom of this room, where new events are arriving
     private jumpToLiveTimeline = (): void => {
         if (this.state.initialEventId && this.state.isInitialEventHighlighted) {
@@ -2532,6 +2553,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                         searchInfo={this.state.search}
                         navigationVm={this.searchNavVm}
                         onCancelClick={this.onCancelSearchClick}
+                        onBackToResults={this.onBackToSearchResults}
                         onSearchScopeChange={this.onSearchScopeChange}
                         isRoomEncrypted={isRoomEncrypted}
                     />

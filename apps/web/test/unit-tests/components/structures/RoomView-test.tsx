@@ -319,7 +319,7 @@ describe("RoomView", () => {
             // guard — it reads "0 of 2" (and stepping could then reach the predecessor) if the current-room filter
             // is removed. The predecessor match stays in the full result set (see the extractSearchMatches test)
             // but is excluded from the "k of N" stepper.
-            await screen.findByText("0 of 1");
+            await screen.findByText("0 of 1", { exact: false });
 
             // Spy installed before stepping so the negative assertion below is evaluated across the whole flow.
             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
@@ -379,7 +379,7 @@ describe("RoomView", () => {
                 }),
             );
 
-            await screen.findByText("0 of 2");
+            await screen.findByText("0 of 2", { exact: false });
             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
 
             // Step to the older match. The stepper jumps purely by event id: it dispatches ViewRoom with
@@ -388,9 +388,9 @@ describe("RoomView", () => {
             // outside the loaded window. This test pins the dispatch contract + session survival only; the actual
             // back-pagination lives in matrix-js-sdk (and is mocked away here), so it is not asserted.
             await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $newer (index 0)
-            await screen.findByText("1 of 2");
+            await screen.findByText("1 of 2", { exact: false });
             await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $older (index 1)
-            await screen.findByText("2 of 2");
+            await screen.findByText("2 of 2", { exact: false });
 
             expect(dispatchSpy).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -405,6 +405,65 @@ describe("RoomView", () => {
             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
             expect(roomViewRef.current!.state.search).toBeDefined();
             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(1);
+        });
+
+        it("returns from stepping to the results list without tearing down the search session", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            act(() =>
+                roomViewRef.current!.setState({
+                    timelineRenderingType: TimelineRenderingType.Search,
+                    search: {
+                        searchId: 1,
+                        roomId: room.roomId,
+                        term: "match",
+                        scope: SearchScope.Room,
+                        promise: Promise.resolve({
+                            results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                            highlights: [],
+                            count: 2,
+                        }),
+                    },
+                }),
+            );
+
+            await screen.findByText("0 of 2", { exact: false });
+            // Step into the live timeline (Room mode), then return to the results list via the affordance.
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await screen.findByText("1 of 2", { exact: false });
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+
+            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
+
+            // The stepper cursor is reset, so the "k of N loaded" counter reads "0 of N" again.
+            await screen.findByText("0 of 2", { exact: false });
+            // Back in Search mode (results list re-renders) with no active match, but the search session — term,
+            // promise, navigation VM — is preserved (distinct from cancelling, which clears `search` entirely).
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(roomViewRef.current!.state.search!.currentMatchIndex).toBeUndefined();
         });
     });
 
@@ -1279,7 +1338,7 @@ describe("RoomView", () => {
             );
 
             // Once results arrive, the counter + arrows render in the header (browsing, Search render mode).
-            await screen.findByText("0 of 2");
+            await screen.findByText("0 of 2", { exact: false });
             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
 
             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
@@ -1298,7 +1357,7 @@ describe("RoomView", () => {
 
             // The counter advances, we switch to the live (Room) timeline, and the search session survives the
             // jump rather than being torn down like a clicked result.
-            await screen.findByText("1 of 2");
+            await screen.findByText("1 of 2", { exact: false });
             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
             expect(roomViewRef.current!.state.search).toBeDefined();
             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(0);
