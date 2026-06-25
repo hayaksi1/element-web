@@ -28,6 +28,13 @@ import SettingsStore from "./settings/SettingsStore";
 
 const SEARCH_LIMIT = 10;
 
+// When a `from:`/sender filter is active the Seshat (local) leg cannot filter by sender at query time
+// (its ISearchArgs has no sender field), so we post-filter the returned page client-side. A page of only
+// SEARCH_LIMIT raw results could shrink to zero after dropping other senders, so we over-fetch from Seshat
+// to give the post-filter enough candidates to still fill a page (search Phase 3 slice 2). The homeserver
+// leg filters natively via IRoomEventFilter.senders and needs no over-fetch.
+const SESHAT_SENDER_OVERFETCH_LIMIT = SEARCH_LIMIT * 5;
+
 // A room-upgrade predecessor chain is normally 1-2 rooms; cap traversal so a
 // malformed/cyclic predecessor graph can never spin (#32258).
 const MAX_PREDECESSOR_CHAIN = 20;
@@ -141,6 +148,20 @@ function sanitizeSeshatResults(localResult: IResultRoomEvents): void {
 }
 
 /**
+ * Drop Seshat results whose matched event was not sent by one of the selected senders, in place.
+ *
+ * The homeserver `/search` leg filters by sender natively (IRoomEventFilter.senders); the local Seshat
+ * leg cannot, so we filter the raw response client-side before it is merged/paginated. Filtering at the
+ * raw `IResultRoomEvents` level (matching `result.result.sender`, a full MXID) keeps the count/merge math
+ * in one place and composes with `sanitizeSeshatResults`. A no-op when `senders` is empty.
+ */
+function filterSeshatResultsBySender(localResult: IResultRoomEvents | undefined, senders?: string[]): void {
+    if (!localResult?.results || !senders || senders.length === 0) return;
+    const allowed = new Set(senders);
+    localResult.results = localResult.results.filter((r) => allowed.has(r.result.sender));
+}
+
+/**
  * Build the room-id search chain for a single-room search: the room itself
  * followed by its room-upgrade predecessors (#32258). Seshat indexes per
  * room_id and an upgraded room's new id differs from the old one, so without
@@ -168,6 +189,7 @@ async function serverSideSearch(
     term: string,
     roomIds?: string[],
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<{ response: ISearchResponse; query: ISearchRequestBody }> {
     const filter: IRoomEventFilter = {
         limit: SEARCH_LIMIT,
@@ -176,6 +198,12 @@ async function serverSideSearch(
     // Scope to the given rooms (a single room, or — for an upgraded room — the
     // room plus its predecessor chain so pre-upgrade history is searched, #32258).
     if (roomIds && roomIds.length > 0) filter.rooms = roomIds;
+
+    // Scope to the given senders (the `from:` filter, search Phase 3 slice 2). The homeserver applies
+    // this natively; it is independent of `rooms`, so an all-rooms search narrows by sender alone. The
+    // filter rides inside `body` below, which is stored as `_query` and replayed on every paginated
+    // request, so server-side pagination keeps the sender scope with no extra work.
+    if (senders && senders.length > 0) filter.senders = senders;
 
     const body: ISearchRequestBody = {
         search_categories: {
@@ -202,8 +230,9 @@ async function serverSideSearchProcess(
     term: string,
     roomIds?: string[],
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISearchResults> {
-    const result = await serverSideSearch(client, term, roomIds, abortSignal);
+    const result = await serverSideSearch(client, term, roomIds, abortSignal, senders);
 
     // The js-sdk method backPaginateRoomEventsSearch() uses _query internally
     // so we're reusing the concept here since we want to delegate the
@@ -232,6 +261,7 @@ async function combinedSearch(
     client: MatrixClient,
     searchTerm: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISearchResults> {
     // Run the server-side and the local (Seshat) search concurrently, but
     // tolerate one leg failing: Seshat rejects some queries the homeserver
@@ -240,8 +270,8 @@ async function combinedSearch(
     // entire "All Rooms" search whenever either leg threw; degrade to the
     // surviving leg's results instead, and only fail if BOTH legs fail.
     const [serverSettled, localSettled] = await Promise.allSettled([
-        serverSideSearch(client, searchTerm, undefined, abortSignal),
-        localSearch(searchTerm),
+        serverSideSearch(client, searchTerm, undefined, abortSignal, senders),
+        localSearch(searchTerm, undefined, senders),
     ]);
 
     if (serverSettled.status === "rejected" && localSettled.status === "rejected") {
@@ -294,6 +324,12 @@ async function combinedSearch(
         oldestEventFrom: "server",
         results: [],
         highlights: [],
+        // Remember the sender filter so combinedPagination can re-apply the post-filter to later Seshat
+        // pages (the server leg keeps it via the stored _query). The Seshat leg over-fetches, so with a
+        // sender filter a degraded (server-failed) combined search may push overflow into cachedEvents
+        // that the single-leg local paginator does not drain — accepted as a v1 limitation, matching the
+        // existing degradation note above.
+        senderFilter: senders,
     };
 
     // Combine our results (combineResponses tolerates either source being undefined,
@@ -315,12 +351,15 @@ async function combinedSearch(
     return result;
 }
 
-function buildSeshatSearchArgs(searchTerm: string, roomId?: string): ISearchArgs {
+function buildSeshatSearchArgs(searchTerm: string, roomId?: string, senders?: string[]): ISearchArgs {
+    const hasSenderFilter = !!senders && senders.length > 0;
     return {
         search_term: hardenSeshatSearchTerm(searchTerm),
         before_limit: 1,
         after_limit: 1,
-        limit: SEARCH_LIMIT,
+        // Over-fetch when a sender filter is active so the client-side post-filter still has enough
+        // candidates to fill a page (search Phase 3 slice 2). Seshat has no native sender filter.
+        limit: hasSenderFilter ? SESHAT_SENDER_OVERFETCH_LIMIT : SEARCH_LIMIT,
         order_by_recency: true,
         room_id: roomId,
     };
@@ -329,11 +368,11 @@ function buildSeshatSearchArgs(searchTerm: string, roomId?: string): ISearchArgs
 async function localSearch(
     searchTerm: string,
     roomId?: string,
-    processResult = true,
+    senders?: string[],
 ): Promise<{ response: IResultRoomEvents; query: ISearchArgs }> {
     const eventIndex = EventIndexPeg.get();
 
-    const searchArgs = buildSeshatSearchArgs(searchTerm, roomId);
+    const searchArgs = buildSeshatSearchArgs(searchTerm, roomId, senders);
 
     const localResult = await eventIndex!.search(searchArgs);
     if (!localResult) {
@@ -343,6 +382,9 @@ async function localSearch(
     // Strip Seshat's spurious `state_key: null` (which makes the SDK treat non-state events as
     // state events) and promote edited messages so they render in results (#32356).
     sanitizeSeshatResults(localResult);
+
+    // Apply the `from:`/sender filter Seshat cannot do at query time (search Phase 3 slice 2).
+    filterSeshatResultsBySender(localResult, senders);
 
     searchArgs.next_batch = localResult.next_batch;
 
@@ -363,6 +405,10 @@ export interface ISeshatSearchResults extends ISearchResults {
     // chain locally (#32258). Each entry carries its own room_id + next_batch so the
     // chain can be paginated independently.
     seshatChainQueries?: ISearchArgs[];
+    // The active `from:`/sender filter (full MXIDs), carried so each Seshat pagination page can re-apply
+    // the client-side post-filter Seshat cannot do at query time (search Phase 3 slice 2). The homeserver
+    // leg keeps the filter via the stored `_query` body and needs no carry here.
+    senderFilter?: string[];
 }
 
 // Sentinel next_batch token marking a local multi-room (predecessor-chain) search that
@@ -373,15 +419,17 @@ async function localSearchProcess(
     client: MatrixClient,
     searchTerm: string,
     roomId?: string,
+    senders?: string[],
 ): Promise<ISeshatSearchResults> {
     const emptyResult = {
         results: [],
         highlights: [],
+        senderFilter: senders,
     } as ISeshatSearchResults;
 
     if (searchTerm === "") return emptyResult;
 
-    const result = await localSearch(searchTerm, roomId);
+    const result = await localSearch(searchTerm, roomId, senders);
 
     emptyResult.seshatQuery = result.query;
 
@@ -412,6 +460,10 @@ async function localPagination(
     if (!localResult) {
         throw new Error("Local search pagination failed");
     }
+
+    // Re-apply the `from:`/sender post-filter to this page (search Phase 3 slice 2); the over-fetch limit
+    // is already baked into the stored seshatQuery.
+    filterSeshatResultsBySender(localResult, searchResult.senderFilter);
 
     searchResult.seshatQuery.next_batch = localResult.next_batch;
 
@@ -458,6 +510,7 @@ function mergeChainResults(
  */
 async function fetchChainRoomPage(
     query: ISearchArgs,
+    senders?: string[],
 ): Promise<{ results: ISearchResult[]; count: number; highlights: string[] }> {
     const eventIndex = EventIndexPeg.get();
     const localResult = await eventIndex!.search(query);
@@ -466,6 +519,8 @@ async function fetchChainRoomPage(
         return { results: [], count: 0, highlights: [] };
     }
     sanitizeSeshatResults(localResult);
+    // Apply the `from:`/sender post-filter to this chain room's page (search Phase 3 slice 2).
+    filterSeshatResultsBySender(localResult, senders);
     query.next_batch = localResult.next_batch;
     return {
         results: localResult.results ?? [],
@@ -492,21 +547,23 @@ async function chainSearchProcess(
     seshatRoomIds: string[],
     serverRoomIds: string[],
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISeshatSearchResults> {
     const result: ISeshatSearchResults = {
         results: [],
         highlights: [],
         cachedEvents: [],
         seshatChainQueries: [],
+        senderFilter: senders,
     };
 
     if (searchTerm === "") return result;
 
-    const queries = seshatRoomIds.map((id) => buildSeshatSearchArgs(searchTerm, id));
+    const queries = seshatRoomIds.map((id) => buildSeshatSearchArgs(searchTerm, id, senders));
     const [pages, server] = await Promise.all([
-        Promise.all(queries.map(fetchChainRoomPage)),
+        Promise.all(queries.map((q) => fetchChainRoomPage(q, senders))),
         serverRoomIds.length > 0
-            ? serverSideSearch(client, searchTerm, serverRoomIds, abortSignal)
+            ? serverSideSearch(client, searchTerm, serverRoomIds, abortSignal, senders)
             : Promise.resolve(undefined),
     ]);
 
@@ -562,7 +619,9 @@ async function chainSearchPagination(
     const [pages, server] = await Promise.all([
         Promise.all(
             queries.map((q) =>
-                q.next_batch ? fetchChainRoomPage(q) : Promise.resolve({ results: [], count: 0, highlights: [] }),
+                q.next_batch
+                    ? fetchChainRoomPage(q, searchResult.senderFilter)
+                    : Promise.resolve({ results: [], count: 0, highlights: [] }),
             ),
         ),
         searchResult._query && searchResult.serverSideNextBatch
@@ -907,6 +966,9 @@ async function combinedPagination(
     // the local indexes turn or the server has exhausted its results.
     if (searchArgs?.next_batch && (!searchResult.serverSideNextBatch || oldestEventFrom === "server")) {
         localResult = await eventIndex!.search(searchArgs);
+        // Re-apply the `from:`/sender post-filter to this Seshat page (search Phase 3 slice 2); the server
+        // leg keeps the filter natively via the stored _query body.
+        filterSeshatResultsBySender(localResult, searchResult.senderFilter);
     }
 
     // Fetch events from the server if we have a token for it and if it's the
@@ -947,6 +1009,7 @@ async function eventIndexSearch(
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISearchResults> {
     let searchPromise: Promise<ISearchResults>;
 
@@ -971,19 +1034,19 @@ async function eventIndexSearch(
 
         if (seshatRoomIds.length === 0) {
             // Entirely (known) non-encrypted chain: server-side search scoped to the chain.
-            searchPromise = serverSideSearchProcess(client, term, roomIds, abortSignal);
+            searchPromise = serverSideSearchProcess(client, term, roomIds, abortSignal, senders);
         } else if (seshatRoomIds.length === 1 && serverRoomIds.length === 0) {
             // Single encrypted room, no predecessors — the common case.
-            searchPromise = localSearchProcess(client, term, seshatRoomIds[0]);
+            searchPromise = localSearchProcess(client, term, seshatRoomIds[0], senders);
         } else {
             // Multi-room chain (encrypted predecessors and/or known non-encrypted ones):
             // Seshat for the local rooms, homeserver for the known non-encrypted ones, merged.
-            searchPromise = chainSearchProcess(client, term, seshatRoomIds, serverRoomIds, abortSignal);
+            searchPromise = chainSearchProcess(client, term, seshatRoomIds, serverRoomIds, abortSignal, senders);
         }
     } else {
         // Search across all rooms, combine a server side search and a
         // local search.
-        searchPromise = combinedSearch(client, term, abortSignal);
+        searchPromise = combinedSearch(client, term, abortSignal, senders);
     }
 
     return searchPromise;
@@ -1039,15 +1102,16 @@ export default function eventSearch(
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISearchResults> {
     const eventIndex = EventIndexPeg.get();
 
     if (eventIndex === null) {
         // No local index: search the room plus its predecessor chain server-side (#32258).
         const roomIds = roomId !== undefined ? getRoomSearchChain(client, roomId) : undefined;
-        return serverSideSearchProcess(client, term, roomIds, abortSignal);
+        return serverSideSearchProcess(client, term, roomIds, abortSignal, senders);
     } else {
-        return eventIndexSearch(client, term, roomId, abortSignal);
+        return eventIndexSearch(client, term, roomId, abortSignal, senders);
     }
 }
 
@@ -1136,6 +1200,11 @@ export interface SearchInfo {
      * The scope of the search.
      */
     scope: SearchScope;
+    /**
+     * The active `from:`/sender filter (full MXIDs), or undefined/empty for no sender filter (search Phase 3
+     * slice 2). Mirrors {@link SearchSessionParams.senders} into the per-room-view render state.
+     */
+    senders?: string[];
     /**
      * The promise for the search results.
      */

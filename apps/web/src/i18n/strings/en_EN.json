@@ -2126,6 +2126,10 @@
             "nudge_description": "Enable the in-room search shortcut to search this conversation instead of your browser's find-on-page.",
             "nudge_title": "Search this room",
             "placeholder": "Search messages…",
+            "sender_filter_button": "Filter by sender",
+            "sender_filter_button_active": "Filter by sender (%(count)s selected)",
+            "sender_filter_clear": "Clear sender filter",
+            "sender_filter_label": "Messages from",
             "summary": {
                 "one": "1 result found for “<query/>”",
                 "other": "%(count)s results found for “<query/>”"

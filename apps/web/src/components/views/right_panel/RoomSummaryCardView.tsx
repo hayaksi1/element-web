@@ -51,14 +51,17 @@ import { useRoomSummaryCardViewModel } from "../../viewmodels/right_panel/RoomSu
 import { useRoomTopicViewModel } from "../../viewmodels/right_panel/RoomSummaryCardTopicViewModel.tsx";
 import { useRoomName } from "../../../hooks/useRoomName.ts";
 import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate.tsx";
+import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter.tsx";
 
 interface IProps {
     room: Room;
     permalinkCreator: RoomPermalinkCreator;
     onSearchChange?: (term: string) => void;
     onSearchCancel?: () => void;
+    onSearchSendersChange?: (senders: string[]) => void;
     focusRoomSearch?: boolean;
     searchTerm?: string;
+    searchSenders?: string[];
 }
 
 const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null => {
@@ -128,8 +131,10 @@ const RoomSummaryCardView: React.FC<IProps> = ({
     permalinkCreator,
     onSearchChange,
     onSearchCancel,
+    onSearchSendersChange,
     focusRoomSearch,
     searchTerm = "",
+    searchSenders = [],
 }) => {
     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
     // XXX: this name should be part of the view model
@@ -224,6 +229,15 @@ const RoomSummaryCardView: React.FC<IProps> = ({
                         onKeyDown={vm.onUpdateSearchInput}
                     />
                 </Box>
+                {/* Telegram-style "from:"/sender filter; renders only when the room has other members to filter by. */}
+                {onSearchSendersChange && (
+                    <RoomSearchSenderFilter
+                        key={room.roomId}
+                        room={room}
+                        senders={searchSenders}
+                        onSearchSendersChange={onSearchSendersChange}
+                    />
+                )}
                 {/* Telegram-style "jump to date" calendar; renders only when jump-to-date is enabled (MSC3030). */}
                 <RoomSearchJumpToDate key={room.roomId} roomId={room.roomId} />
             </Flex>
