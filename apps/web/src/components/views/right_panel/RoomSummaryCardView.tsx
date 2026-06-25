@@ -38,7 +38,7 @@ import PublicIcon from "@vector-im/compound-design-tokens/assets/web/icons/publi
 import ErrorIcon from "@vector-im/compound-design-tokens/assets/web/icons/error";
 import ErrorSolidIcon from "@vector-im/compound-design-tokens/assets/web/icons/error-solid";
 import ChevronDownIcon from "@vector-im/compound-design-tokens/assets/web/icons/chevron-down";
-import { JoinRule, type Room } from "matrix-js-sdk/src/matrix";
+import { JoinRule, type Room, SearchOrderBy } from "matrix-js-sdk/src/matrix";
 import { Box, Flex, HistoryVisibilityBadge, LinkedText } from "@element-hq/web-shared-components";
 
 import BaseCard from "./BaseCard.tsx";
@@ -52,6 +52,7 @@ import { useRoomTopicViewModel } from "../../viewmodels/right_panel/RoomSummaryC
 import { useRoomName } from "../../../hooks/useRoomName.ts";
 import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate.tsx";
 import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter.tsx";
+import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle.tsx";
 
 interface IProps {
     room: Room;
@@ -59,9 +60,11 @@ interface IProps {
     onSearchChange?: (term: string) => void;
     onSearchCancel?: () => void;
     onSearchSendersChange?: (senders: string[]) => void;
+    onSearchOrderChange?: (order: SearchOrderBy) => void;
     focusRoomSearch?: boolean;
     searchTerm?: string;
     searchSenders?: string[];
+    searchOrder?: SearchOrderBy;
 }
 
 const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null => {
@@ -132,9 +135,11 @@ const RoomSummaryCardView: React.FC<IProps> = ({
     onSearchChange,
     onSearchCancel,
     onSearchSendersChange,
+    onSearchOrderChange,
     focusRoomSearch,
     searchTerm = "",
     searchSenders = [],
+    searchOrder = SearchOrderBy.Recent,
 }) => {
     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
     // XXX: this name should be part of the view model
@@ -240,6 +245,14 @@ const RoomSummaryCardView: React.FC<IProps> = ({
                 )}
                 {/* Telegram-style "jump to date" calendar; renders only when jump-to-date is enabled (MSC3030). */}
                 <RoomSearchJumpToDate key={room.roomId} roomId={room.roomId} />
+                {/* Recent/Relevant result-order toggle (search Phase 5 slice 1). */}
+                {onSearchOrderChange && (
+                    <RoomSearchOrderToggle
+                        key={room.roomId}
+                        order={searchOrder}
+                        onSearchOrderChange={onSearchOrderChange}
+                    />
+                )}
             </Flex>
         </Form.Root>
     );

@@ -6,7 +6,7 @@
  */
 
 import EventEmitter from "events";
-import { type ISearchResults } from "matrix-js-sdk/src/matrix";
+import { type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
 import { type SearchMatch, type SearchScope } from "../Searching";
 import defaultDispatcher from "../dispatcher/dispatcher";
@@ -32,6 +32,13 @@ export interface SearchSessionParams {
      * is preserved verbatim by {@link SearchSessionStore.updateResults}, so a re-search keeps the filter.
      */
     senders?: string[];
+    /**
+     * The requested result ordering — {@link SearchOrderBy.Recent} (default) or {@link SearchOrderBy.Rank}
+     * (relevance) (search Phase 5 slice 1). Part of the session identity: it survives RoomView remounts during
+     * cross-room stepping and is preserved verbatim by {@link SearchSessionStore.updateResults}, so a re-search
+     * keeps the chosen order.
+     */
+    order?: SearchOrderBy;
     promise: Promise<ISearchResults>;
     abortController?: AbortController;
 }
