@@ -833,6 +833,50 @@ describe("MessagePanel", function () {
         expect(within(tiles[0] as HTMLElement).queryByRole("status")).not.toBeInTheDocument();
         expect(within(tiles[1] as HTMLElement).queryByRole("status")).not.toBeInTheDocument();
     });
+
+    // Phase 2 slice 2: live in-bubble highlight while stepping through search matches.
+    describe("search match highlighting (Phase 2 slice 2)", () => {
+        const mkHighlightEvents = (): MatrixEvent[] => [
+            TestUtilsMatrix.mkMessage({
+                event: true,
+                room: roomId,
+                user: "@user:id",
+                ts: 1000,
+                id: "$match0",
+                msg: "find the boat please",
+            }),
+            TestUtilsMatrix.mkMessage({
+                event: true,
+                room: roomId,
+                user: "@user:id",
+                ts: 2000,
+                id: "$match1",
+                msg: "another boat over here",
+            }),
+        ];
+
+        it("highlights the search term only in the focused match's live tile", () => {
+            const events = mkHighlightEvents();
+            const { container } = render(
+                getComponent({ events, searchHighlightEventId: "$match0", searchHighlights: ["boat"] }),
+                clientAndSDKContextRenderOptions(client, sdkContext),
+            );
+
+            const highlights = container.getElementsByClassName("mx_EventTile_searchHighlight");
+            expect(highlights.length).toEqual(1);
+            expect(highlights[0].textContent).toEqual("boat");
+        });
+
+        it("does not highlight anything when no search highlight props are supplied", () => {
+            const events = mkHighlightEvents();
+            const { container } = render(
+                getComponent({ events }),
+                clientAndSDKContextRenderOptions(client, sdkContext),
+            );
+
+            expect(container.getElementsByClassName("mx_EventTile_searchHighlight").length).toEqual(0);
+        });
+    });
 });
 
 describe("shouldFormContinuation", () => {

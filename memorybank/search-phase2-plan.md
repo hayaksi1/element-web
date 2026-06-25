@@ -168,10 +168,34 @@ Changes:
 
 ---
 
+## Slice 2 — Live in-bubble highlight in stepping mode — ✅ DONE (session 19, committed)
+
+**Shipped (TDD RED→GREEN, adversarial-reviewed):** while stepping, the matched terms now highlight in the body of
+the **focused match's live tile** (the same `mx_EventTile_searchHighlight` span as the results list), reusing the
+existing `EventTile.highlights` → `HtmlHighlighter` path — no new render code.
+
+Files:
+- `Searching.ts`: new pure `extractSearchHighlights(results, term)` (enrich + longest-first sort, **non-mutating**,
+  mirrors RoomSearchView) + `SearchInfo.highlights?: string[]`.
+- `MessagePanel.tsx`: new optional `searchHighlights` / `searchHighlightEventId` props; `getTilesForEvent` applies
+  `highlights` to the tile whose id === `searchHighlightEventId` only.
+- `TimelinePanel.tsx`: forwards both props (optional → 5 other callers unaffected).
+- `RoomView.tsx`: `onSearchUpdate` stores `highlights` (only for completed single-room searches); render derives the
+  focused match's eventId + terms when `isSteppingSearchMatch` and threads them down. **Decoupled from the transient
+  jump-flash `highlightedEventId`** so the body highlight persists while the match stays focused.
+
+Tests: `Searching-test` extractSearchHighlights (4, incl. non-mutation); `MessagePanel-test` focused-tile-only +
+no-leak (2). Full verify: tsc clean, 129 web Jest pass (Searching 34, MessagePanel 23, RoomView+TimelinePanel 72),
+eslint/prettier clean. No new i18n.
+
+**Documented limitation (deliberate, not a slice-2 regression):** a *malformed* edit (`m.replace` with missing/
+non-string `m.new_content.body`) that becomes a match is NOT re-keyed by `promoteReplacementContent` (its intentional
+#32356 blank-tile guard), so its match id is the edit id, which the live timeline never renders (SDK aggregates edits
+onto the original). Result: no live highlight for that match — **graceful** (no crash), and identical to slice 1's
+jump no-op and the pre-existing results-list non-render for the same case. Not fixed here to avoid regressing the
+#32356 guard; revisit only if real malformed edits surface.
+
 ## Later slices (next sessions)
-- **Slice 2 — Live in-bubble highlight in stepping mode.** Thread `searchHighlights` to the *live* `EventTile`
-  of the focused match (currently highlight only inside result tiles). Apply `BaseHighlighter`
-  (`mx_EventTile_searchHighlight`) to the live tile; reuse `HtmlUtils` highlighter.
 - **Slice 3 — Ordering + wrap-around + keyboard.** Define chronological order (down=older), Enter=next /
   Shift+Enter=prev while the search box is focused, optional wrap.
 - **Slice 4 — Out-of-window / encrypted edge cases.** Confirm Seshat-result event ids resolve in the live

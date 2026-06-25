@@ -122,7 +122,13 @@ import { LargeLoader } from "./LargeLoader";
 import { isVideoRoom } from "../../utils/video-rooms";
 import { SDKContext } from "../../contexts/SDKContext";
 import { RoomSearchView } from "./RoomSearchView";
-import eventSearch, { extractSearchMatches, type SearchInfo, type SearchMatch, SearchScope } from "../../Searching";
+import eventSearch, {
+    extractSearchHighlights,
+    extractSearchMatches,
+    type SearchInfo,
+    type SearchMatch,
+    SearchScope,
+} from "../../Searching";
 import { RoomSearchNavigationViewModel } from "../../viewmodels/search/RoomSearchNavigationViewModel";
 import { WidgetType } from "../../widgets/WidgetType";
 import WidgetUtils from "../../utils/WidgetUtils";
@@ -1843,6 +1849,12 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 ...this.state.search!,
                 count: searchResults?.count,
                 matches: canStep ? matches : undefined,
+                // Terms to highlight in the focused match's live tile while stepping (slice 2). Mirrors the
+                // enrichment the results list applies so the live highlight matches the result-tile highlight.
+                highlights:
+                    canStep && searchResults
+                        ? extractSearchHighlights(searchResults, this.state.search!.term)
+                        : undefined,
                 // The stepper cursor is reset whenever the result set changes; keep view-state in sync with the VM.
                 currentMatchIndex: undefined,
                 error: error ?? undefined,
@@ -2617,6 +2629,16 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             highlightedEventId = this.state.initialEventId;
         }
 
+        // While stepping through search matches (slice 2), highlight the matched terms in the body of the
+        // focused match's live tile. Decoupled from `highlightedEventId` (the transient jump flash) so the body
+        // highlight persists for as long as the match stays focused.
+        let searchHighlightEventId: string | undefined;
+        let searchHighlights: string[] | undefined;
+        if (isSteppingSearchMatch && this.state.search) {
+            searchHighlightEventId = this.state.search.matches?.[this.state.search.currentMatchIndex!]?.eventId;
+            searchHighlights = this.state.search.highlights;
+        }
+
         let messagePanel: JSX.Element | undefined;
         if (!isRoomEncryptionLoading) {
             messagePanel = (
@@ -2632,6 +2654,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                         manageReadMarkers={!this.state.isPeeking}
                         hidden={hideMessagePanel}
                         highlightedEventId={highlightedEventId}
+                        searchHighlights={searchHighlights}
+                        searchHighlightEventId={searchHighlightEventId}
                         eventId={this.state.initialEventId}
                         eventScrollIntoView={this.state.initialEventScrollIntoView}
                         eventPixelOffset={this.state.initialEventPixelOffset}

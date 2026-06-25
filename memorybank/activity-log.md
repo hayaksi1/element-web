@@ -1115,3 +1115,35 @@ User decision: implement **Phase 1B** (web toast), keep desktop default-on.
 
 - Phase 2 (in-timeline match stepping + "k of N" + live highlight, COMPLEMENT to `RoomSearchView`) → P3 from:/date
   filters → P4 searchable media tabs → P5 reach/ranking/health-check. See `search-improvement-plan.md` §5.
+
+## Session 19 (2026-06-25) — Search Phase 2 **slice 2**: live in-bubble highlight while stepping (TDD + reviewed)
+
+Continued the search initiative. Confirmed slices 1/1B are **committed** (dc4ce66, d0f086a, cdce4a2) and the tree was
+clean; "where I left off" notes were stale. Implemented **Phase 2 slice 2** end-to-end.
+
+**What it does:** while stepping through search matches in the live timeline, the matched terms now highlight in the
+**focused match's real bubble** (`mx_EventTile_searchHighlight`), reusing the existing `EventTile.highlights` →
+`HtmlHighlighter` path — zero new render code.
+
+**Approach:** understand-workflow (4 parallel Explore readers) mapped the highlight path → TDD (RED→GREEN) → 3-lens
+adversarial-review workflow (correctness / edit-event-mapping / regression-leak) with per-finding verification.
+
+**Files (6, +136/-1):** `Searching.ts` (`extractSearchHighlights` pure helper + `SearchInfo.highlights`);
+`MessagePanel.tsx` (`searchHighlights`/`searchHighlightEventId` props → focused tile only in `getTilesForEvent`);
+`TimelinePanel.tsx` (forward, optional → other 5 callers unaffected); `RoomView.tsx` (`onSearchUpdate` stores
+highlights for completed single-room searches; render derives focused match eventId+terms, **decoupled** from the
+transient jump-flash so the highlight persists). Tests in `Searching-test` (4) + `MessagePanel-test` (2).
+
+**Verify:** tsc clean; 129 web Jest pass (Searching 34, MessagePanel 23, RoomView+TimelinePanel 72); eslint/prettier
+clean; no new i18n. Ran via the `--transformIgnorePatterns` jest workaround.
+
+**Review outcome:** 2 findings → 1 confirmed (medium-conf), 1 refuted. Confirmed = malformed-edit match (no
+`m.new_content.body`) shows no live highlight because `promoteReplacementContent` (intentional #32356 guard) leaves it
+keyed to the edit id, absent from the live timeline. **Documented, not fixed** — pre-existing, graceful (no crash),
+same as slice 1's jump no-op; fixing would regress the #32356 blank-tile guard. See `search-phase2-plan.md` slice 2.
+
+### WHERE I LEFT OFF — Phase 2 slice 3 next
+
+- Slice 3: chronological ordering + wrap-around + keyboard (Enter=next / Shift+Enter=prev while search box focused).
+  Then slice 4 (out-of-window/encrypted edge cases, all-rooms) → slice 5 (hide list while stepping, PostHog, pcss).
+- Slice 2 committed this session. (jest needs the `--transformIgnorePatterns` workaround — see memory.)
