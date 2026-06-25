@@ -1074,22 +1074,31 @@ export interface SearchMatch {
 }
 
 /**
- * Build an ordered list of match locations from a set of search results, for in-timeline stepping.
+ * Build a chronologically ordered list of match locations from a set of search results, for in-timeline
+ * stepping.
  *
- * The order mirrors {@link ISearchResults.results} (newest first as returned by the backend). Results whose
- * matched event is missing an event id or room id are skipped — they cannot be jumped to in the timeline.
+ * Matches are ordered newest-first by event timestamp so that the up/down arrows mean a consistent
+ * "newer/older" independent of how the backend happened to order the raw results. (This app requests recency
+ * order from both backends — {@link SearchOrderBy.Recent} from the homeserver and `order_by_recency` from
+ * Seshat — but the explicit client-side sort guarantees a single chronological order on the merged list.)
+ * `Array.prototype.sort` is stable, so matches sharing a timestamp keep their backend order; a match whose
+ * event has no timestamp sinks to the end (treated as oldest). Results whose matched event is missing an event
+ * id or room id are skipped — they cannot be jumped to in the timeline.
  */
 export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
-    const matches: SearchMatch[] = [];
+    const matches: Array<SearchMatch & { ts: number }> = [];
     for (const result of results.results ?? []) {
         const event = result.context.getEvent();
         const eventId = event.getId();
         const roomId = event.getRoomId();
         if (eventId && roomId) {
-            matches.push({ roomId, eventId });
+            // getTs() is typed as number but masks a possibly-absent origin_server_ts with a non-null
+            // assertion; default to 0 so an undated match can never produce a NaN comparison and corrupt order.
+            matches.push({ roomId, eventId, ts: event.getTs() ?? 0 });
         }
     }
-    return matches;
+    matches.sort((a, b) => b.ts - a.ts);
+    return matches.map(({ roomId, eventId }) => ({ roomId, eventId }));
 }
 
 /**

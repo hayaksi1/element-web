@@ -24,6 +24,7 @@ import { useAccountData } from "../../../hooks/useAccountData";
 import { useDispatcher } from "../../../hooks/useDispatcher";
 import defaultDispatcher from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";
+import { type SearchMatchStepPayload } from "../../../dispatcher/payloads/SearchMatchStepPayload";
 import { canInviteTo } from "../../../utils/room/canInviteTo";
 import { DefaultTagID } from "../../../stores/room-list-v3/skip-list/tag";
 import { useEventEmitterState } from "../../../hooks/useEventEmitter";
@@ -138,9 +139,23 @@ const useSearchInput = (
     const searchInputRef = useRef<HTMLInputElement>(null);
 
     const onUpdateSearchInput = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-        if (searchInputRef.current && e.key === Key.ESCAPE) {
-            searchInputRef.current.value = "";
-            onSearchCancel?.();
+        if (e.key === Key.ESCAPE) {
+            if (searchInputRef.current) {
+                searchInputRef.current.value = "";
+                onSearchCancel?.();
+            }
+            return;
+        }
+        // Step through the in-room search matches without leaving the search box: Enter advances to the next
+        // (older) match, Shift+Enter goes back to the previous (newer) one. The room being searched owns the
+        // match cursor (RoomSearchNavigationViewModel), so we signal it via the dispatcher. Ignore the Enter
+        // that confirms an in-progress IME (e.g. CJK) composition so we don't hijack the user's text input.
+        if (e.key === Key.ENTER && !e.nativeEvent?.isComposing) {
+            e.preventDefault();
+            defaultDispatcher.dispatch<SearchMatchStepPayload>({
+                action: Action.SearchMatchStep,
+                direction: e.shiftKey ? "previous" : "next",
+            });
         }
     };
 

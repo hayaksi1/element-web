@@ -60,7 +60,7 @@ describe("SearchMatchNavigation", () => {
         expect(previous).not.toHaveBeenCalled();
     });
 
-    it("disables the arrows at the ends of the match list", () => {
+    it("disables an arrow when its snapshot flag is false", () => {
         renderNav({ current: 1, total: 5, canPrevious: false, canNext: true });
         expect(screen.getByRole("button", { name: "Previous match" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Next match" })).toBeEnabled();

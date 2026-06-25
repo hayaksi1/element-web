@@ -53,8 +53,9 @@ export class RoomSearchNavigationViewModel
         return {
             current: this.index < 0 ? 0 : this.index + 1,
             total,
-            canPrevious: this.index > 0,
-            canNext: this.index < total - 1,
+            // Stepping wraps around, so both arrows are available whenever there is at least one match.
+            canPrevious: total > 0,
+            canNext: total > 0,
         };
     }
 
@@ -67,16 +68,26 @@ export class RoomSearchNavigationViewModel
         this.snapshot.set(this.computeSnapshot());
     }
 
+    /**
+     * Step to the next (older) match. From the empty cursor this activates the first (newest) match; from the
+     * last match it wraps around to the first.
+     */
     public readonly next = (): void => {
-        if (this.index >= this.matches.length - 1) return;
-        this.index += 1;
+        const total = this.matches.length;
+        if (total === 0) return;
+        this.index = this.index < 0 ? 0 : (this.index + 1) % total;
         this.snapshot.set(this.computeSnapshot());
         this.props.onActivateMatch(this.matches[this.index], this.index);
     };
 
+    /**
+     * Step to the previous (newer) match. From the empty cursor or the first match this wraps around to the
+     * last (oldest) match.
+     */
     public readonly previous = (): void => {
-        if (this.index <= 0) return;
-        this.index -= 1;
+        const total = this.matches.length;
+        if (total === 0) return;
+        this.index = this.index <= 0 ? total - 1 : this.index - 1;
         this.snapshot.set(this.computeSnapshot());
         this.props.onActivateMatch(this.matches[this.index], this.index);
     };

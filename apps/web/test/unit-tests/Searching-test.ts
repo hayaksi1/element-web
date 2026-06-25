@@ -792,7 +792,7 @@ describe("Searching", () => {
     describe("extractSearchMatches", () => {
         const eventMapper = (obj: Partial<IEvent>): MatrixEvent => new MatrixEvent(obj);
 
-        const makeResult = (roomId: string, eventId: string): SearchResult =>
+        const makeResult = (roomId: string, eventId: string, ts = 1): SearchResult =>
             SearchResult.fromJson(
                 {
                     rank: 1,
@@ -800,7 +800,7 @@ describe("Searching", () => {
                         room_id: roomId,
                         event_id: eventId,
                         sender: "@user:example.org",
-                        origin_server_ts: 1,
+                        origin_server_ts: ts,
                         content: { body: "match", msgtype: "m.text" },
                         type: EventType.RoomMessage,
                     },
@@ -809,9 +809,27 @@ describe("Searching", () => {
                 eventMapper,
             );
 
-        it("returns an ordered {roomId, eventId} list preserving results order", () => {
+        it("orders matches newest-first by event timestamp regardless of backend order", () => {
             const results = {
-                results: [makeResult("!room:example.org", "$a"), makeResult("!room:example.org", "$b")],
+                results: [
+                    makeResult("!room:example.org", "$old", 100),
+                    makeResult("!room:example.org", "$new", 300),
+                    makeResult("!room:example.org", "$mid", 200),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$new" },
+                { roomId: "!room:example.org", eventId: "$mid" },
+                { roomId: "!room:example.org", eventId: "$old" },
+            ]);
+        });
+
+        it("keeps the backend order for matches sharing a timestamp (stable sort)", () => {
+            const results = {
+                results: [makeResult("!room:example.org", "$a", 5), makeResult("!room:example.org", "$b", 5)],
                 highlights: [],
                 count: 2,
             } as unknown as ISearchResults;
@@ -819,6 +837,39 @@ describe("Searching", () => {
             expect(extractSearchMatches(results)).toEqual([
                 { roomId: "!room:example.org", eventId: "$a" },
                 { roomId: "!room:example.org", eventId: "$b" },
+            ]);
+        });
+
+        it("sorts a match missing a timestamp to the end without corrupting the dated order", () => {
+            const undated = SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: "!room:example.org",
+                        event_id: "$undated",
+                        sender: "@user:example.org",
+                        // no origin_server_ts → MatrixEvent.getTs() is undefined
+                        content: { body: "match", msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                } as unknown as Parameters<typeof SearchResult.fromJson>[0],
+                eventMapper,
+            );
+            const results = {
+                results: [
+                    undated,
+                    makeResult("!room:example.org", "$b", 100),
+                    makeResult("!room:example.org", "$a", 200),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$a" },
+                { roomId: "!room:example.org", eventId: "$b" },
+                { roomId: "!room:example.org", eventId: "$undated" },
             ]);
         });
 

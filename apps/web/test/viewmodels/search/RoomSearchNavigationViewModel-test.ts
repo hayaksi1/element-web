@@ -18,22 +18,22 @@ describe("RoomSearchNavigationViewModel", () => {
         expect(vm.getSnapshot()).toEqual({ current: 0, total: 0, canPrevious: false, canNext: false });
     });
 
-    it("exposes the total and enables next once matches are set", () => {
+    it("exposes the total and enables both arrows once matches are set", () => {
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
         vm.setMatches([matchA, matchB, matchC]);
-        expect(vm.getSnapshot()).toEqual({ current: 0, total: 3, canPrevious: false, canNext: true });
+        expect(vm.getSnapshot()).toEqual({ current: 0, total: 3, canPrevious: true, canNext: true });
     });
 
-    it("activates the first match on next() from the empty cursor", () => {
+    it("activates the first (newest) match on next() from the empty cursor", () => {
         const onActivateMatch = jest.fn();
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
         vm.setMatches([matchA, matchB, matchC]);
         vm.next();
         expect(onActivateMatch).toHaveBeenCalledWith(matchA, 0);
-        expect(vm.getSnapshot()).toEqual({ current: 1, total: 3, canPrevious: false, canNext: true });
+        expect(vm.getSnapshot()).toEqual({ current: 1, total: 3, canPrevious: true, canNext: true });
     });
 
-    it("steps forward and disables next at the last match", () => {
+    it("steps forward through every match", () => {
         const onActivateMatch = jest.fn();
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
         vm.setMatches([matchA, matchB, matchC]);
@@ -41,17 +41,42 @@ describe("RoomSearchNavigationViewModel", () => {
         vm.next();
         vm.next();
         expect(onActivateMatch).toHaveBeenNthCalledWith(3, matchC, 2);
-        expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: false });
+        expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: true });
     });
 
-    it("does not activate or move past the last match", () => {
+    it("wraps from the last match back to the first on next()", () => {
+        const onActivateMatch = jest.fn();
+        const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
+        vm.setMatches([matchA, matchB, matchC]);
+        vm.next(); // A (0)
+        vm.next(); // B (1)
+        vm.next(); // C (2)
+        onActivateMatch.mockClear();
+        vm.next(); // wraps to A (0)
+        expect(onActivateMatch).toHaveBeenCalledWith(matchA, 0);
+        expect(vm.getSnapshot()).toEqual({ current: 1, total: 3, canPrevious: true, canNext: true });
+    });
+
+    it("re-activates the only match when wrapping with a single result", () => {
         const onActivateMatch = jest.fn();
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
         vm.setMatches([matchA]);
         vm.next(); // -> index 0
-        vm.next(); // clamped, no-op
-        expect(onActivateMatch).toHaveBeenCalledTimes(1);
-        expect(vm.getSnapshot()).toEqual({ current: 1, total: 1, canPrevious: false, canNext: false });
+        vm.next(); // wraps, still index 0
+        expect(onActivateMatch).toHaveBeenCalledTimes(2);
+        expect(onActivateMatch).toHaveBeenNthCalledWith(2, matchA, 0);
+        expect(vm.getSnapshot()).toEqual({ current: 1, total: 1, canPrevious: true, canNext: true });
+    });
+
+    it("re-activates the only match when wrapping backward with a single result", () => {
+        const onActivateMatch = jest.fn();
+        const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
+        vm.setMatches([matchA]);
+        vm.next(); // -> index 0
+        onActivateMatch.mockClear();
+        vm.previous(); // wraps, still index 0
+        expect(onActivateMatch).toHaveBeenCalledWith(matchA, 0);
+        expect(vm.getSnapshot()).toEqual({ current: 1, total: 1, canPrevious: true, canNext: true });
     });
 
     it("steps backward with previous()", () => {
@@ -59,20 +84,31 @@ describe("RoomSearchNavigationViewModel", () => {
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
         vm.setMatches([matchA, matchB, matchC]);
         vm.next();
-        vm.next(); // index 1
+        vm.next(); // index 1 (B)
         onActivateMatch.mockClear();
-        vm.previous(); // index 0
+        vm.previous(); // index 0 (A)
         expect(onActivateMatch).toHaveBeenCalledWith(matchA, 0);
-        expect(vm.getSnapshot()).toEqual({ current: 1, total: 3, canPrevious: false, canNext: true });
+        expect(vm.getSnapshot()).toEqual({ current: 1, total: 3, canPrevious: true, canNext: true });
     });
 
-    it("does not activate or move before the first match", () => {
+    it("wraps to the last (oldest) match on previous() from the empty cursor", () => {
         const onActivateMatch = jest.fn();
         const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
         vm.setMatches([matchA, matchB]);
-        vm.previous(); // index -1, no-op
-        expect(onActivateMatch).not.toHaveBeenCalled();
-        expect(vm.getSnapshot()).toEqual({ current: 0, total: 2, canPrevious: false, canNext: true });
+        vm.previous(); // wraps to last (index 1)
+        expect(onActivateMatch).toHaveBeenCalledWith(matchB, 1);
+        expect(vm.getSnapshot()).toEqual({ current: 2, total: 2, canPrevious: true, canNext: true });
+    });
+
+    it("wraps from the first match to the last on previous()", () => {
+        const onActivateMatch = jest.fn();
+        const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
+        vm.setMatches([matchA, matchB, matchC]);
+        vm.next(); // index 0 (A)
+        onActivateMatch.mockClear();
+        vm.previous(); // wraps to last (index 2, C)
+        expect(onActivateMatch).toHaveBeenCalledWith(matchC, 2);
+        expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: true });
     });
 
     it("resets the cursor when matches change", () => {
@@ -82,7 +118,16 @@ describe("RoomSearchNavigationViewModel", () => {
         vm.next();
         vm.next();
         vm.setMatches([matchA]);
-        expect(vm.getSnapshot()).toEqual({ current: 0, total: 1, canPrevious: false, canNext: true });
+        expect(vm.getSnapshot()).toEqual({ current: 0, total: 1, canPrevious: true, canNext: true });
+    });
+
+    it("does nothing when stepping with no matches", () => {
+        const onActivateMatch = jest.fn();
+        const vm = new RoomSearchNavigationViewModel({ onActivateMatch });
+        vm.next();
+        vm.previous();
+        expect(onActivateMatch).not.toHaveBeenCalled();
+        expect(vm.getSnapshot()).toEqual({ current: 0, total: 0, canPrevious: false, canNext: false });
     });
 
     it("notifies subscribers when the snapshot changes", () => {
