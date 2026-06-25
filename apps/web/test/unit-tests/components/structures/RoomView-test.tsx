@@ -258,6 +258,154 @@ describe("RoomView", () => {
             expect(previousSpy).toHaveBeenCalledTimes(1);
             expect(nextSpy).not.toHaveBeenCalled();
         });
+
+        // NB: these heavier mount-based stepping tests live here, in the early describe, rather than in
+        // "message search" below: a pre-existing cross-test isolation leak in this large suite leaves a
+        // client-less RoomView re-rendering (and crashing in shouldEncryptRoomWithSingle3rdPartyInvite) for
+        // whichever mount-heavy test runs last among the later describes. Running early keeps state clean.
+        it("does not step to matches from a predecessor room (would unmount the room-keyed RoomView)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            // A room-scoped search of an upgraded room also searches its predecessor chain (#32258), so the
+            // completed result set can contain matches that live in a *different* room. RoomView is keyed by
+            // room id (LoggedInView), so jumping the live timeline into the predecessor would unmount the
+            // search session. Such cross-room matches must therefore be excluded from live-timeline stepping.
+            const predRoom = new Room("!predecessor:example.org", cli, "@alice:example.org");
+            rooms.set(predRoom.roomId, predRoom);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (roomId: string, eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            act(() =>
+                roomViewRef.current!.setState({
+                    timelineRenderingType: TimelineRenderingType.Search,
+                    search: {
+                        searchId: 1,
+                        roomId: room.roomId,
+                        term: "match",
+                        scope: SearchScope.Room,
+                        promise: Promise.resolve({
+                            results: [
+                                makeResult(room.roomId, "$current", "current match", 2),
+                                makeResult(predRoom.roomId, "$predecessor", "predecessor match", 1),
+                            ],
+                            highlights: [],
+                            count: 2,
+                        }),
+                    },
+                }),
+            );
+
+            // Only the current-room match is steppable in the live timeline: this counter is the load-bearing
+            // guard — it reads "0 of 2" (and stepping could then reach the predecessor) if the current-room filter
+            // is removed. The predecessor match stays in the full result set (see the extractSearchMatches test)
+            // but is excluded from the "k of N" stepper.
+            await screen.findByText("0 of 1");
+
+            // Spy installed before stepping so the negative assertion below is evaluated across the whole flow.
+            const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+            // Step forward across every steppable match; wrap-around keeps it on the single current-room match.
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+
+            // The live timeline is only ever asked to jump within the current room — never into the predecessor
+            // room (which would unmount the room-keyed RoomView and tear down the search session).
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ action: Action.ViewRoom, room_id: room.roomId, event_id: "$current" }),
+            );
+            expect(dispatchSpy).not.toHaveBeenCalledWith(
+                expect.objectContaining({ action: Action.ViewRoom, room_id: predRoom.roomId }),
+            );
+        });
+
+        it("steps to an older match by dispatching ViewRoom by event id and keeps the search session alive", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            act(() =>
+                roomViewRef.current!.setState({
+                    timelineRenderingType: TimelineRenderingType.Search,
+                    search: {
+                        searchId: 1,
+                        roomId: room.roomId,
+                        term: "match",
+                        scope: SearchScope.Room,
+                        promise: Promise.resolve({
+                            results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                            highlights: [],
+                            count: 2,
+                        }),
+                    },
+                }),
+            );
+
+            await screen.findByText("0 of 2");
+            const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+
+            // Step to the older match. The stepper jumps purely by event id: it dispatches ViewRoom with
+            // highlighted/scroll_into_view — the input the SDK's existing TimelineWindow contextual load (the
+            // permalink/reply-jump path, shared with E2EE/Seshat decryption) consumes to fetch a hit that may be
+            // outside the loaded window. This test pins the dispatch contract + session survival only; the actual
+            // back-pagination lives in matrix-js-sdk (and is mocked away here), so it is not asserted.
+            await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $newer (index 0)
+            await screen.findByText("1 of 2");
+            await userEvent.click(screen.getByRole("button", { name: "Next match" })); // -> $older (index 1)
+            await screen.findByText("2 of 2");
+
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$older",
+                    highlighted: true,
+                    scroll_into_view: true,
+                }),
+            );
+            // The search session survives stepping to the older match (Room timeline, cursor advanced).
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(1);
+        });
     });
 
     it("gets a room view store from MultiRoomViewStore when given a room ID", async () => {

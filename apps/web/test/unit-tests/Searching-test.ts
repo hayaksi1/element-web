@@ -901,6 +901,32 @@ describe("Searching", () => {
             const results = { results: [], highlights: [], count: 0 } as unknown as ISearchResults;
             expect(extractSearchMatches(results)).toEqual([]);
         });
+
+        it("merges matches from other rooms chronologically (e.g. predecessor-chain results), leaving scoping to the caller", () => {
+            // A room-scoped search of an upgraded room also returns predecessor-room matches (#32258).
+            // extractSearchMatches is a pure, scope-agnostic helper: it preserves every jumpable match
+            // regardless of which room it belongs to, ordered newest-first. Restricting *live-timeline*
+            // stepping to the current room (RoomView is keyed by room id) is the caller's responsibility, so
+            // this helper must not pre-filter by room.
+            // Timestamps interleave across rooms so the result can only be correct if matches are merged by ts
+            // across rooms (not grouped by room then ordered): the predecessor match sorts *between* the two
+            // current-room matches.
+            const results = {
+                results: [
+                    makeResult("!current:example.org", "$old", 100),
+                    makeResult("!predecessor:example.org", "$mid", 200),
+                    makeResult("!current:example.org", "$new", 300),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([
+                { roomId: "!current:example.org", eventId: "$new" },
+                { roomId: "!predecessor:example.org", eventId: "$mid" },
+                { roomId: "!current:example.org", eventId: "$old" },
+            ]);
+        });
     });
 
     describe("extractSearchHighlights", () => {
