@@ -1060,6 +1060,39 @@ export enum SearchScope {
 }
 
 /**
+ * The location of a single search match, used for stepping through matches in the live timeline.
+ */
+export interface SearchMatch {
+    /**
+     * The room the matched event belongs to.
+     */
+    roomId: string;
+    /**
+     * The id of the matched event.
+     */
+    eventId: string;
+}
+
+/**
+ * Build an ordered list of match locations from a set of search results, for in-timeline stepping.
+ *
+ * The order mirrors {@link ISearchResults.results} (newest first as returned by the backend). Results whose
+ * matched event is missing an event id or room id are skipped — they cannot be jumped to in the timeline.
+ */
+export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
+    const matches: SearchMatch[] = [];
+    for (const result of results.results ?? []) {
+        const event = result.context.getEvent();
+        const eventId = event.getId();
+        const roomId = event.getRoomId();
+        if (eventId && roomId) {
+            matches.push({ roomId, eventId });
+        }
+    }
+    return matches;
+}
+
+/**
  * Information about a message search in progress.
  */
 export interface SearchInfo {
@@ -1095,6 +1128,14 @@ export interface SearchInfo {
      * The total count of matching results as returned by the backend.
      */
     count?: number;
+    /**
+     * Ordered list of match locations (display order) used to step through matches in the live timeline.
+     */
+    matches?: SearchMatch[];
+    /**
+     * Index into {@link matches} of the currently-focused match, or -1/undefined when no match is active.
+     */
+    currentMatchIndex?: number;
     /**
      * Describe the error if any occured.
      */

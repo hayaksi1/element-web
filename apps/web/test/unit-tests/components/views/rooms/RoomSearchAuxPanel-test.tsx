@@ -11,8 +11,88 @@ import { render, screen } from "jest-matrix-react";
 
 import RoomSearchAuxPanel from "../../../../../src/components/views/rooms/RoomSearchAuxPanel";
 import { SearchScope } from "../../../../../src/Searching";
+import { RoomSearchNavigationViewModel } from "../../../../../src/viewmodels/search/RoomSearchNavigationViewModel";
 
 describe("RoomSearchAuxPanel", () => {
+    it("should render the match navigation counter and arrows when a navigation view model has matches", () => {
+        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+        navigationVm.setMatches([
+            { roomId: "!r:e", eventId: "$a" },
+            { roomId: "!r:e", eventId: "$b" },
+        ]);
+
+        render(
+            <RoomSearchAuxPanel
+                searchInfo={{
+                    searchId: 1234,
+                    count: 2,
+                    term: "abcd",
+                    scope: SearchScope.Room,
+                    promise: new Promise(() => {}),
+                }}
+                isRoomEncrypted={false}
+                onSearchScopeChange={jest.fn()}
+                onCancelClick={jest.fn()}
+                navigationVm={navigationVm}
+            />,
+        );
+
+        expect(screen.getByText("0 of 2")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Next match" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Previous match" })).toBeInTheDocument();
+    });
+
+    it("should hide the results-count summary while stepping a match (counter is the source of truth)", () => {
+        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+        navigationVm.setMatches([
+            { roomId: "!r:e", eventId: "$a" },
+            { roomId: "!r:e", eventId: "$b" },
+        ]);
+        navigationVm.next(); // step to the first match
+
+        render(
+            <RoomSearchAuxPanel
+                searchInfo={{
+                    searchId: 1234,
+                    count: 2,
+                    term: "abcd",
+                    scope: SearchScope.Room,
+                    promise: new Promise(() => {}),
+                    currentMatchIndex: 0,
+                }}
+                isRoomEncrypted={false}
+                onSearchScopeChange={jest.fn()}
+                onCancelClick={jest.fn()}
+                navigationVm={navigationVm}
+            />,
+        );
+
+        expect(screen.queryByText("results found", { exact: false })).not.toBeInTheDocument();
+        expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    });
+
+    it("should not render match navigation when there are no matches", () => {
+        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+
+        render(
+            <RoomSearchAuxPanel
+                searchInfo={{
+                    searchId: 1234,
+                    count: 0,
+                    term: "abcd",
+                    scope: SearchScope.Room,
+                    promise: new Promise(() => {}),
+                }}
+                isRoomEncrypted={false}
+                onSearchScopeChange={jest.fn()}
+                onCancelClick={jest.fn()}
+                navigationVm={navigationVm}
+            />,
+        );
+
+        expect(screen.queryByRole("button", { name: "Next match" })).not.toBeInTheDocument();
+    });
+
     it("should render the count of results", () => {
         render(
             <RoomSearchAuxPanel

@@ -5,10 +5,22 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { type IResultRoomEvents } from "matrix-js-sdk/src/matrix";
+import {
+    EventType,
+    type IEvent,
+    type IResultRoomEvents,
+    type ISearchResults,
+    MatrixEvent,
+    SearchResult,
+} from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
 
-import eventSearch, { hardenSeshatSearchTerm, getRoomSearchChain, searchPagination } from "../../src/Searching";
+import eventSearch, {
+    extractSearchMatches,
+    hardenSeshatSearchTerm,
+    getRoomSearchChain,
+    searchPagination,
+} from "../../src/Searching";
 import EventIndexPeg from "../../src/indexing/EventIndexPeg";
 import { createTestClient } from "../test-utils";
 
@@ -773,6 +785,69 @@ describe("Searching", () => {
             expect(searchSpy).toHaveBeenCalledWith(expect.objectContaining({ next_batch: "srv1" }));
             const merged = captured.search_categories.room_events.results.map((r: any) => r.result.event_id);
             expect(merged).toEqual(["$new2", "$old2"]);
+        });
+    });
+
+    describe("extractSearchMatches", () => {
+        const eventMapper = (obj: Partial<IEvent>): MatrixEvent => new MatrixEvent(obj);
+
+        const makeResult = (roomId: string, eventId: string): SearchResult =>
+            SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: roomId,
+                        event_id: eventId,
+                        sender: "@user:example.org",
+                        origin_server_ts: 1,
+                        content: { body: "match", msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                },
+                eventMapper,
+            );
+
+        it("returns an ordered {roomId, eventId} list preserving results order", () => {
+            const results = {
+                results: [makeResult("!room:example.org", "$a"), makeResult("!room:example.org", "$b")],
+                highlights: [],
+                count: 2,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$a" },
+                { roomId: "!room:example.org", eventId: "$b" },
+            ]);
+        });
+
+        it("skips results whose matched event lacks an id or room id", () => {
+            const bad = SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        // no event_id / room_id
+                        sender: "@user:example.org",
+                        origin_server_ts: 1,
+                        content: { body: "match", msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                } as unknown as Parameters<typeof SearchResult.fromJson>[0],
+                eventMapper,
+            );
+            const results = {
+                results: [makeResult("!room:example.org", "$a"), bad],
+                highlights: [],
+                count: 2,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([{ roomId: "!room:example.org", eventId: "$a" }]);
+        });
+
+        it("returns an empty list when there are no results", () => {
+            const results = { results: [], highlights: [], count: 0 } as unknown as ISearchResults;
+            expect(extractSearchMatches(results)).toEqual([]);
         });
     });
 });

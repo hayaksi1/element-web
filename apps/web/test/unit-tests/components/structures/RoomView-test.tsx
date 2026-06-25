@@ -1045,6 +1045,119 @@ describe("RoomView", () => {
 
             await expect(findByPlaceholderText("Search messages…")).resolves.toHaveValue("search term");
         });
+
+        it("steps the live timeline to a match and keeps the search session alive", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: 1,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            // A completed single-room search drives the stepper organically via onSearchUpdate.
+            act(() =>
+                roomViewRef.current!.setState({
+                    timelineRenderingType: TimelineRenderingType.Search,
+                    search: {
+                        searchId: 1,
+                        roomId: room.roomId,
+                        term: "match",
+                        scope: SearchScope.Room,
+                        promise: Promise.resolve({
+                            results: [makeResult("$match1", "first match"), makeResult("$match2", "second match")],
+                            highlights: [],
+                            count: 2,
+                        }),
+                    },
+                }),
+            );
+
+            // Once results arrive, the counter + arrows render in the header (browsing, Search render mode).
+            await screen.findByText("0 of 2");
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+
+            const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+
+            // Jumps the live timeline to the first match via the existing ViewRoom path.
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$match1",
+                    highlighted: true,
+                    scroll_into_view: true,
+                }),
+            );
+
+            // The counter advances, we switch to the live (Room) timeline, and the search session survives the
+            // jump rather than being torn down like a clicked result.
+            await screen.findByText("1 of 2");
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(0);
+        });
+
+        it("does not enable the match stepper for all-rooms searches", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            act(() =>
+                roomViewRef.current!.setState({
+                    timelineRenderingType: TimelineRenderingType.Search,
+                    search: {
+                        searchId: 1,
+                        term: "match",
+                        scope: SearchScope.All,
+                        promise: Promise.resolve({
+                            results: [
+                                SearchResult.fromJson(
+                                    {
+                                        rank: 1,
+                                        result: {
+                                            room_id: room.roomId,
+                                            event_id: "$match1",
+                                            sender: cli.getSafeUserId(),
+                                            origin_server_ts: 1,
+                                            content: { body: "a match", msgtype: "m.text" },
+                                            type: EventType.RoomMessage,
+                                        },
+                                        context: { profile_info: {}, events_before: [], events_after: [] },
+                                    },
+                                    eventMapper,
+                                ),
+                            ],
+                            highlights: [],
+                            count: 1,
+                        }),
+                    },
+                }),
+            );
+
+            await screen.findByText("1 result found", { exact: false });
+            expect(screen.queryByRole("button", { name: "Next match" })).not.toBeInTheDocument();
+        });
     });
 
     it("fires Action.RoomLoaded", async () => {
