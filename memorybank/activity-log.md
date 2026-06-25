@@ -1,5 +1,62 @@
 # Activity Log
 
+## 2026-06-25 (session 17) — Search Phase 2 slice 1: in-timeline match stepping (k-of-N + live-timeline arrows)
+
+Directive: "continue where you left off" → Search **Phase 2** (the biggest Telegram-parity win). User decision this
+session: arrows should **drive the LIVE timeline** (not step the results list). Followed brainstorming-done →
+writing-plans (`memorybank/search-phase2-plan.md`) → TDD per task → adversarial review → fix → verify.
+
+> ⚠️ **STATE: slice-1 work is UNCOMMITTED** (HEAD `d0f086a`, which is the unpushed Phase-1B toast). Phase-1A
+> `cdce4a2` is pushed; `d0f086a` (Phase 1B) + this slice are local only. Commit prepared; **push to `main` pending
+> user OK** (per recent-session convention).
+
+### Architecture mapped first (4 parallel Explore agents)
+Key unlocks: the live-timeline **jump+highlight+back-pagination already exists** via `dispatch(Action.ViewRoom
+{room_id,event_id,highlighted,scroll_into_view})` → RoomViewStore → TimelinePanel.loadTimeline (TimelineWindow) →
+MessagePanel `isSelectedEvent` (same path as reply/permalink; works E2EE). Search **replaces** the timeline
+(`timelineRenderingType=Search` shows RoomSearchView list, hides MessagePanel) and L782-791 of
+`onRoomViewStoreUpdate` **clears search on a result click** — the core obstacle to keeping the cursor alive.
+
+### Shipped (TDD, MVVM-v2), slice 1
+- **`Searching.ts`**: `SearchMatch {roomId,eventId}`, pure `extractSearchMatches(results)` (preserves order, skips
+  id-less), `SearchInfo.matches?`/`currentMatchIndex?`. (+3 Jest)
+- **`apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.ts`** (extends BaseViewModel): cursor (index, -1=none),
+  `setMatches`/`next`/`previous`, snapshot `{current,total,canPrevious,canNext}`, calls injected `onActivateMatch`. (+9)
+- **`packages/shared-components/.../SearchMatchNavigation/`** dumb View: "k of N" + 2 Compound chevron IconButtons,
+  renders null when total 0; package i18n keys `room|search|{match_position,next_match,previous_match}`; barrel +
+  root index export. (+5 vitest)
+- **`RoomSearchAuxPanel`**: new optional `navigationVm` → renders `<SearchMatchNavigation>`; hides the (differently-
+  counted) "N results found" summary while stepping. (+3 Jest)
+- **`RoomView`** integration: constructs/disposes `searchNavVm`; `onActivateSearchMatch` flips
+  `timelineRenderingType→Room` **before** the async ViewRoom dispatch (so the L782 "clear on result click" branch is
+  skipped → search survives) + sets `currentMatchIndex`; header decoupled (renders when `search && (Search-mode ||
+  stepping)`); body shows the live timeline when `currentMatchIndex>=0` (else the list). `onSearchUpdate` enables the
+  stepper **only for completed, single-room searches**. (+2 Jest incl. mutation-proven "search survives the jump")
+
+### Adversarial review (3 parallel agents: correctness / MVVM / regression) → applied the real fixes
+Confirmed + **fixed**: (a) "k of N" vs "N results" two-number contradiction → hide summary while stepping; (b) All-
+rooms stepping would jump cross-room and unmount RoomView, losing the session → **restrict stepper to Room scope**;
+(c) partial/aborted count + currentMatchIndex/VM desync → **enable stepper only when search complete**, reset index
+with matches. Refuted: dedup/null-id (already guarded). **Accepted + DOCUMENTED as slice-2 limits** (in the plan):
+pagination pauses while stepping (stepper covers the loaded result page); composer/status-bar stay in search-mode
+chrome during stepping; a permalink click mid-stepping doesn't auto-exit search (use ✕). **Skipped** `.stories.tsx`:
+the storybook **visual-regression** baselines are committed per-platform (`__vis__/linux`) and only generatable in
+CI's `playwright-screenshots` docker — not locally — so a story would add an unverifiable vis test; behavior is fully
+covered by the unit test (omitting a story is CI-safe). *(Accidentally `rm -rf`'d the committed `__vis__` baselines
+mid-cleanup; restored via `git checkout`.)*
+
+### Verification (all green)
+- Web Jest (helper `scratchpad/webjest.sh`): **105 pass / 5 suites** (Searching, RoomSearchNavigationViewModel,
+  RoomSearchAuxPanel, RoomView, + 1). Package vitest **unit** project: SearchMatchNavigation **5** + RoomListSearchView
+  **7**. `tsc` app+package: **0** non-vendored errors. `eslint --max-warnings 0` + `prettier --check`: clean (app +
+  package). i18n gen (app + package): keys consistent, app strings correctly carry no package-only keys.
+- **Not verifiable here:** real Seshat/live round-trip on a packaged build; the storybook visual-regression (CI-only).
+
+### Next (slice 2+, in `search-phase2-plan.md`)
+Live in-bubble highlight on the focused match tile; ordering/wrap/keyboard (Enter=next); out-of-window + All-rooms +
+pagination-while-stepping; show composer/affordance to return to the list. Then Phase 3 (from:/jump-to-date) → 4 → 5.
+
+
 ## 2026-06-25 (session 15) — Finish session-14 deferred review-fixes (renderer-recovery TODO B + C); re-verify the whole session-14 changeset
 
 Directive: "continue where you left off, check memorybank." Picked up the two deferred review-fix TODOs the

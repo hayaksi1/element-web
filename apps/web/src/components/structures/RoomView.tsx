@@ -122,7 +122,8 @@ import { LargeLoader } from "./LargeLoader";
 import { isVideoRoom } from "../../utils/video-rooms";
 import { SDKContext } from "../../contexts/SDKContext";
 import { RoomSearchView } from "./RoomSearchView";
-import eventSearch, { type SearchInfo, SearchScope } from "../../Searching";
+import eventSearch, { extractSearchMatches, type SearchInfo, type SearchMatch, SearchScope } from "../../Searching";
+import { RoomSearchNavigationViewModel } from "../../viewmodels/search/RoomSearchNavigationViewModel";
 import { WidgetType } from "../../widgets/WidgetType";
 import WidgetUtils from "../../utils/WidgetUtils";
 import { shouldEncryptRoomWithSingle3rdPartyInvite } from "../../utils/room/shouldEncryptRoomWithSingle3rdPartyInvite";
@@ -443,6 +444,11 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     private roomView = createRef<HTMLDivElement>();
     private searchResultsPanel = createRef<ScrollPanel>();
     private messagePanel: TimelinePanel | null = null;
+    // Drives the in-timeline "k of N" search match stepper (header arrows). Always present; renders nothing
+    // until it has matches.
+    public readonly searchNavVm = new RoomSearchNavigationViewModel({
+        onActivateMatch: (match: SearchMatch, index: number): void => this.onActivateSearchMatch(match, index),
+    });
     private roomViewBody = createRef<HTMLDivElement>();
 
     private roomViewStore: RoomViewStore;
@@ -1066,6 +1072,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         //
         // (We could use isMounted, but facebook have deprecated that.)
         this.unmounted = true;
+
+        this.searchNavVm.dispose();
 
         this.context.legacyCallHandler.removeListener(LegacyCallHandlerEvent.CallState, this.onCallState);
 
@@ -1800,6 +1808,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         const abortController = new AbortController();
         const promise = eventSearch(this.context.client!, term, roomId, abortController.signal);
 
+        // Reset the match stepper for the new query; matches are populated once results arrive via onSearchUpdate.
+        this.searchNavVm.setMatches([]);
+
         this.setState({
             timelineRenderingType: TimelineRenderingType.Search,
             search: {
@@ -1820,13 +1831,46 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     };
 
     private onSearchUpdate = (inProgress: boolean, searchResults: ISearchResults | null, error: Error | null): void => {
+        // Phase 2 slice 1: in-timeline match stepping is enabled only for completed, single-room searches.
+        // All-rooms stepping (which would jump between rooms and re-mount RoomView) and stepping through pages
+        // beyond the loaded results are deferred to a later slice. Restricting to the completed result set also
+        // keeps the "k of N" stepper consistent rather than reflecting a partial/aborted page.
+        const canStep = !inProgress && searchResults !== null && this.state.search?.scope === SearchScope.Room;
+        const matches = canStep ? extractSearchMatches(searchResults) : [];
+        this.searchNavVm.setMatches(matches);
         this.setState({
             search: {
                 ...this.state.search!,
                 count: searchResults?.count,
+                matches: canStep ? matches : undefined,
+                // The stepper cursor is reset whenever the result set changes; keep view-state in sync with the VM.
+                currentMatchIndex: undefined,
                 error: error ?? undefined,
                 inProgress,
             },
+        });
+    };
+
+    /**
+     * Step the live timeline to a search match. Switches back to the room (live) timeline so the match is
+     * shown in context and reuses the existing ViewRoom → jump-and-highlight path, while keeping the search
+     * session alive so the user can keep stepping with the header arrows.
+     */
+    private onActivateSearchMatch = (match: SearchMatch, index: number): void => {
+        // Flip to the live timeline before the (async) ViewRoom dispatch lands, so onRoomViewStoreUpdate does
+        // not treat this as a "clicked a search result" and tear the search down. `currentMatchIndex` drives
+        // the body to show the live timeline instead of the results list.
+        this.setState((state) => ({
+            timelineRenderingType: TimelineRenderingType.Room,
+            search: state.search ? { ...state.search, currentMatchIndex: index } : undefined,
+        }));
+        defaultDispatcher.dispatch<ViewRoomPayload>({
+            action: Action.ViewRoom,
+            room_id: match.roomId,
+            event_id: match.eventId,
+            highlighted: true,
+            scroll_into_view: true,
+            metricsTrigger: undefined, // we stay within the same search session
         });
     };
 
@@ -1955,6 +1999,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     }, 300);
 
     private onCancelSearchClick = (): Promise<void> => {
+        this.searchNavVm.setMatches([]);
         return new Promise<void>((resolve) => {
             this.setState(
                 {
@@ -2432,13 +2477,22 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
         const hiddenHighlightCount = this.getHiddenHighlightCount();
 
+        // While stepping through matches in the live timeline (currentMatchIndex set), we show the live
+        // MessagePanel jumped to the match instead of the results list, but keep the search header.
+        const isSteppingSearchMatch =
+            this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) >= 0;
+
         let aux: JSX.Element | undefined;
         let previewBar;
-        if (this.state.timelineRenderingType === TimelineRenderingType.Search) {
+        if (
+            this.state.search &&
+            (this.state.timelineRenderingType === TimelineRenderingType.Search || isSteppingSearchMatch)
+        ) {
             if (!isRoomEncryptionLoading) {
                 aux = (
                     <RoomSearchAuxPanel
                         searchInfo={this.state.search}
+                        navigationVm={this.searchNavVm}
                         onCancelClick={this.onCancelSearchClick}
                         onSearchScopeChange={this.onSearchScopeChange}
                         isRoomEncrypted={isRoomEncrypted}
@@ -2542,7 +2596,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         let searchResultsPanel;
         let hideMessagePanel = false;
 
-        if (this.state.search) {
+        if (this.state.search && !isSteppingSearchMatch) {
             searchResultsPanel = (
                 <RoomSearchView
                     key={this.state.search.searchId}

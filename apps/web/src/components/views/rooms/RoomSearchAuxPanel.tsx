@@ -10,6 +10,7 @@ import React from "react";
 import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/search";
 import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
 import { IconButton, Link } from "@vector-im/compound-web";
+import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
 
 import { _t } from "../../../languageHandler";
 import { PosthogScreenTracker } from "../../../PosthogTrackers";
@@ -20,12 +21,26 @@ import InlineSpinner from "../elements/InlineSpinner";
 interface Props {
     searchInfo?: SearchInfo;
     isRoomEncrypted: boolean;
+    /**
+     * View model driving the in-timeline "k of N" match stepper. When provided and it has matches, the
+     * counter and up/down arrows are shown in the header.
+     */
+    navigationVm?: SearchMatchNavigationViewModel;
     onSearchScopeChange(this: void, scope: SearchScope): void;
     onCancelClick(this: void): void;
 }
 
-const RoomSearchAuxPanel: React.FC<Props> = ({ searchInfo, isRoomEncrypted, onSearchScopeChange, onCancelClick }) => {
+const RoomSearchAuxPanel: React.FC<Props> = ({
+    searchInfo,
+    isRoomEncrypted,
+    navigationVm,
+    onSearchScopeChange,
+    onCancelClick,
+}) => {
     const scope = searchInfo?.scope ?? SearchScope.Room;
+    // While stepping matches in the live timeline, the "k of N" stepper is the source of truth for position,
+    // so we hide the (differently-counted) "N results found" summary to avoid showing two conflicting totals.
+    const isSteppingMatch = (searchInfo?.currentMatchIndex ?? -1) >= 0;
 
     return (
         <>
@@ -34,7 +49,7 @@ const RoomSearchAuxPanel: React.FC<Props> = ({ searchInfo, isRoomEncrypted, onSe
                 <div className="mx_RoomSearchAuxPanel_summary">
                     <SearchIcon width="24px" height="24px" />
                     <div className="mx_RoomSearchAuxPanel_summary_text">
-                        {searchInfo?.count !== undefined ? (
+                        {isSteppingMatch ? null : searchInfo?.count !== undefined ? (
                             _t(
                                 "room|search|summary",
                                 { count: searchInfo.count },
@@ -49,6 +64,7 @@ const RoomSearchAuxPanel: React.FC<Props> = ({ searchInfo, isRoomEncrypted, onSe
                     </div>
                 </div>
                 <div className="mx_RoomSearchAuxPanel_buttons">
+                    {navigationVm && <SearchMatchNavigation vm={navigationVm} />}
                     <Link
                         onClick={() =>
                             onSearchScopeChange(scope === SearchScope.Room ? SearchScope.All : SearchScope.Room)
