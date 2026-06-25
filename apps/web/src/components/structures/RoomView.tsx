@@ -860,16 +860,33 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // End the search when the user clicks a result — a non-stepping ViewRoom that points the live timeline at an
         // event. While searching, the live timeline is kept un-pinned (onSearch and onBackToSearchResults call
         // resetFocusedEvent so getInitialEventId() is null when idle in the results list), so a non-null focused
-        // event here means the user just navigated to a result. A stepping jump is excluded via the flag consumed
-        // above — relying on that rather than the synchronous flip to Room mode, which is racy on its own.
+        // event here means the user just navigated to a result.
+        //
+        // Our OWN navigations (stepping to a match, or the async no-event_id ViewRoom resetFocusedEvent fires on the
+        // way back to the list) must be excluded. The `!wasSteppingJump` one-shot flag does that in the common case,
+        // but it is racy: on the packaged build, unrelated RoomViewStore emissions (sync, receipts, the sliding-sync
+        // re-dispatch) fire constantly while a search is active and can consume the flag before our own ViewRoom
+        // update lands — so the update then sees it already false and the gate wrongly tore the session down ("the
+        // search resets itself"). The durable guard is SearchSessionStore.steppingTarget: the event our in-flight
+        // navigation pinned. A focused event equal to it is ours (the match we stepped to, or the event still pinned
+        // for the window before the clearing ViewRoom lands), so the gate fires only for an event the user actually
+        // navigated to that we did NOT pin — immune to the flag being consumed early (search Phase 8b).
+        const focusedEventId = this.roomViewStore.getInitialEventId();
         if (
             this.state.timelineRenderingType === TimelineRenderingType.Search &&
             !wasSteppingJump &&
-            this.roomViewStore.getInitialEventId()
+            focusedEventId &&
+            focusedEventId !== SearchSessionStore.instance.steppingTarget
         ) {
             newState.timelineRenderingType = TimelineRenderingType.Room;
             SearchSessionStore.instance.clear({ abort: true });
             newState.search = undefined;
+        } else if (!focusedEventId && SearchSessionStore.instance.steppingTarget !== null) {
+            // Our own clearing navigation (resetFocusedEvent's no-event_id ViewRoom) has landed: the live timeline is
+            // un-pinned again, idle in the results list. Drop the durable stepping target so a later genuine re-click
+            // of the previously-stepped/started event is recognised as a user navigation and ends the search. This is
+            // race-free: the gate above is inert while focus is null, so the brief window it protected is over.
+            SearchSessionStore.instance.clearSteppingTarget();
         }
 
         if (
@@ -2027,10 +2044,11 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // path does in RoomSearchNavigationViewModel.activate. Without this, a dropdown row click moved only the
         // local view-state cursor, leaving the store at -1 — so the store-backed "k of N" counter stayed "0 of N"
         // (no indication which result was opened) and a subsequent Enter-step restarted from the newest match
-        // instead of the clicked one (search Phase 8, Bug #1). beginSteppingJump also flags the upcoming ViewRoom as
-        // internal so the result-click clear gate never tears the session down for this navigation. Both calls are
-        // idempotent no-ops when reached via the arrow/Enter path (which already set them with the same index).
-        SearchSessionStore.instance.beginSteppingJump();
+        // instead of the clicked one (search Phase 8, Bug #1). beginSteppingJump also records this match as the
+        // in-flight navigation target so the result-click clear gate never tears the session down for this jump, even
+        // if its one-shot flag is consumed early by an unrelated emission (search Phase 8b). Both calls are idempotent
+        // no-ops when reached via the arrow/Enter path (which already set them with the same index/event).
+        SearchSessionStore.instance.beginSteppingJump(match.eventId);
         SearchSessionStore.instance.setCurrentMatchIndex(index);
         // Flip to the live timeline before the (async) ViewRoom dispatch lands, so onRoomViewStoreUpdate does
         // not treat this as a "clicked a search result" and tear the search down. `currentMatchIndex` drives
@@ -2244,8 +2262,14 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
      */
     private resetFocusedEvent(): void {
         const roomId = this.getRoomId();
-        if (roomId && this.roomViewStore.getInitialEventId()) {
-            SearchSessionStore.instance.beginSteppingJump();
+        const focusedEventId = this.roomViewStore.getInitialEventId();
+        if (roomId && focusedEventId) {
+            // Record the event we are clearing FROM as the in-flight navigation target. The clearing ViewRoom is
+            // async, so for the whole window before it lands the live timeline is still pinned to focusedEventId while
+            // we are already back in Search mode — the clear gate must treat that focused event as ours, or a racing
+            // RoomViewStore emission that consumed the one-shot flag tears the surviving session down (search Phase
+            // 8b). Passing null here would leave that window unguarded once the flag is gone.
+            SearchSessionStore.instance.beginSteppingJump(focusedEventId);
             defaultDispatcher.dispatch<ViewRoomPayload>({
                 action: Action.ViewRoom,
                 room_id: roomId,

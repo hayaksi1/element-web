@@ -85,9 +85,10 @@ export class RoomSearchNavigationViewModel
     };
 
     private activate(index: number): void {
-        // Flag the upcoming ViewRoom dispatch as a stepping jump so RoomView's clear gates leave the session alone,
-        // then move the cursor (which emits Update → recomputes this snapshot via onStoreUpdate).
-        this.store.beginSteppingJump();
+        // Flag the upcoming ViewRoom dispatch as a stepping jump to this match's event so RoomView's clear gates leave
+        // the session alone (durably — by event id — not just via the one-shot flag), then move the cursor (which
+        // emits Update → recomputes this snapshot via onStoreUpdate).
+        this.store.beginSteppingJump(this.store.matches[index].eventId);
         this.store.setCurrentMatchIndex(index);
         this.props.onActivateMatch(this.store.matches[index], index);
     }

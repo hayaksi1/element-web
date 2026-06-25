@@ -162,8 +162,9 @@ describe("RoomView", () => {
                 abortController: search.abortController ?? new AbortController(),
             });
             ref.current!.setState({ timelineRenderingType: TimelineRenderingType.Search, search });
-            if (stores.roomViewStore.getInitialEventId()) {
-                SearchSessionStore.instance.beginSteppingJump();
+            const focusedEventId = stores.roomViewStore.getInitialEventId();
+            if (focusedEventId) {
+                SearchSessionStore.instance.beginSteppingJump(focusedEventId);
                 defaultDispatcher.dispatch<ViewRoomPayload>({
                     action: Action.ViewRoom,
                     room_id: room.roomId,
@@ -678,6 +679,81 @@ describe("RoomView", () => {
             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBeUndefined();
         });
 
+        it("keeps the search alive when a RoomViewStore update races the return-to-results transition (dropdown reset bug)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+
+            await screen.findByText("0 of 2", { exact: false });
+
+            // Step into the newest match: the live timeline (Room mode) is pinned to $newer.
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await screen.findByText("1 of 2", { exact: false });
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$newer");
+
+            // Return to the results list. onBackToSearchResults flips back to Search mode and resetFocusedEvent
+            // dispatches an ASYNC (window.setTimeout) clearing ViewRoom — so for the whole window before it lands, the
+            // live timeline is still pinned to $newer while we are already back in Search mode showing the dropdown.
+            fireEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$newer");
+            // The durable guard records the still-pinned match and survives the return-to-results re-render (which
+            // re-mounts RoomSearchView and re-fires updateResults) — without this it was nulled and the gate reset.
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$newer");
+
+            // Model the packaged-desktop race jsdom never produces on its own: a background RoomViewStore emission
+            // (sync / read receipts / the sliding-sync re-dispatch) lands in that window and consumes the one-shot
+            // stepping-jump flag, then the next emission re-evaluates the clear gate while $newer is still pinned.
+            // Microtask-only flush (no flushPromises, which would run the pending clearing ViewRoom macrotask and null
+            // the focus), so $newer remains the focused event the gate sees.
+            await act(async () => {
+                SearchSessionStore.instance.consumeSteppingJump(); // an unrelated update consumed the flag early
+                stores.roomViewStore.emit(UPDATE_EVENT); // the next unrelated update re-evaluates the clear gate
+            });
+
+            // The session must survive: pre-fix the clear gate fired and tore it down — the user's "it resets itself".
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$newer");
+
+            // Drain the deferred clearing ViewRoom (held pending above to keep the race window open) so its timer
+            // can't leak into the next test; once it lands the timeline un-pins and the session stays alive.
+            await flushPromises();
+            expect(roomViewRef.current!.state.search).toBeDefined();
+        });
+
         it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
@@ -1033,7 +1109,7 @@ describe("RoomView", () => {
             // A stepping jump is in flight (flag set, not yet consumed). An EditEvent dispatched in this window must
             // NOT tear the surviving session down (a genuine edit, with no jump in flight, still closes it).
             act(() => {
-                SearchSessionStore.instance.beginSteppingJump();
+                SearchSessionStore.instance.beginSteppingJump("$m1");
                 defaultDispatcher.dispatch({
                     action: Action.EditEvent,
                     event: matchEvent,

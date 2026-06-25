@@ -176,14 +176,14 @@ describe("SearchSessionStore", () => {
 
         it("begin sets it; isSteppingJump reads it non-destructively", () => {
             start();
-            store.beginSteppingJump();
+            store.beginSteppingJump("$e");
             expect(store.isSteppingJump()).toBe(true);
             expect(store.isSteppingJump()).toBe(true);
         });
 
         it("consume returns true once then false", () => {
             start();
-            store.beginSteppingJump();
+            store.beginSteppingJump("$e");
             expect(store.consumeSteppingJump()).toBe(true);
             expect(store.consumeSteppingJump()).toBe(false);
         });
@@ -192,7 +192,7 @@ describe("SearchSessionStore", () => {
             start();
             const listener = jest.fn();
             store.on(SearchSessionStoreEvent.Update, listener);
-            store.beginSteppingJump();
+            store.beginSteppingJump("$e");
             store.consumeSteppingJump();
             expect(listener).not.toHaveBeenCalled();
             store.off(SearchSessionStoreEvent.Update, listener);
@@ -200,16 +200,58 @@ describe("SearchSessionStore", () => {
 
         it("auto-resets when fresh results arrive", () => {
             start();
-            store.beginSteppingJump();
+            store.beginSteppingJump("$e");
             store.updateResults({ inProgress: false, matches: [] });
             expect(store.isSteppingJump()).toBe(false);
         });
 
         it("is cleared when the session is cleared", () => {
             start();
-            store.beginSteppingJump();
+            store.beginSteppingJump("$e");
             store.clear();
             expect(store.isSteppingJump()).toBe(false);
+        });
+    });
+
+    describe("steppingTarget (durable navigation guard)", () => {
+        it("defaults to null", () => {
+            start();
+            expect(store.steppingTarget).toBeNull();
+        });
+
+        it("begin records the event id and survives the one-shot flag being consumed", () => {
+            start();
+            store.beginSteppingJump("$hit");
+            expect(store.steppingTarget).toBe("$hit");
+            // Consuming the flag (an unrelated update would) must NOT clear the durable target — that is the whole
+            // point: the result-click clear gate still recognises our own navigation after the flag is gone.
+            store.consumeSteppingJump();
+            expect(store.steppingTarget).toBe("$hit");
+        });
+
+        it("persists across fresh results (so the return-to-results re-render does not unguard the clear gate)", () => {
+            start();
+            store.beginSteppingJump("$hit");
+            // Returning from stepping re-mounts the hidden RoomSearchView, which re-resolves the promise and calls
+            // updateResults again — the durable target must survive that so the clear gate stays guarded for the
+            // return-to-list window. (The one-shot flag still resets here.)
+            store.updateResults({ inProgress: false, matches: [] });
+            expect(store.steppingTarget).toBe("$hit");
+            expect(store.isSteppingJump()).toBe(false);
+        });
+
+        it("resets to null on a new search session (start)", () => {
+            start();
+            store.beginSteppingJump("$hit");
+            start();
+            expect(store.steppingTarget).toBeNull();
+        });
+
+        it("resets to null when the session is cleared", () => {
+            start();
+            store.beginSteppingJump("$hit");
+            store.clear();
+            expect(store.steppingTarget).toBeNull();
         });
     });
 
