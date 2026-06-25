@@ -2122,6 +2122,7 @@
         "search": {
             "all_rooms_button": "Search all rooms",
             "back_to_results": "Back to results",
+            "jump_to_date_button": "Jump to date",
             "nudge_description": "Enable the in-room search shortcut to search this conversation instead of your browser's find-on-page.",
             "nudge_title": "Search this room",
             "placeholder": "Search messages…",

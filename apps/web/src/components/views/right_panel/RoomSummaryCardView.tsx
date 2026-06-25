@@ -50,6 +50,7 @@ import { topicToHtml } from "../../../HtmlUtils.tsx";
 import { useRoomSummaryCardViewModel } from "../../viewmodels/right_panel/RoomSummaryCardViewModel.tsx";
 import { useRoomTopicViewModel } from "../../viewmodels/right_panel/RoomSummaryCardTopicViewModel.tsx";
 import { useRoomName } from "../../../hooks/useRoomName.ts";
+import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate.tsx";
 
 interface IProps {
     room: Room;
@@ -207,19 +208,25 @@ const RoomSummaryCardView: React.FC<IProps> = ({
 
     const header = onSearchChange && (
         <Form.Root className="mx_RoomSummaryCard_search" onSubmit={(e) => e.preventDefault()}>
-            <Search
-                placeholder={_t("room|search|placeholder")}
-                name="room_message_search"
-                onChange={(e) => {
-                    setSearchValue(e.currentTarget.value);
-                    onSearchChange(e.currentTarget.value);
-                }}
-                value={searchValue}
-                className="mx_no_textinput"
-                ref={vm.searchInputRef}
-                autoFocus={focusRoomSearch}
-                onKeyDown={vm.onUpdateSearchInput}
-            />
+            <Flex align="center" gap="var(--cpd-space-2x)">
+                <Box flex="1" className="mx_RoomSummaryCard_searchInput">
+                    <Search
+                        placeholder={_t("room|search|placeholder")}
+                        name="room_message_search"
+                        onChange={(e) => {
+                            setSearchValue(e.currentTarget.value);
+                            onSearchChange(e.currentTarget.value);
+                        }}
+                        value={searchValue}
+                        className="mx_no_textinput"
+                        ref={vm.searchInputRef}
+                        autoFocus={focusRoomSearch}
+                        onKeyDown={vm.onUpdateSearchInput}
+                    />
+                </Box>
+                {/* Telegram-style "jump to date" calendar; renders only when jump-to-date is enabled (MSC3030). */}
+                <RoomSearchJumpToDate key={room.roomId} roomId={room.roomId} />
+            </Flex>
         </Form.Root>
     );
 
