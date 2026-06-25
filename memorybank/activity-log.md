@@ -1448,3 +1448,26 @@ eslint `--max-warnings 0` / prettier / i18n:lint clean. Jest via `scratchpad/web
   `@matrix-org/analytics-events` schema add.
 - **Slice 2 is UNCOMMITTED** (working tree has the slice-2 changes; jest needs the `--transformIgnorePatterns`
   workaround). Review and commit when ready, per the per-slice commit cadence (slice 1 = `f9adbf3`).
+
+## Session 26 (2026-06-25) — Phase 4: typed, searchable shared-media tabs (CORRECTED SCOPE) — DONE
+
+Phase 3 slice 2 was committed+pushed before this session (`24aaa29` feat + `7ba0e59` docs; origin/main = `7ba0e59`).
+
+**Pivotal correction (verified, not assumed):** the master plan's Phase-4 premise — "`isValidEvent` excludes media-only
+events, so filenames aren't indexed → needs INDEX_VERSION bump + full Seshat re-backfill" — is **FALSE**.
+`isValidEvent` (EventIndex.ts:555-579) has no media exclusion; media are `m.room.message` with a truthy `content.body`
+(every upload sets `body: fileName`, ContentMessages.ts:566) → already pass → **media filenames are ALREADY indexed &
+searchable in ⌘F**. Bumping INDEX_VERSION alone is also a no-op (no version-compare code; EventIndexPeg only handles
+`userVersion===0`). The only genuine gap (split-format received media: body=caption, filename=realname) can't be fixed
+cleanly anyway — native Seshat indexes `body` only → needs a Rust/Hak rebuild. Surfaced this; **user (away) chose the
+corrected scope: typed+searchable tabs, NO re-backfill.**
+
+**Built (TDD, 7-agent Understand + 5-lens adversarial review):** see `memorybank/search-phase4-plan.md` §4a for the full
+file list + review outcomes. Core: additive optional `TimelinePanel.eventFilter` (filters the *displayed* list only;
+full window kept for pagination) ← `RoomFilesView` (MVVM v2: `RoomFilesViewModel` {activeCategory, searchTerm}, Compound
+`ChatFilter` tab row + `Search`, arrow/Home/End keyboard nav) ← `FilePanel`. Pure `utils/FileCategory.ts` classifies
+All/Media/Files/Music/Voice (**Links deferred** — `contains_url` data source ≠ hyperlinks-in-text).
+
+**Review:** 24 findings → 2 confirmed & FIXED (empty-state guard ignored the filter → blank panel on no-match tab/search;
+listbox had no keyboard nav), 20 adversarially refuted, 0 deferred. **Verified:** 75 affected Jest green; tsc clean (4
+vendored only); eslint/prettier/i18n:lint clean. Committed + pushed at end of session.

@@ -163,3 +163,7 @@ Per the master plan: Phase 3's structured filters (jump-to-date slice 1 + sender
 `search-improvement-plan.md` §5 is **Phase 4** (split `FilePanel` into searchable Media/Files/Links/Music/Voice tabs;
 needs INDEX_VERSION bump + re-backfill to index media filenames). Combining `from:` + jump-to-date + term into one query
 ("from Alice in March") is a natural Phase 3 polish if wanted before Phase 4.
+
+> **DECISION LOCKED (session 26, AskUserQuestion):** Build **Phase 4 FULL** — media tabs **plus** the
+> `INDEX_VERSION` bump + full local Seshat re-backfill so media filenames/captions become discoverable in the main ⌘F
+> search. User accepted the one-time storage/compute cost. Detailed slice plan: see `search-phase4-plan.md`.
