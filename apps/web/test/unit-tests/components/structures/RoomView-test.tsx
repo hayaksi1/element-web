@@ -338,6 +338,61 @@ describe("RoomView", () => {
             expect(ref.current!.state.search!.currentMatchIndex).toBe(0);
         });
 
+        it("syncs the SearchSessionStore cursor to the clicked row so the counter and Enter-stepping anchor on it (Bug #1)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            const ref = createRef<RoomView>();
+            const { container } = await mountRoomView(ref);
+            expect(ref.current).toBeTruthy();
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const mkResult = (eventId: string, body: string, ts: number): SearchResult =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            content: { body, msgtype: "m.text" },
+                            type: "m.room.message",
+                            event_id: eventId,
+                            sender: "@alice:example.org",
+                            origin_server_ts: ts,
+                            room_id: room.roomId,
+                        },
+                        context: { events_before: [], events_after: [], profile_info: {} },
+                    },
+                    eventMapper,
+                );
+            // Two results; newest-first ordering puts $newer at row 0 and $older at row 1.
+            startSearch(ref, {
+                searchId: 9,
+                roomId: room.roomId,
+                term: "gemini",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [mkResult("$newer", "newer hit", 5000), mkResult("$older", "older hit", 4000)],
+                    highlights: [],
+                    count: 2,
+                }) as unknown as SearchInfo["promise"],
+            });
+
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("older hit")).toBeInTheDocument();
+                return el;
+            });
+
+            // Click the SECOND row ($older, index 1).
+            const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
+            await userEvent.click(within(dropdown).getByText("older hit"));
+            await expect(prom).resolves.toEqual(expect.objectContaining({ event_id: "$older" }));
+
+            // The shared store cursor must move to the clicked index (1), not stay at -1 — this is what drives the
+            // store-backed "k of N" counter and the anchor for a subsequent Enter-step. Before the fix it stayed -1,
+            // so the counter read "0 of 2" and the next Enter restarted stepping from the newest match.
+            expect(SearchSessionStore.instance.currentMatchIndex).toBe(1);
+            // The header counter therefore reflects the clicked result (1-based): "2 of 2".
+            await screen.findByText("2 of 2", { exact: false });
+        });
+
         it("keeps the live timeline visible behind the bounded results dropdown (Phase 7 — Bug #2)", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
             const ref = createRef<RoomView>();

@@ -214,4 +214,42 @@ describe("RoomSearchHeader", () => {
         expect(screen.getByTestId("search-order-toggle-button")).toBeInTheDocument();
         expect(screen.getByTestId("search-sender-filter-button")).toBeInTheDocument();
     });
+
+    it("returns to the results list when the search box is clicked while a match is focused (Bug #2)", async () => {
+        const onBackToResults = jest.fn();
+        renderHeader({
+            onBackToResults,
+            // currentMatchIndex >= 0 means a match is focused in the live timeline (stepping), so the dropdown is
+            // hidden. Clicking the search box is the user's intuitive way to bring the results list back.
+            searchInfo: {
+                searchId: 1234,
+                count: 3,
+                term: "abcd",
+                scope: SearchScope.Room,
+                promise: new Promise(() => {}),
+                currentMatchIndex: 0,
+            },
+        });
+
+        await userEvent.click(screen.getByPlaceholderText("Search messages…"));
+        expect(onBackToResults).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not return to the results list when the search box is clicked while not stepping", async () => {
+        const onBackToResults = jest.fn();
+        renderHeader({
+            onBackToResults,
+            // No focused match (results list already visible) — clicking the box is a plain focus, not a return.
+            searchInfo: {
+                searchId: 1234,
+                count: 3,
+                term: "abcd",
+                scope: SearchScope.Room,
+                promise: new Promise(() => {}),
+            },
+        });
+
+        await userEvent.click(screen.getByPlaceholderText("Search messages…"));
+        expect(onBackToResults).not.toHaveBeenCalled();
+    });
 });

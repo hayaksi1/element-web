@@ -2023,6 +2023,15 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
      * session alive so the user can keep stepping with the header arrows.
      */
     private onActivateSearchMatch = (match: SearchMatch, index: number): void => {
+        // Mirror the focused-match cursor into the shared SearchSessionStore, exactly like the arrow/Enter stepping
+        // path does in RoomSearchNavigationViewModel.activate. Without this, a dropdown row click moved only the
+        // local view-state cursor, leaving the store at -1 — so the store-backed "k of N" counter stayed "0 of N"
+        // (no indication which result was opened) and a subsequent Enter-step restarted from the newest match
+        // instead of the clicked one (search Phase 8, Bug #1). beginSteppingJump also flags the upcoming ViewRoom as
+        // internal so the result-click clear gate never tears the session down for this navigation. Both calls are
+        // idempotent no-ops when reached via the arrow/Enter path (which already set them with the same index).
+        SearchSessionStore.instance.beginSteppingJump();
+        SearchSessionStore.instance.setCurrentMatchIndex(index);
         // Flip to the live timeline before the (async) ViewRoom dispatch lands, so onRoomViewStoreUpdate does
         // not treat this as a "clicked a search result" and tear the search down. `currentMatchIndex` drives
         // the body to show the live timeline instead of the results list.
