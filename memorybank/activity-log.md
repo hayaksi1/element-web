@@ -1471,3 +1471,35 @@ All/Media/Files/Music/Voice (**Links deferred** — `contains_url` data source �
 **Review:** 24 findings → 2 confirmed & FIXED (empty-state guard ignored the filter → blank panel on no-match tab/search;
 listbox had no keyboard nav), 20 adversarially refuted, 0 deferred. **Verified:** 75 affected Jest green; tsc clean (4
 vendored only); eslint/prettier/i18n:lint clean. Committed + pushed at end of session.
+
+## Session 27 (2026-06-25) — Search Phase 5 **slice 1**: relevance-vs-recency order toggle (TDD + adversarial review)
+
+User away; pre-authorised "choose the recommended / closest-to-Telegram option". Picked Phase 5's one concrete,
+user-facing, self-contained deliverable: a **Recent / Relevant result-order toggle** in the search header. Evidence base:
+a 5-agent Understand workflow (`phase5-relevance-understand`) tracing result-ordering across all 4 search paths +
+the `senders` threading template. Full design: `memorybank/search-phase5-plan.md`.
+
+**Correctness crux (the whole reason this is sliced the way it is):** only the **single-source pass-through** paths
+honour a backend order — server-only (`order_by: Rank`) and Seshat-single-room (`order_by_recency: false` →
+tantivy/BM25 relevance). The **combined (All-rooms)** and **chain (predecessor)** paths re-sort client-side by recency
+(`compareEvents`) and their sliding-window/k-way-merge pagination invariant only holds for recency-sorted legs — so
+honouring Rank there would silently corrupt cross-page order. Resolved **by construction**: `order` (default
+`SearchOrderBy.Recent`) is threaded ONLY into the single-source legs; `combinedSearch`/`chainSearchProcess` never
+receive it (forced recency, documented; merge-by-rank redesign deferred to slice 5.3).
+
+**Built (TDD, RED verified first):** `Searching.ts` — `order` threaded eventSearch → eventIndexSearch →
+serverSideSearch(Process)/localSearch(Process)/buildSeshatSearchArgs; `SearchInfo.order` + `SearchSessionParams.order`
+(session identity, preserved by start/updateResults); `searchInfoFromSession` carries `order` (the slice-2
+dropped-`senders` bug analog); `RoomView.onSearch` order param (defaults from session → term/scope/sender changes
+preserve it) + `onSearchOrderChange`; prop chain RoomView → RightPanel → RoomSummaryCardView → new dumb View
+`RoomSearchOrderToggle.tsx` (Compound `Menu` + 2 `RadioMenuItem`, `IconButton` `chevron-up-down`, controlled, active
+aria-label + indicator dot). 4 i18n `room|search|order_*` keys. Stepping (`extractSearchMatches`) stays chronological
+under Rank by design.
+
+**Review:** 5-lens adversarial workflow (`phase5-slice1-review`, 19 agents) → **7 confirmed / 7 refuted** (refuted set
+correctly included the documented all-rooms deferral). Applied: a11y active-state aria-label (`order_toggle_button_active`,
+mirroring the sender filter), `key={room.roomId}`, refreshed `extractSearchMatches` doc comment, deduped test helper, +
+4 added tests (order survives cross-room remount; chain-path force-recency leak guard; order preserved across a
+sender-filter change; indicator-dot present/absent). **Verified:** 207 Jest across 8 suites; tsc clean (4 vendored only);
+eslint/prettier/i18n:lint clean. **Decision logged:** portable offline encrypted **web** search stays **Desktop-only**
+(offline-only/no-CDN constraint; multi-week spike). Committed + pushed at end of session.
