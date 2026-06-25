@@ -1,5 +1,67 @@
 # Activity Log
 
+## 2026-06-25 (session 23) — Search Phase 2 slice 6: cross-room/all-rooms/predecessor stepping via a SearchSessionStore (+ stale-initialEventId fix)
+
+Directive: "continue the task, read memorybank." Slices 1–5 committed (HEAD `d1998d7`, working tree clean — the
+session-22 plan's "committed+pushed" for slice 5 was accurate). Picked up **Slice 6**, the largest/HIGH-risk piece:
+make in-timeline match stepping survive RoomView's room-id-keyed remount so it works cross-room (all-rooms scope +
+upgraded predecessor rooms). **User decision (AskUserQuestion):** include all-rooms scope in this slice.
+
+### Architecture (mapped first via a 6-agent Understand workflow, then verified by hand)
+RoomView is keyed by room id (`LoggedInView.tsx:737`), so a cross-room `ViewRoom` unmounts/remounts it and destroyed
+the in-instance search session. Fix: lift the session into a **new singleton `apps/web/src/stores/SearchSessionStore.ts`**
+(plain `EventEmitter`, UIStore-style `static get instance`, self-registers `defaultDispatcher` for
+`Action.OnLoggedOut → clear({abort:true})`). It owns `{searchId, roomId?, term, scope, promise, abortController?,
+matches[] (cross-room, unfiltered, newest-first), currentMatchIndex(-1=none), highlights[], count?, inProgress, error?}`
+plus a transient `steppingJump` flag (not emitted). `RoomSearchNavigationViewModel` now reads/writes the store via
+`disposables.trackListener` (state moved off the instance, so it survives the remount). `state.search` stays as
+RoomView's per-mount render mirror, **re-seeded from the store in the constructor** when the focused match is in this
+room (no results-list flash).
+
+### Shipped (TDD RED→GREEN per task)
+- **SearchSessionStore** (+18 Jest): `start` (aborts+replaces previous), `updateResults` (resets cursor + steppingJump),
+  `setCurrentMatchIndex` (no-op-guarded), `clear({abort})`, `begin/consume/isSteppingJump`, `hasActiveSession`,
+  `getSnapshot`, logout reset.
+- **VM migration** (+16): reads store; `next/previous` compute the wrapped index, `beginSteppingJump`+`setCurrentMatchIndex`,
+  then `onActivateMatch`. Disposal removes the store listener (factory in the test prevents singleton listener leak).
+- **RoomView**: `onSearch`→`store.start`; `onSearchUpdate`→`store.updateResults` with the **full** `extractSearchMatches`
+  (REMOVED the slice-4 `.filter(current-room)` + `scope===Room` gate → predecessor + all-rooms steppable);
+  `onActivateSearchMatch` flips Room mode + dispatch (VM already flagged); `onCancelSearchClick`→`store.clear({abort:true})`
+  (the only real abort); `onBackToSearchResults`→`setCurrentMatchIndex(-1)` + `resetFocusedEvent`; constructor rehydration.
+- **Clear gates**: result-click teardown is a **positive gate** (`Search && !consumeSteppingJump() && getInitialEventId()`)
+  + `resetFocusedEvent()` (flag-guarded no-`event_id` ViewRoom) on `onSearch` AND `onBackToSearchResults` so the timeline
+  is never pinned while idle in the list — fixes the deferred stale-`initialEventId` re-click no-op **and** lets clicking
+  the event the search was started on end the search. `EditEvent` clear guarded by `!isSteppingJump()`.
+- **Tests**: reversed the slice-4 "does not step to a predecessor room" + "does not enable stepper for all-rooms" tests
+  to assert the new cross-room behaviour; added remount-rehydrate, result-click-clears, stale-id-fix, started-on-event-
+  clears, abort-not-on-unmount, edit-during-stepping-jump. RoomView-test **70**.
+
+### Key bug found & fixed mid-implementation (not by the review)
+The first clear-gate cut keyed on `this.state.initialEventId !== newState.initialEventId`, which is **racy** across the
+rapid `onRoomViewStoreUpdate` calls the back-to-results self-dispatch triggers (the component-state mirror is read stale).
+Replaced with a fixed `searchStartEventId` baseline, then — after the review (below) — with the cleaner positive gate +
+`resetFocusedEvent`.
+
+### Adversarial review (4-lens workflow: races / store-lifecycle / regression / test-quality → per-finding Opus verify)
+34 agents. **All** race/lifecycle "criticals" REFUTED (dispatcher-leak, VM listener-leak, multiple-update races,
+constructor `getRoomId` race, lingering-session re-appear, back-to-results race — JS run-to-completion + the structural
+gate guards hold). **One real (narrow) bug:** the `searchStartEventId` baseline left a result-click on the event the
+search was *started on* as a no-op → **fixed** by switching to the positive gate + `resetFocusedEvent` (also removed the
+baseline field). Closed 3 test gaps; added a `setCurrentMatchIndex` no-op double-emit guard. (A verify-subagent had
+injected two brittle `FINDING-REPRO` tests calling private methods into RoomView-test — removed them.)
+
+### Verification (all green)
+175 search-related web Jest + 75 adjacent; `tsc` only the 4 pre-existing vendored matrix-js-sdk errors; eslint
+`--max-warnings 0` + prettier clean; no new i18n. Jest via the `--transformIgnorePatterns` workaround (`scratchpad/webjest.sh`,
+allowlist incl. `@element-hq/web-shared-components`). **Not verifiable here:** real Seshat cross-room round-trip + the
+actual LoggedInView remount on a live build (the unit tests simulate the remount via a fresh mount + seeded store).
+
+### Next
+Commit prepared (`feat(web): cross-room/all-rooms search stepping via SearchSessionStore (search Phase 2 slice 6)`);
+**push pending user OK** (per recent-session convention). Then **Phase 3** (from:/jump-to-date filters) → Phase 4
+(searchable media tabs) → Phase 5 (reach/ranking/health-check). PostHog stepping metric still deferred (needs an upstream
+`Interaction` name in `@matrix-org/analytics-events`).
+
 ## 2026-06-25 (session 21) — Search Phase 2 slice 4: out-of-window/encrypted edge cases + predecessor-chain stepping safety
 
 Directive: "continue the task, read memorybank to detect where you are." Slices 1–3 done & committed (HEAD `277d3a8`);

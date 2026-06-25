@@ -10,13 +10,44 @@ import React from "react";
 import { render, screen } from "jest-matrix-react";
 
 import RoomSearchAuxPanel from "../../../../../src/components/views/rooms/RoomSearchAuxPanel";
-import { SearchScope } from "../../../../../src/Searching";
+import { type SearchMatch, SearchScope } from "../../../../../src/Searching";
 import { RoomSearchNavigationViewModel } from "../../../../../src/viewmodels/search/RoomSearchNavigationViewModel";
+import { SearchSessionStore } from "../../../../../src/stores/SearchSessionStore";
 
 describe("RoomSearchAuxPanel", () => {
+    const vms: RoomSearchNavigationViewModel[] = [];
+
+    // The match stepper now reads its cursor from the SearchSessionStore, so we seed the store rather than the VM.
+    const seedMatches = (matches: SearchMatch[]): void => {
+        const store = SearchSessionStore.instance;
+        store.start({
+            searchId: 1,
+            term: "abcd",
+            scope: SearchScope.Room,
+            promise: new Promise(() => {}),
+            abortController: new AbortController(),
+        });
+        store.updateResults({ inProgress: false, matches });
+    };
+
+    const makeVm = (): RoomSearchNavigationViewModel => {
+        const vm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+        vms.push(vm);
+        return vm;
+    };
+
+    beforeEach(() => {
+        SearchSessionStore.instance.clear({ abort: false });
+    });
+
+    afterEach(() => {
+        while (vms.length) vms.pop()!.dispose();
+        SearchSessionStore.instance.clear({ abort: false });
+    });
+
     it("should render the match navigation counter and arrows when a navigation view model has matches", () => {
-        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
-        navigationVm.setMatches([
+        const navigationVm = makeVm();
+        seedMatches([
             { roomId: "!r:e", eventId: "$a" },
             { roomId: "!r:e", eventId: "$b" },
         ]);
@@ -44,8 +75,8 @@ describe("RoomSearchAuxPanel", () => {
     });
 
     it("should keep the results-count summary visible while stepping a match (keep both, stepper labelled loaded)", () => {
-        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
-        navigationVm.setMatches([
+        const navigationVm = makeVm();
+        seedMatches([
             { roomId: "!r:e", eventId: "$a" },
             { roomId: "!r:e", eventId: "$b" },
         ]);
@@ -76,8 +107,8 @@ describe("RoomSearchAuxPanel", () => {
 
     it("shows a back-to-results button while stepping and invokes onBackToResults when clicked", () => {
         const onBackToResults = jest.fn();
-        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
-        navigationVm.setMatches([{ roomId: "!r:e", eventId: "$a" }]);
+        const navigationVm = makeVm();
+        seedMatches([{ roomId: "!r:e", eventId: "$a" }]);
         navigationVm.next(); // step to the first match
 
         render(
@@ -123,7 +154,7 @@ describe("RoomSearchAuxPanel", () => {
     });
 
     it("should not render match navigation when there are no matches", () => {
-        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+        const navigationVm = makeVm();
 
         render(
             <RoomSearchAuxPanel
