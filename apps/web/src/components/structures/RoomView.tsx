@@ -83,6 +83,8 @@ import RoomPreviewCard from "../views/rooms/RoomPreviewCard";
 import RoomUpgradeWarningBar from "../views/rooms/RoomUpgradeWarningBar";
 import AuxPanel from "../views/rooms/AuxPanel";
 import RoomHeader from "../views/rooms/RoomHeader/RoomHeader";
+import RoomSearchHeader from "../views/rooms/RoomSearchHeader";
+import RoomSearchResults from "../views/rooms/RoomSearchResults";
 import { type IOOBData, type IThreepidInvite } from "../../stores/ThreepidInviteStore";
 import EffectsOverlay from "../views/elements/EffectsOverlay";
 import { containsEmoji } from "../../effects/utils";
@@ -126,8 +128,10 @@ import { RoomSearchView } from "./RoomSearchView";
 import eventSearch, {
     extractSearchHighlights,
     extractSearchMatches,
+    extractSearchResultPreviews,
     type SearchInfo,
     type SearchMatch,
+    type SearchResultPreview,
     SearchScope,
 } from "../../Searching";
 import { RoomSearchNavigationViewModel } from "../../viewmodels/search/RoomSearchNavigationViewModel";
@@ -140,7 +144,6 @@ import { type CancelAskToJoinPayload } from "../../dispatcher/payloads/CancelAsk
 import { type SubmitAskToJoinPayload } from "../../dispatcher/payloads/SubmitAskToJoinPayload";
 import RightPanelStore from "../../stores/right-panel/RightPanelStore";
 import { onView3pidInvite } from "../../stores/right-panel/action-handlers";
-import RoomSearchAuxPanel from "../views/rooms/RoomSearchAuxPanel";
 import { PinnedMessageBanner } from "../views/rooms/PinnedMessageBanner";
 import { ScopedRoomContextProvider, useScopedRoomContext } from "../../contexts/ScopedRoomContext";
 import { DeclineAndBlockInviteDialog } from "../views/dialogs/DeclineAndBlockInviteDialog";
@@ -243,6 +246,12 @@ export interface IRoomState {
      * The state of an ongoing search if there is one.
      */
     search?: SearchInfo;
+    /**
+     * Whether the Telegram-style top-of-chat search bar (search Phase 6) is showing in place of the room header.
+     * Set on Cmd+F (FocusMessageSearch) so the bar opens with an empty input before any term is typed, and cleared
+     * on cancel. Distinct from {@link search}, which only exists once a term has actually been searched.
+     */
+    searchHeaderActive: boolean;
     callState?: CallState;
     canPeek: boolean;
     canSelfRedact: boolean;
@@ -456,6 +465,8 @@ function searchInfoFromSession(session: SearchSession): SearchInfo {
         inProgress: session.inProgress,
         count: session.count,
         matches: session.matches,
+        // Carry the dropdown result rows across the remount so the results list survives a cross-room jump (Phase 6).
+        previews: session.previews,
         currentMatchIndex: session.currentMatchIndex,
         highlights: session.highlights,
         error: session.error,
@@ -526,6 +537,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             showApps: false,
             isPeeking: false,
             showRightPanel: false,
+            searchHeaderActive: false,
             joining: false,
             showTopUnreadMessagesBar: false,
             statusBarVisible: false,
@@ -570,7 +582,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         const session = SearchSessionStore.instance.getSnapshot();
         const focusedMatch = session?.matches[session.currentMatchIndex];
         if (session && focusedMatch && thisRoomId && focusedMatch.roomId === thisRoomId) {
-            this.state = { ...this.state, search: searchInfoFromSession(session) };
+            // The surviving session also means the top-of-chat search bar (Phase 6) should be showing.
+            this.state = { ...this.state, search: searchInfoFromSession(session), searchHeaderActive: true };
         }
     }
 
@@ -1428,6 +1441,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 onView3pidInvite(payload, RightPanelStore.instance);
                 break;
             case Action.FocusMessageSearch:
+                // Open the Telegram-style top-of-chat search bar (search Phase 6). The bar shows with an empty input
+                // before any term is typed; an `initialText` (e.g. from Spotlight) kicks off a search immediately.
+                this.setState({ searchHeaderActive: true });
                 if ((payload as FocusMessageSearchPayload).initialText) {
                     this.onSearch(payload.initialText);
                 }
@@ -1897,6 +1913,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
         this.setState({
             timelineRenderingType: TimelineRenderingType.Search,
+            // Keep the top-of-chat search bar (Phase 6) open whenever a search is running, even if the search was
+            // kicked off by something other than Cmd+F (e.g. Spotlight's "search messages").
+            searchHeaderActive: true,
             search: {
                 searchId,
                 roomId,
@@ -1944,12 +1963,15 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // still deferred (the stepper covers the loaded result page).
         const canStep = !inProgress && searchResults !== null;
         const matches = canStep && searchResults ? extractSearchMatches(searchResults) : [];
+        // Result preview rows for the Telegram-style dropdown (Phase 6), ordered in lockstep with `matches`.
+        const previews = canStep && searchResults ? extractSearchResultPreviews(searchResults) : [];
         const highlights =
             canStep && searchResults ? extractSearchHighlights(searchResults, this.state.search!.term) : undefined;
 
         SearchSessionStore.instance.updateResults({
             inProgress,
             matches: canStep ? matches : undefined,
+            previews: canStep ? previews : undefined,
             highlights: canStep ? highlights : undefined,
             count: searchResults?.count,
             error: error ?? undefined,
@@ -1965,6 +1987,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 // (>SEARCH_LIMIT hits; rooms hidden because we lack their state). See slice 5.
                 count: searchResults?.count,
                 matches: canStep ? matches : undefined,
+                // Result preview rows for the Telegram-style dropdown (Phase 6), parallel to `matches`.
+                previews: canStep ? previews : undefined,
                 // Terms to highlight in the focused match's live tile while stepping (slice 2). Mirrors the
                 // enrichment the results list applies so the live highlight matches the result-tile highlight.
                 highlights: canStep ? highlights : undefined,
@@ -1997,6 +2021,21 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             scroll_into_view: true,
             metricsTrigger: undefined, // we stay within the same search session
         });
+    };
+
+    // Click a row in the Telegram-style results dropdown (Phase 6): jump the live timeline to it. Previews are
+    // ordered in lockstep with `matches`, so the row index addresses the matching SearchMatch directly.
+    private onSearchResultClick = (index: number): void => {
+        const match = this.state.search?.matches?.[index];
+        if (match) {
+            this.onActivateSearchMatch(match, index);
+        }
+    };
+
+    // Resolve a sender's display name for a results-dropdown row, against the matched message's (possibly other) room.
+    private getSearchResultSenderName = (preview: SearchResultPreview): string => {
+        const room = this.context.client?.getRoom(preview.roomId);
+        return room?.getMember(preview.sender)?.name ?? preview.sender;
     };
 
     private onForgetClick = (): void => {
@@ -2124,13 +2163,15 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     }, 300);
 
     private onCancelSearchClick = (): Promise<void> => {
-        // Cancelling is the only path that ends (and aborts) the search session.
+        // Cancelling is the only path that ends (and aborts) the search session. It also closes the top-of-chat
+        // search bar (search Phase 6), restoring the normal room header.
         SearchSessionStore.instance.clear({ abort: true });
         return new Promise<void>((resolve) => {
             this.setState(
                 {
                     timelineRenderingType: TimelineRenderingType.Room,
                     search: undefined,
+                    searchHeaderActive: false,
                 },
                 resolve,
             );
@@ -2649,18 +2690,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             this.state.search &&
             (this.state.timelineRenderingType === TimelineRenderingType.Search || isSteppingSearchMatch)
         ) {
-            if (!isRoomEncryptionLoading) {
-                aux = (
-                    <RoomSearchAuxPanel
-                        searchInfo={this.state.search}
-                        navigationVm={this.searchNavVm}
-                        onCancelClick={this.onCancelSearchClick}
-                        onBackToResults={this.onBackToSearchResults}
-                        onSearchScopeChange={this.onSearchScopeChange}
-                        isRoomEncrypted={isRoomEncrypted}
-                    />
-                );
-            }
+            // The search summary, "k of N" stepper, scope toggle and cancel now live in the top-of-chat search bar
+            // (search Phase 6, RoomSearchHeader), so the aux panel renders nothing during a search.
         } else if (showRoomUpgradeBar) {
             aux = <RoomUpgradeWarningBar room={this.state.room} />;
         } else if (myMembership !== KnownMembership.Join) {
@@ -2759,17 +2790,30 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         let hideMessagePanel = false;
 
         if (this.state.search && !isSteppingSearchMatch) {
+            // RoomSearchView is kept mounted as the data engine — it awaits the search promise, processes results
+            // (threads, highlights, pagination) and drives onSearchUpdate, which populates `search.previews`. The
+            // Telegram-style RoomSearchResults dropdown (Phase 6) renders those previews as an opaque overlay on
+            // top of it; a row click jumps the live timeline to that match.
             searchResultsPanel = (
-                <RoomSearchView
-                    key={this.state.search.searchId}
-                    ref={this.searchResultsPanel}
-                    term={this.state.search.term}
-                    scope={this.state.search.scope}
-                    promise={this.state.search.promise}
-                    inProgress={!!this.state.search.inProgress}
-                    className={this.messagePanelClassNames}
-                    onUpdate={this.onSearchUpdate}
-                />
+                <div className="mx_RoomView_searchResultsWrapper">
+                    <RoomSearchView
+                        key={this.state.search.searchId}
+                        ref={this.searchResultsPanel}
+                        term={this.state.search.term}
+                        scope={this.state.search.scope}
+                        promise={this.state.search.promise}
+                        inProgress={!!this.state.search.inProgress}
+                        className={this.messagePanelClassNames}
+                        onUpdate={this.onSearchUpdate}
+                    />
+                    <RoomSearchResults
+                        previews={this.state.search.previews ?? []}
+                        inProgress={!!this.state.search.inProgress}
+                        error={this.state.search.error}
+                        onResultClick={this.onSearchResultClick}
+                        getSenderName={this.getSearchResultSenderName}
+                    />
+                </div>
             );
             hideMessagePanel = true;
         }
@@ -2848,18 +2892,13 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             !this.props.hideRightPanel && !isRoomEncryptionLoading && this.state.room && this.state.showRightPanel;
 
         const rightPanel = showRightPanel ? (
+            // Search moved out of the right-panel "About" card into the top-of-chat search bar (search Phase 6),
+            // so the right panel no longer receives any search props.
             <RightPanel
                 room={this.state.room}
                 resizeNotifier={this.context.resizeNotifier}
                 permalinkCreator={this.permalinkCreator}
                 e2eStatus={this.state.e2eStatus}
-                onSearchChange={this.onSearchChange}
-                onSearchCancel={this.onCancelSearchClick}
-                onSearchSendersChange={this.onSearchSendersChange}
-                onSearchOrderChange={this.onSearchOrderChange}
-                searchTerm={this.state.search?.term ?? ""}
-                searchSenders={this.state.search?.senders ?? []}
-                searchOrder={this.state.search?.order ?? SearchOrderBy.Recent}
             />
         ) : undefined;
 
@@ -2976,13 +3015,33 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                                 ref={this.roomViewBody}
                                 data-layout={this.state.layout}
                             >
-                                {!this.props.hideHeader && (
-                                    <RoomHeader
-                                        room={this.state.room}
-                                        legacyAdditionalButtons={this.state.viewRoomOpts.buttons}
-                                        extraButtons={<>{extraButtons}</>}
-                                    />
-                                )}
+                                {!this.props.hideHeader &&
+                                    (this.state.searchHeaderActive || this.state.search ? (
+                                        // Telegram-style search bar replaces the room header while searching (Phase 6).
+                                        <RoomSearchHeader
+                                            room={this.state.room}
+                                            term={this.state.search?.term ?? ""}
+                                            onSearchChange={this.onSearchChange}
+                                            onCancel={this.onCancelSearchClick}
+                                            isRoomEncrypted={!!isRoomEncrypted}
+                                            searchInfo={this.state.search}
+                                            navigationVm={this.searchNavVm}
+                                            scope={this.state.search?.scope ?? SearchScope.Room}
+                                            onSearchScopeChange={this.onSearchScopeChange}
+                                            senders={this.state.search?.senders ?? []}
+                                            onSearchSendersChange={this.onSearchSendersChange}
+                                            order={this.state.search?.order ?? SearchOrderBy.Recent}
+                                            onSearchOrderChange={this.onSearchOrderChange}
+                                            onBackToResults={this.onBackToSearchResults}
+                                            autoFocus={true}
+                                        />
+                                    ) : (
+                                        <RoomHeader
+                                            room={this.state.room}
+                                            legacyAdditionalButtons={this.state.viewRoomOpts.buttons}
+                                            extraButtons={<>{extraButtons}</>}
+                                        />
+                                    ))}
                                 {mainSplitBody}
                             </div>
                         </MainSplit>

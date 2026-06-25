@@ -8,7 +8,7 @@
 import EventEmitter from "events";
 import { type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
-import { type SearchMatch, type SearchScope } from "../Searching";
+import { type SearchMatch, type SearchResultPreview, type SearchScope } from "../Searching";
 import defaultDispatcher from "../dispatcher/dispatcher";
 import { Action } from "../dispatcher/actions";
 import { type ActionPayload } from "../dispatcher/payloads";
@@ -50,6 +50,8 @@ export interface SearchSessionParams {
 export interface SearchSessionResults {
     inProgress: boolean;
     matches?: SearchMatch[];
+    /** Result preview rows for the dropdown (parallel to {@link matches}) — see {@link extractSearchResultPreviews}. */
+    previews?: SearchResultPreview[];
     highlights?: string[];
     count?: number;
     error?: Error;
@@ -61,6 +63,8 @@ export interface SearchSessionResults {
 export interface SearchSession extends SearchSessionParams {
     /** Ordered (newest-first), cross-room and unfiltered — see {@link extractSearchMatches}. */
     matches: SearchMatch[];
+    /** Result preview rows for the dropdown, parallel to {@link matches} (see {@link extractSearchResultPreviews}). */
+    previews: SearchResultPreview[];
     /** Index into {@link matches} of the focused match, or -1 when no match is focused (viewing the results list). */
     currentMatchIndex: number;
     highlights: string[];
@@ -117,6 +121,7 @@ export class SearchSessionStore extends EventEmitter {
         this.session = {
             ...params,
             matches: [],
+            previews: [],
             currentMatchIndex: -1,
             highlights: [],
             inProgress: true,
@@ -134,6 +139,7 @@ export class SearchSessionStore extends EventEmitter {
             ...this.session,
             inProgress: results.inProgress,
             matches: results.matches ?? this.session.matches,
+            previews: results.previews ?? this.session.previews,
             highlights: results.highlights ?? this.session.highlights,
             count: results.count,
             error: results.error,
