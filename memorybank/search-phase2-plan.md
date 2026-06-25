@@ -275,15 +275,93 @@ out of scope. (c) The new mount-heavy tests live in the early describe because o
 isolation leak (a client-less RoomView re-renders → `shouldEncryptRoomWithSingle3rdPartyInvite` crash) that strikes
 whichever mount-heavy test runs last in the later describes; the leak itself is out of slice scope.
 
+## Slice 5 — Polish — ✅ DONE (session 22, TDD, adversarial-reviewed, committed+pushed)
+
+**Shipped (TDD RED→GREEN per task; 4-lens adversarial-review workflow, 9/16 findings confirmed, safe ones applied):**
+all three tasks below. Files: `RoomSearchAuxPanel.tsx` (keep summary while stepping + back-to-results `IconButton`,
+`list-view` icon, gated on `isSteppingMatch`), `RoomView.tsx` (`onBackToSearchResults`), `MessagePanel.tsx`/`EventTile.tsx`/
+`EventTileViewModel.ts`/`EventTileDerivedState.ts` (`isSearchHighlightMatch` → `mx_EventTile_searchHighlightActive`),
+`_EventTile.pcss`+`_EventBubbleTile.pcss` (active tile reuses the `mx_EventTile_selected` subtle-bg + accent-stroke
+treatment, layout-scoped group/irc + bubble), app i18n `room|search|back_to_results`, shared i18n
+`match_position` → "…loaded". **Verify: 224 affected web Jest pass (RoomView 58, MessagePanel, RoomSearchAuxPanel 11,
+EventTile) + shared SearchMatchNavigation vitest 5; tsc clean (only the 4 vendored matrix-js-sdk errors); eslint/prettier/
+i18n clean.** Jest via `scratchpad/webjest.sh` (the `--transformIgnorePatterns` workaround; allowlist MUST include
+`@element-hq/web-shared-components`).
+
+**i18n resolution note (verified):** apps/web reads shared-components strings from **src**, not the gitignored `dist` —
+runtime via `webpack.config.ts` `additionalStringsPaths`, tests via `test/setup/setupLanguage.ts`. So "…loaded" ships
+from the src change alone (no dist rebuild needed); and because apps/web jest renders "…loaded", ALL apps/web counter
+assertions were switched to `exact: false` (else they'd break in CI which rebuilds dist).
+
+**Review findings — applied (safe/valuable):** (a) CSS robustness — the original unscoped `$event-selected-color` bg was
+*identical to hover* (default group layout), *overridden by the mention yellow*, and *invisible in bubble*; fixed by
+reusing the proven `mx_EventTile_selected` treatment (bg + inset accent stroke) in the layout-scoped blocks. (b) test:
+pin the counter reset to "0 of N" after back-to-results; (c) test: active-tile test no longer passes `searchHighlights`
+(proves the tile mark depends solely on `searchHighlightEventId`); (d) accurate comment on the (belt-and-braces)
+`setMatches` in `onBackToSearchResults`.
+
+**Review finding — DEFERRED to Slice 6 (documented in code + here):** *stale `initialEventId` after back-to-results.*
+After stepping then back-to-results, the RoomViewStore's initial event id still points at the last-stepped match and
+`getInitialEventId() ?? this.state.initialEventId` (onRoomViewStoreUpdate) keeps it sticky, so **re-clicking that exact
+same result is a no-op** (the result-click clear gate keys on an `initialEventId` *change*). The naive fix (clear
+`this.state.initialEventId`) is UNSAFE — the store still holds it, so the next store update would trip the gate and tear
+the search down. The correct fix is the result-click-gate rework Slice 6 performs when it lifts the search session out of
+RoomView. Workarounds today: step via arrows, click a different result, or ✕. (Medium-severity edge case; not a crash /
+no data loss.)
+
+**PostHog — DEFERRED (per session-22 user decision):** needs a new `Interaction` name in the external/immutable
+`@matrix-org/analytics-events`; do it upstream then `PosthogTrackers.trackInteraction(...)` from
+`RoomSearchNavigationViewModel.next/previous`.
+
+### Original task plan (as executed)
+
+**User decisions (session 22, locked via AskUserQuestion):**
+- **Dual denominator → "Keep both, label stepper 'loaded'."** Show the results-list summary "N results found"
+  (`searchInfo.count`, backend estimate) AND the stepper "k of N **loaded**" simultaneously — most honest. Stop
+  hiding the summary while stepping.
+- **PostHog → DEFER to a follow-up.** `@matrix-org/analytics-events` (external, immutable from this repo) has **no**
+  search-stepping `Interaction` name and `trackEvent<E extends IPosthogEvent>` is type-gated to that union, so a
+  properly-typed event needs an **upstream schema PR** (out of this slice's scope). Ship UX now; no PostHog code.
+- **Active tile → new subtle dedicated class** `mx_EventTile_searchHighlightActive` using `$event-selected-color`
+  (distinct from the yellow `$event-highlight-bg-color` URL-jump flash, so search-stepping reads as its own state).
+
+**Note:** "hide the results list while stepping" is **already shipped** (slice 1: `RoomView.tsx` gates `RoomSearchView`
+on `!isSteppingSearchMatch`). The remaining list deliverable is the **"back to results" affordance**.
+
+### Task A — Dual denominator: keep summary + label stepper "loaded"
+- Files: `apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx` (remove the `isSteppingMatch ? null :` branch so
+  the `room|search|summary` text always renders when `count` defined; remove the now-unused `isSteppingMatch`);
+  `packages/shared-components/src/i18n/strings/en_EN.json` key `room|search|match_position`
+  `"%(current)s of %(total)s"` → `"%(current)s of %(total)s loaded"`.
+- TDD: new RoomSearchAuxPanel test "keeps the summary visible while stepping" (RED: current code hides) → GREEN;
+  replace the old "should hide the results-count summary while stepping" test; update `SearchMatchNavigation.test`
+  (`packages/shared-components`) "1 of N" → "1 of N loaded".
+
+### Task B — "Back to results" affordance (return from live stepping to the results list)
+- New `RoomView.onBackToSearchResults` = setState `{ timelineRenderingType: Search, search:{...search,
+  currentMatchIndex: undefined} }` (keeps the session alive — distinct from `onCancelSearchClick` which clears it).
+  Pass to `RoomSearchAuxPanel`; render a list `IconButton` (tooltip/aria `room|search|back_to_results`) only while
+  `isSteppingMatch`. New app i18n key `room|search|back_to_results`.
+- TDD: RoomSearchAuxPanel test "shows back-to-results button while stepping, hidden otherwise; click fires callback";
+  RoomView state-flip test where the suite allows (mirror slice-1/3 early-describe mount-guard convention).
+
+### Task C — pcss for the active live tile (`mx_EventTile_searchHighlightActive`)
+- Thread "this tile is the focused search match" (`eventId === searchHighlightEventId`) from `MessagePanel.tsx`
+  (getTilesForEvent, ~811) → `EventTile` → `EventTileDerivedState.ts` classnames (alongside `mx_EventTile_highlight`).
+  pcss: `apps/web/res/css/views/rooms/_EventTile.pcss` new rule `mx_EventTile_searchHighlightActive` →
+  `background-color: $event-selected-color` (subtle); verify dark/bubble layouts.
+- TDD: `MessagePanel-test` — focused tile gets `mx_EventTile_searchHighlightActive`, others don't; no-leak when not
+  stepping. Add EventTileDerivedState assertion if the seam lands there.
+
+### Wrap-up
+- i18n: `matrix-gen-i18n` no-diff (app + shared-components); tsc/eslint/prettier clean; full Jest via the
+  `--transformIgnorePatterns` workaround; adversarial-review workflow; commit
+  `feat(web): search stepping polish — back-to-results, dual-denominator, active-tile (Phase 2 slice 5)`.
+- **PostHog follow-up (deferred):** add a `WebRoomTimelineSearchMatchStep` (or similar) Interaction name upstream in
+  `@matrix-org/analytics-events`, then `PosthogTrackers.trackInteraction(...)` from
+  `RoomSearchNavigationViewModel.next/previous`. Tracked here, not done in slice 5.
+
 ## Later slices (next sessions)
-- **Slice 5 — Polish.** Hide the results list once stepping starts (toggle back via a "list" affordance);
-  PostHog tracking; pcss for the active live tile. **Also (slice-4 adversarial-review finding):** the header can
-  show TWO conflicting totals before the first arrow press — the results-list summary "N results found" (`count`,
-  full backend estimate across the predecessor chain) and the "k of N" stepper (`matches.length`, current-room
-  loaded page, ≤SEARCH_LIMIT). `RoomSearchAuxPanel` only hides the summary once `currentMatchIndex>=0`. Fix:
-  hide the summary whenever the stepper is present (`navigationVm` total>0), or unify the denominators, or label
-  the stepper "k of N loaded". (Pre-existing for the >SEARCH_LIMIT case since slice 1; slice 4 documented it in
-  `onSearchUpdate`.)
 - **Slice 6 — All-rooms (and predecessor-room) cross-room stepping via a `SearchSessionStore`.** *(Large, HIGH risk —
   the deferred half of slice 4. The defining blocker: RoomView is room-id-keyed, so the search session cannot survive
   a room switch while it lives on the component instance.)*

@@ -1232,3 +1232,57 @@ fails every suite with "Cannot use import statement outside a module". Pattern: 
   tabs, P5 reach/ranking/health-check.
 - Slice 3 committed this session (one commit). Push still deferred (origin lacks slices 1/1B/2/3 — user pushes at the
   end of the initiative, not per slice).
+
+## Session 22 (2026-06-25) — Search Phase 2 **slice 5**: polish (dual denominator, back-to-results, active-tile) — TDD + reviewed
+
+Continued the initiative; confirmed slices 1–4 committed (HEAD 38c06eb), tree clean. Implemented **Phase 2 slice 5**
+end-to-end, TDD per task, then a 4-lens adversarial-review workflow, applied the safe findings, committed + pushed (user
+asked to commit+push this session).
+
+**Process:** understand-workflow (5 parallel Explore readers → mapped RoomSearchAuxPanel dual denominator, RoomView
+search glue, PostHog conventions, pcss, nav VM/types) → AskUserQuestion locked 3 UX/policy decisions → TDD RED→GREEN per
+task → adversarial-review workflow (state-machine / mvvm-threading / css-ux / tests-i18n; 16 findings → 9 confirmed) →
+applied safe fixes → verify → docs → commit+push.
+
+**User decisions (AskUserQuestion):** dual denominator = "keep both, label stepper **loaded**"; PostHog = **defer**
+(external immutable analytics-events has no suitable Interaction name); active tile = **new dedicated subtle class**.
+
+**What shipped (3 tasks):**
+- **A — dual denominator.** `RoomSearchAuxPanel.tsx` no longer hides the "N results found" summary while stepping;
+  shared `match_position` → "%(current)s of %(total)s **loaded**". Both totals now coexist (count = backend estimate,
+  stepper = current-room loaded ≤SEARCH_LIMIT) with "loaded" to disambiguate.
+- **B — back-to-results affordance.** New `RoomView.onBackToSearchResults` flips `timelineRenderingType`→Search +
+  `currentMatchIndex`→undefined (keeps the session alive, unlike `onCancelSearchClick`); a `list-view` `IconButton`
+  (`room|search|back_to_results`) renders in the header only while stepping.
+- **C — active-tile pcss.** Threaded `isSearchHighlightMatch` (`searchHighlightEventId` match) MessagePanel→EventTile→
+  EventTileViewModel(`EventTileDisplayInput`)→`getEventTileClassState`→`mx_EventTile_searchHighlightActive`. CSS reuses the
+  `mx_EventTile_selected` subtle-bg + accent-stroke treatment, layout-scoped (group/irc + bubble).
+
+**Adversarial review:** 9/16 confirmed. Applied: CSS robustness (the first cut used an unscoped `$event-selected-color`
+bg that was identical to hover / overridden by the mention yellow / invisible in bubble — reusing the selected treatment
+fixes all three); pin the "0 of N" counter reset in the back-to-results test; decouple the active-tile test from
+`searchHighlights`; accurate comment on the belt-and-braces `setMatches`. Correctly refuted: MVVM threading complete, no
+spinner flicker, icon choice is bikeshed.
+
+**DEFERRED to Slice 6 (documented in code + plan): stale `initialEventId`.** After back-to-results the RoomViewStore's
+initial event id still points at the last-stepped match (sticky via `getInitialEventId() ?? this.state.initialEventId`),
+so re-clicking that **exact same** result is a no-op. The naive fix is unsafe (store still holds it → next store update
+trips the clear gate and tears search down); correct fix = the result-click-gate rework Slice 6 does. Medium edge case,
+workarounds exist (arrows / different result / ✕).
+
+**Verify:** 224 affected web Jest (RoomView 58, MessagePanel, RoomSearchAuxPanel 11, EventTile) + shared
+SearchMatchNavigation vitest 5; tsc clean (only the 4 vendored matrix-js-sdk errors); eslint/prettier/i18n clean. Jest via
+recreated `scratchpad/webjest.sh` (allowlist MUST include `@element-hq/web-shared-components`).
+
+**i18n gotcha learned:** apps/web resolves shared-components strings from **src** (webpack `additionalStringsPaths` at
+runtime; `test/setup/setupLanguage.ts` in tests), NOT the gitignored `dist`. So "…loaded" ships from the src change alone,
+AND apps/web jest renders "…loaded" — every apps/web "k of N" counter assertion was switched to `exact: false` (CI
+rebuilds dist, so an exact assertion would break there). The `dist` rebuild done this session was unnecessary (gitignored,
+not committed).
+
+### WHERE I LEFT OFF — Phase 2 slice 6 next
+- **Slice 6 — All-rooms (+ predecessor-room) cross-room stepping via a `SearchSessionStore`** (large, HIGH risk; design
+  in `search-phase2-plan.md`). It also naturally fixes slice-5's deferred stale-`initialEventId` no-op (the result-click
+  gate rework) and re-enables the all-rooms `canStep` branch. Then P3 from:/date filters, P4 media tabs, P5
+  reach/ranking/health-check. PostHog stepping event still pending an upstream `@matrix-org/analytics-events` schema add.
+- Slices 1–5 + slice-5 commit **pushed this session** (user asked to commit+push; origin now has the work).
