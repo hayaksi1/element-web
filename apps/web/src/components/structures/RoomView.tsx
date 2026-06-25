@@ -1852,11 +1852,27 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // beyond the loaded results are deferred to a later slice. Restricting to the completed result set also
         // keeps the "k of N" stepper consistent rather than reflecting a partial/aborted page.
         const canStep = !inProgress && searchResults !== null && this.state.search?.scope === SearchScope.Room;
-        const matches = canStep ? extractSearchMatches(searchResults) : [];
+        // Live-timeline stepping is restricted to matches in the *current* room. RoomView is keyed by room id
+        // (see LoggedInView), so dispatching ViewRoom into another room would unmount this RoomView and tear down
+        // the search session. A room-scoped search also searches upgraded predecessor rooms (#32258), whose
+        // matches live in a different room — those remain visible in the results list but are excluded from the
+        // "k of N" live stepper. (Stepping into other rooms needs a search session that survives the remount;
+        // deferred — see the SearchSessionStore slice in memorybank/search-phase2-plan.md.)
+        const currentRoomId = this.getRoomId();
+        const matches =
+            canStep && searchResults
+                ? extractSearchMatches(searchResults).filter((m) => m.roomId === currentRoomId)
+                : [];
         this.searchNavVm.setMatches(matches);
         this.setState({
             search: {
                 ...this.state.search!,
+                // NB: `count` (the backend's full estimate across the whole predecessor chain) and
+                // `matches.length` (this loaded page, filtered to the current room, capped at SEARCH_LIMIT) are
+                // intentionally DIFFERENT denominators — do not "fix" one to match the other. The results-list
+                // summary shows `count`; the "k of N" live stepper shows `matches.length`. They can legitimately
+                // diverge (predecessor-room matches; >SEARCH_LIMIT hits). Reconciling the header display so only
+                // one denominator is visible at a time is a Slice 5 (display polish) task — see search-phase2-plan.md.
                 count: searchResults?.count,
                 matches: canStep ? matches : undefined,
                 // Terms to highlight in the focused match's live tile while stepping (slice 2). Mirrors the
