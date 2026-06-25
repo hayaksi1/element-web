@@ -190,6 +190,7 @@ async function serverSideSearch(
     roomIds?: string[],
     abortSignal?: AbortSignal,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<{ response: ISearchResponse; query: ISearchRequestBody }> {
     const filter: IRoomEventFilter = {
         limit: SEARCH_LIMIT,
@@ -210,7 +211,9 @@ async function serverSideSearch(
             room_events: {
                 search_term: term,
                 filter: filter,
-                order_by: SearchOrderBy.Recent,
+                // Recency by default; the search header's order toggle can request relevance (search Phase 5
+                // slice 1). The order rides inside `body` (stored as `_query`) so server pagination replays it.
+                order_by: order,
                 event_context: {
                     before_limit: 1,
                     after_limit: 1,
@@ -231,8 +234,9 @@ async function serverSideSearchProcess(
     roomIds?: string[],
     abortSignal?: AbortSignal,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
-    const result = await serverSideSearch(client, term, roomIds, abortSignal, senders);
+    const result = await serverSideSearch(client, term, roomIds, abortSignal, senders, order);
 
     // The js-sdk method backPaginateRoomEventsSearch() uses _query internally
     // so we're reusing the concept here since we want to delegate the
@@ -269,6 +273,12 @@ async function combinedSearch(
     // Seshat throws FieldDoesNotExist, #32341). Promise.all used to reject the
     // entire "All Rooms" search whenever either leg threw; degrade to the
     // surviving leg's results instead, and only fail if BOTH legs fail.
+    //
+    // Both legs are intentionally left on the recency default (no order param): the sliding-window merge below
+    // (combineEvents/compareOldestEvents, which pages the next leg by oldest timestamp) only preserves global
+    // order when both sources are recency-sorted, so the search header's relevance order is NOT honoured for an
+    // all-rooms search in slice 1 — it would corrupt cross-page order. Honouring relevance here needs a
+    // merge-by-rank/page-by-lowest-rank-frontier redesign (search Phase 5, deferred).
     const [serverSettled, localSettled] = await Promise.allSettled([
         serverSideSearch(client, searchTerm, undefined, abortSignal, senders),
         localSearch(searchTerm, undefined, senders),
@@ -351,7 +361,12 @@ async function combinedSearch(
     return result;
 }
 
-function buildSeshatSearchArgs(searchTerm: string, roomId?: string, senders?: string[]): ISearchArgs {
+function buildSeshatSearchArgs(
+    searchTerm: string,
+    roomId?: string,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
+): ISearchArgs {
     const hasSenderFilter = !!senders && senders.length > 0;
     return {
         search_term: hardenSeshatSearchTerm(searchTerm),
@@ -360,7 +375,9 @@ function buildSeshatSearchArgs(searchTerm: string, roomId?: string, senders?: st
         // Over-fetch when a sender filter is active so the client-side post-filter still has enough
         // candidates to fill a page (search Phase 3 slice 2). Seshat has no native sender filter.
         limit: hasSenderFilter ? SESHAT_SENDER_OVERFETCH_LIMIT : SEARCH_LIMIT,
-        order_by_recency: true,
+        // Recency unless the order toggle requested relevance (search Phase 5 slice 1): with order_by_recency
+        // false, Seshat/tantivy orders results by its full-text relevance (BM25) score instead of timestamp.
+        order_by_recency: order !== SearchOrderBy.Rank,
         room_id: roomId,
     };
 }
@@ -369,10 +386,11 @@ async function localSearch(
     searchTerm: string,
     roomId?: string,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<{ response: IResultRoomEvents; query: ISearchArgs }> {
     const eventIndex = EventIndexPeg.get();
 
-    const searchArgs = buildSeshatSearchArgs(searchTerm, roomId, senders);
+    const searchArgs = buildSeshatSearchArgs(searchTerm, roomId, senders, order);
 
     const localResult = await eventIndex!.search(searchArgs);
     if (!localResult) {
@@ -420,6 +438,7 @@ async function localSearchProcess(
     searchTerm: string,
     roomId?: string,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISeshatSearchResults> {
     const emptyResult = {
         results: [],
@@ -429,7 +448,7 @@ async function localSearchProcess(
 
     if (searchTerm === "") return emptyResult;
 
-    const result = await localSearch(searchTerm, roomId, senders);
+    const result = await localSearch(searchTerm, roomId, senders, order);
 
     emptyResult.seshatQuery = result.query;
 
@@ -559,6 +578,10 @@ async function chainSearchProcess(
 
     if (searchTerm === "") return result;
 
+    // Every source is left on the recency default: mergeChainResults re-sorts the pooled pages by timestamp
+    // (compareEvents), and the cross-page invariant only holds for recency-sorted sources, so the search
+    // header's relevance order is NOT honoured on a predecessor-chain search in slice 1 (search Phase 5,
+    // deferred with the all-rooms case in combinedSearch).
     const queries = seshatRoomIds.map((id) => buildSeshatSearchArgs(searchTerm, id, senders));
     const [pages, server] = await Promise.all([
         Promise.all(queries.map((q) => fetchChainRoomPage(q, senders))),
@@ -1010,6 +1033,7 @@ async function eventIndexSearch(
     roomId?: string,
     abortSignal?: AbortSignal,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
     let searchPromise: Promise<ISearchResults>;
 
@@ -1033,19 +1057,22 @@ async function eventIndexSearch(
         }
 
         if (seshatRoomIds.length === 0) {
-            // Entirely (known) non-encrypted chain: server-side search scoped to the chain.
-            searchPromise = serverSideSearchProcess(client, term, roomIds, abortSignal, senders);
+            // Entirely (known) non-encrypted chain: server-side search scoped to the chain. Single source, so the
+            // backend order is honoured verbatim — thread the requested order through (search Phase 5 slice 1).
+            searchPromise = serverSideSearchProcess(client, term, roomIds, abortSignal, senders, order);
         } else if (seshatRoomIds.length === 1 && serverRoomIds.length === 0) {
-            // Single encrypted room, no predecessors — the common case.
-            searchPromise = localSearchProcess(client, term, seshatRoomIds[0], senders);
+            // Single encrypted room, no predecessors — the common case. Single Seshat source, so the requested
+            // order is honoured (recency vs Seshat relevance) (search Phase 5 slice 1).
+            searchPromise = localSearchProcess(client, term, seshatRoomIds[0], senders, order);
         } else {
             // Multi-room chain (encrypted predecessors and/or known non-encrypted ones):
-            // Seshat for the local rooms, homeserver for the known non-encrypted ones, merged.
+            // Seshat for the local rooms, homeserver for the known non-encrypted ones, merged. The merge re-sorts
+            // by recency, so `order` is intentionally NOT threaded here (forced recency, see chainSearchProcess).
             searchPromise = chainSearchProcess(client, term, seshatRoomIds, serverRoomIds, abortSignal, senders);
         }
     } else {
-        // Search across all rooms, combine a server side search and a
-        // local search.
+        // Search across all rooms, combine a server side search and a local search. The combined merge re-sorts
+        // by recency, so `order` is intentionally NOT threaded here (forced recency, see combinedSearch).
         searchPromise = combinedSearch(client, term, abortSignal, senders);
     }
 
@@ -1103,15 +1130,16 @@ export default function eventSearch(
     roomId?: string,
     abortSignal?: AbortSignal,
     senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
     const eventIndex = EventIndexPeg.get();
 
     if (eventIndex === null) {
         // No local index: search the room plus its predecessor chain server-side (#32258).
         const roomIds = roomId !== undefined ? getRoomSearchChain(client, roomId) : undefined;
-        return serverSideSearchProcess(client, term, roomIds, abortSignal, senders);
+        return serverSideSearchProcess(client, term, roomIds, abortSignal, senders, order);
     } else {
-        return eventIndexSearch(client, term, roomId, abortSignal, senders);
+        return eventIndexSearch(client, term, roomId, abortSignal, senders, order);
     }
 }
 
@@ -1142,9 +1170,10 @@ export interface SearchMatch {
  * stepping.
  *
  * Matches are ordered newest-first by event timestamp so that the up/down arrows mean a consistent
- * "newer/older" independent of how the backend happened to order the raw results. (This app requests recency
- * order from both backends — {@link SearchOrderBy.Recent} from the homeserver and `order_by_recency` from
- * Seshat — but the explicit client-side sort guarantees a single chronological order on the merged list.)
+ * "newer/older" independent of how the backend happened to order the raw results. (The backend order is recency
+ * by default, but the search header's order toggle can request relevance ({@link SearchOrderBy.Rank}) on the
+ * single-source paths (search Phase 5 slice 1); either way this explicit client-side sort guarantees a single
+ * chronological order on the merged stepping list, so stepping stays "newer/older" even under relevance.)
  * `Array.prototype.sort` is stable, so matches sharing a timestamp keep their backend order; a match whose
  * event has no timestamp sinks to the end (treated as oldest). Results whose matched event is missing an event
  * id or room id are skipped — they cannot be jumped to in the timeline.
@@ -1205,6 +1234,12 @@ export interface SearchInfo {
      * slice 2). Mirrors {@link SearchSessionParams.senders} into the per-room-view render state.
      */
     senders?: string[];
+    /**
+     * The requested result ordering — {@link SearchOrderBy.Recent} (default) or {@link SearchOrderBy.Rank}
+     * (relevance) (search Phase 5 slice 1). Mirrors {@link SearchSessionParams.order} into the per-room-view
+     * render state. Only the single-source search paths honour relevance; all-rooms/chain stay recency.
+     */
+    order?: SearchOrderBy;
     /**
      * The promise for the search results.
      */

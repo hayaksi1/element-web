@@ -36,6 +36,7 @@ import {
     ClientEvent,
     type MatrixError,
     type ISearchResults,
+    SearchOrderBy,
     THREAD_RELATION_TYPE,
     type MatrixClient,
 } from "matrix-js-sdk/src/matrix";
@@ -447,6 +448,9 @@ function searchInfoFromSession(session: SearchSession): SearchInfo {
         // Carry the from:/sender filter across the remount so the chip keeps its selection and a subsequent
         // re-search (term/scope/sender change) keeps the active filter rather than silently clearing it.
         senders: session.senders,
+        // Likewise carry the chosen result order (recent/relevant) so the toggle keeps its selection and a
+        // re-search does not silently revert to recency (search Phase 5 slice 1).
+        order: session.order,
         promise: session.promise,
         abortController: session.abortController,
         inProgress: session.inProgress,
@@ -1871,19 +1875,25 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             });
     }
 
-    // `senders` defaults to the current session's filter so a term change (onSearchChange) or scope change
-    // (onSearchScopeChange) preserves the active `from:` filter; the sender-filter control passes it explicitly.
-    private onSearch = (term: string, scope = SearchScope.Room, senders = this.state.search?.senders): void => {
+    // `senders` and `order` default to the current session's values so a term change (onSearchChange) or scope
+    // change (onSearchScopeChange) preserves the active `from:` filter and chosen order; the dedicated controls
+    // pass their axis explicitly.
+    private onSearch = (
+        term: string,
+        scope = SearchScope.Room,
+        senders = this.state.search?.senders,
+        order = this.state.search?.order ?? SearchOrderBy.Recent,
+    ): void => {
         const roomId = scope === SearchScope.Room ? this.getRoomId() : undefined;
         debuglog("sending search request");
         const abortController = new AbortController();
-        const promise = eventSearch(this.context.client!, term, roomId, abortController.signal, senders);
+        const promise = eventSearch(this.context.client!, term, roomId, abortController.signal, senders, order);
         // make sure that we don't end up showing results from an aborted search by keeping a unique id.
         const searchId = new Date().getTime();
 
         // The session lives in the SearchSessionStore (not just this component) so it survives RoomView being
         // re-mounted when a cross-room stepping jump switches rooms. Starting a new term aborts any previous one.
-        SearchSessionStore.instance.start({ searchId, roomId, term, scope, senders, promise, abortController });
+        SearchSessionStore.instance.start({ searchId, roomId, term, scope, senders, order, promise, abortController });
 
         this.setState({
             timelineRenderingType: TimelineRenderingType.Search,
@@ -1893,6 +1903,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 term,
                 scope,
                 senders,
+                order,
                 promise,
                 abortController,
             },
@@ -1911,6 +1922,17 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     // term and scope. An empty array clears the filter.
     private onSearchSendersChange = (senders: string[]): void => {
         this.onSearch(this.state.search?.term ?? "", this.state.search?.scope ?? SearchScope.Room, senders);
+    };
+
+    // Re-run the active search with a new result order (recent/relevant) (search Phase 5 slice 1), keeping the
+    // current term, scope and sender filter.
+    private onSearchOrderChange = (order: SearchOrderBy): void => {
+        this.onSearch(
+            this.state.search?.term ?? "",
+            this.state.search?.scope ?? SearchScope.Room,
+            this.state.search?.senders,
+            order,
+        );
     };
 
     private onSearchUpdate = (inProgress: boolean, searchResults: ISearchResults | null, error: Error | null): void => {
@@ -2834,8 +2856,10 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 onSearchChange={this.onSearchChange}
                 onSearchCancel={this.onCancelSearchClick}
                 onSearchSendersChange={this.onSearchSendersChange}
+                onSearchOrderChange={this.onSearchOrderChange}
                 searchTerm={this.state.search?.term ?? ""}
                 searchSenders={this.state.search?.senders ?? []}
+                searchOrder={this.state.search?.order ?? SearchOrderBy.Recent}
             />
         ) : undefined;
 

@@ -5,7 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import { type ISearchResults } from "matrix-js-sdk/src/matrix";
+import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
 import { SearchSessionStore, SearchSessionStoreEvent } from "../../../src/stores/SearchSessionStore";
 import { type SearchMatch, SearchScope } from "../../../src/Searching";
@@ -115,6 +115,14 @@ describe("SearchSessionStore", () => {
             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")], count: 1 });
             // The sender filter is session identity, not per-result state: it must survive updateResults.
             expect(store.getSnapshot()?.senders).toEqual(["@alice:server"]);
+        });
+
+        it("preserves the result order (recent/relevant) across result updates", () => {
+            start({ order: SearchOrderBy.Rank });
+            expect(store.getSnapshot()?.order).toBe(SearchOrderBy.Rank);
+            store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")], count: 1 });
+            // The chosen order is session identity, not per-result state: it must survive updateResults.
+            expect(store.getSnapshot()?.order).toBe(SearchOrderBy.Rank);
         });
     });
 

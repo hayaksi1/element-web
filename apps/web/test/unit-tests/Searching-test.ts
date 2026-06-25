@@ -11,6 +11,7 @@ import {
     type IResultRoomEvents,
     type ISearchResults,
     MatrixEvent,
+    SearchOrderBy,
     SearchResult,
 } from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
@@ -1147,6 +1148,143 @@ describe("Searching", () => {
             expect(mockEventIndex.search.mock.calls[0][0].limit).toBe(10);
             const senders = processed.get().search_categories.room_events.results.map((r: any) => r.result.sender);
             expect(senders).toEqual(["@alice:example.org", "@bob:example.org"]);
+        });
+    });
+
+    describe("relevance-vs-recency order (Phase 5 slice 1)", () => {
+        // A room with a single predecessor link, for the chain-leak-guard test below.
+        const roomWith = (predecessorRoomId: string | null): any => ({
+            findPredecessor: jest.fn().mockReturnValue(predecessorRoomId ? { roomId: predecessorRoomId } : null),
+        });
+
+        it("sets order_by: Rank on the homeserver body when relevance order is requested", async () => {
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(null); // no local index -> server-side path
+            jest.spyOn(mockClient, "getRoom").mockReturnValue({ findPredecessor: () => null } as any);
+            const searchSpy = jest.spyOn(mockClient, "search").mockResolvedValue({
+                search_categories: { room_events: { results: [], count: 0, highlights: [] } },
+            } as any);
+
+            await eventSearch(mockClient, "hello", "!room:example.org", undefined, undefined, SearchOrderBy.Rank);
+
+            const body = (searchSpy.mock.calls[0][0] as any).body;
+            expect(body.search_categories.room_events.order_by).toBe(SearchOrderBy.Rank);
+        });
+
+        it("defaults the homeserver body to Recent order", async () => {
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(null);
+            jest.spyOn(mockClient, "getRoom").mockReturnValue({ findPredecessor: () => null } as any);
+            const searchSpy = jest.spyOn(mockClient, "search").mockResolvedValue({
+                search_categories: { room_events: { results: [], count: 0, highlights: [] } },
+            } as any);
+
+            await eventSearch(mockClient, "hello", "!room:example.org");
+
+            const body = (searchSpy.mock.calls[0][0] as any).body;
+            expect(body.search_categories.room_events.order_by).toBe(SearchOrderBy.Recent);
+        });
+
+        it("carries order_by into the stored _query so server-side pagination keeps the order", async () => {
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(null);
+            jest.spyOn(mockClient, "getRoom").mockReturnValue({ findPredecessor: () => null } as any);
+            jest.spyOn(mockClient, "search").mockResolvedValue({
+                search_categories: { room_events: { results: [], count: 0, highlights: [] } },
+            } as any);
+            jest.spyOn(mockClient, "processRoomEventsSearch").mockImplementation(((sr: any) => sr) as any);
+
+            const result: any = await eventSearch(
+                mockClient,
+                "hello",
+                "!room:example.org",
+                undefined,
+                undefined,
+                SearchOrderBy.Rank,
+            );
+
+            expect(result._query.search_categories.room_events.order_by).toBe(SearchOrderBy.Rank);
+        });
+
+        it("orders a single encrypted room by Seshat relevance (order_by_recency false) under relevance order", async () => {
+            const mockEventIndex = {
+                search: jest.fn().mockResolvedValue({ count: 0, results: [], highlights: [] } as IResultRoomEvents),
+            };
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(mockEventIndex as any);
+            mockEncryptedRoom();
+
+            await eventSearch(mockClient, "hello", "!room:example.org", undefined, undefined, SearchOrderBy.Rank);
+
+            expect(mockEventIndex.search.mock.calls[0][0].order_by_recency).toBe(false);
+        });
+
+        it("keeps a single encrypted room ordered by recency (order_by_recency true) by default", async () => {
+            const mockEventIndex = {
+                search: jest.fn().mockResolvedValue({ count: 0, results: [], highlights: [] } as IResultRoomEvents),
+            };
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(mockEventIndex as any);
+            mockEncryptedRoom();
+
+            await eventSearch(mockClient, "hello", "!room:example.org");
+
+            expect(mockEventIndex.search.mock.calls[0][0].order_by_recency).toBe(true);
+        });
+
+        it("keeps recency order on both legs of an all-rooms search even when relevance is requested", async () => {
+            // The combined (All-rooms) path merges the two legs with a sliding-window cache that only preserves
+            // global order when both legs are recency-sorted, so a relevance order must NOT propagate to either leg
+            // (deferred until the merge is redesigned). The single-source paths above honour it; the merged path
+            // stays recency by construction.
+            const mockEventIndex = {
+                search: jest.fn().mockResolvedValue({ count: 0, results: [], highlights: [] } as IResultRoomEvents),
+            };
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(mockEventIndex as any);
+            const searchSpy = jest.spyOn(mockClient, "search").mockResolvedValue({
+                search_categories: { room_events: { results: [], count: 0, highlights: [] } },
+            } as any);
+            jest.spyOn(mockClient, "processRoomEventsSearch").mockImplementation(((sr: any) => ({
+                ...sr,
+                results: [],
+                highlights: [],
+            })) as any);
+
+            // roomId undefined => All Rooms => combinedSearch.
+            await eventSearch(mockClient, "hello", undefined, undefined, undefined, SearchOrderBy.Rank);
+
+            const body = (searchSpy.mock.calls[0][0] as any).body;
+            expect(body.search_categories.room_events.order_by).toBe(SearchOrderBy.Recent);
+            expect(mockEventIndex.search.mock.calls[0][0].order_by_recency).toBe(true);
+        });
+
+        it("keeps recency order on both legs of a predecessor-chain search even when relevance is requested", async () => {
+            // The chain (upgraded-room) path pools its sources through mergeChainResults (recency re-sort), so —
+            // like the all-rooms path — a relevance order must NOT leak into chainSearchProcess's legs.
+            const rooms: Record<string, any> = {
+                "!new:e.o": roomWith("!old:e.o"),
+                "!old:e.o": roomWith(null),
+            };
+            jest.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            // The new room is encrypted (-> Seshat leg); its loaded predecessor is not (-> homeserver leg). A mixed
+            // chain forces the multi-room chainSearchProcess branch.
+            jest.spyOn(mockClient, "getCrypto").mockReturnValue({
+                isEncryptionEnabledInRoom: jest.fn().mockImplementation((id) => Promise.resolve(id === "!new:e.o")),
+            } as any);
+            const mockEventIndex = {
+                search: jest.fn().mockResolvedValue({ count: 0, results: [], highlights: [] } as IResultRoomEvents),
+            };
+            jest.spyOn(EventIndexPeg, "get").mockReturnValue(mockEventIndex as any);
+            const searchSpy = jest.spyOn(mockClient, "search").mockResolvedValue({
+                search_categories: { room_events: { results: [], count: 0, highlights: [] } },
+            } as any);
+            jest.spyOn(mockClient, "processRoomEventsSearch").mockImplementation(((sr: any) => ({
+                ...sr,
+                results: [],
+                highlights: [],
+            })) as any);
+
+            await eventSearch(mockClient, "foo", "!new:e.o", undefined, undefined, SearchOrderBy.Rank);
+
+            // Seshat (encrypted) leg stays recency-ordered, and the homeserver (predecessor) leg keeps order_by Recent.
+            expect(mockEventIndex.search.mock.calls[0][0].order_by_recency).toBe(true);
+            const body = (searchSpy.mock.calls[0][0] as any).body;
+            expect(body.search_categories.room_events.order_by).toBe(SearchOrderBy.Recent);
         });
     });
 });
