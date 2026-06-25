@@ -108,6 +108,14 @@ describe("SearchSessionStore", () => {
             store.updateResults({ inProgress: false, error });
             expect(store.getSnapshot()?.error).toBe(error);
         });
+
+        it("preserves the senders (from:) filter across result updates", () => {
+            start({ senders: ["@alice:server"] });
+            expect(store.getSnapshot()?.senders).toEqual(["@alice:server"]);
+            store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")], count: 1 });
+            // The sender filter is session identity, not per-result state: it must survive updateResults.
+            expect(store.getSnapshot()?.senders).toEqual(["@alice:server"]);
+        });
     });
 
     describe("setCurrentMatchIndex", () => {

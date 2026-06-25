@@ -26,6 +26,12 @@ export interface SearchSessionParams {
     scope: SearchScope;
     /** The room the search was started from, or undefined for an all-rooms search. */
     roomId?: string;
+    /**
+     * The active `from:`/sender filter (full MXIDs), or undefined/empty for no sender filter. Part of the
+     * session identity (search Phase 3 slice 2): it survives RoomView remounts during cross-room stepping and
+     * is preserved verbatim by {@link SearchSessionStore.updateResults}, so a re-search keeps the filter.
+     */
+    senders?: string[];
     promise: Promise<ISearchResults>;
     abortController?: AbortController;
 }
