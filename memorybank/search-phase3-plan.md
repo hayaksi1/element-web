@@ -96,6 +96,70 @@ round-trip on a live desktop build (unit tests mock `timestampToEvent`).
 
 ---
 
-## 3. Slice 2 (next) — `from:` / sender filter
-Compound filter chip/member-picker in the search header; homeserver leg sets `IRoomEventFilter.senders`; Seshat leg =
-client-side post-filter (decision 2) with over-fetch. Detailed design when slice 1 lands.
+## 3. Slice 2 — `from:` / sender filter — **DONE (session 25)**
+
+Shipped end-to-end via TDD + a 4-lens adversarial-review workflow (6 confirmed findings triaged). Evidence base:
+6-agent `sender-filter-understand` Understand workflow over Searching.ts / SearchSessionStore / search header / Compound.
+
+**What it does:** a Compound member-picker in the search header (beside jump-to-date) narrows in-room/all-rooms search
+to selected senders. Homeserver `/search` leg filters natively (`IRoomEventFilter.senders`); the Seshat (encrypted/
+local) leg cannot filter at query time so it **over-fetches** then **post-filters** client-side. Multi-select; the
+filter survives cross-room match-stepping remounts.
+
+**Backend (`Searching.ts`):**
+- `senders?: string[]` threaded through every search seam: `eventSearch` → `eventIndexSearch` →
+  `{serverSideSearchProcess, localSearchProcess, chainSearchProcess, combinedSearch}` → `serverSideSearch`/`localSearch`.
+- Homeserver: `serverSideSearch` sets `filter.senders` (rides in the stored `_query` body → server-side pagination
+  keeps it for free).
+- Seshat: new `const SESHAT_SENDER_OVERFETCH_LIMIT = SEARCH_LIMIT * 5`; `buildSeshatSearchArgs` bumps `limit` when a
+  sender filter is active. New `filterSeshatResultsBySender(localResult, senders)` mutates the raw `IResultRoomEvents`
+  (matches `result.result.sender`, a full MXID) after `sanitizeSeshatResults`, applied in `localSearch` +
+  `fetchChainRoomPage`. New `ISeshatSearchResults.senderFilter` carries the senders so pagination re-applies the
+  post-filter (`localPagination`, `combinedPagination`, `chainSearchPagination`). Removed the dead `processResult`
+  param from `localSearch`.
+- **Accepted v1 limitation (documented in code):** a degraded all-rooms search (homeserver leg failed) that over-fetches
+  Seshat can push overflow into `cachedEvents` the single-leg `localPagination` does not drain → some matches surface
+  only on a later page. Narrow (sender filter + server-leg failure + >SEARCH_LIMIT matches on page 1). Matches the
+  existing degradation note's tone. Count is intentionally NOT recomputed (dual-denominator from slice 5 already shows
+  backend `count` vs loaded `matches.length` diverging — sender filter is just another reason).
+
+**State (`SearchSessionStore` + `SearchInfo` + `RoomView`):**
+- `senders?` added to `SearchSessionParams` (canonical, survives remount) + `SearchInfo` (the render mirror). `start()`
+  spreads it; `updateResults()` preserves it.
+- `RoomView.onSearch(term, scope, senders = this.state.search?.senders)` threads senders to `eventSearch` + `start` +
+  `setState`. New `onSearchSendersChange` re-runs the search keeping term+scope. **Review-found bug fixed:**
+  `searchInfoFromSession` (the remount re-hydration mirror) was dropping `senders` → chip would lose its selection and a
+  re-search would silently clear the filter; now carries `senders` (regression test added, verified RED-without-fix).
+- Plumbed `onSearchSendersChange` + `searchSenders` down RoomView → `RightPanel` → `RoomSummaryCardView` → the control.
+
+**UI (MVVM v2):**
+- `apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.ts` (extends shared `BaseViewModel`) — owns the
+  candidate catalogue: `room.getJoinedMembers()` minus the current user (`room.myUserId`), sorted by display name.
+- `apps/web/src/components/views/right_panel/RoomSearchSenderFilter.tsx` — Compound `Menu` of `CheckboxMenuItem`s
+  (multi-select; `onSelect` `preventDefault` keeps the menu open) + a critical "Clear" `MenuItem`; `IconButton` trigger
+  (`user-profile` icon) with an `indicator` dot + count-aware aria-label when active. Renders null when the room has no
+  other members. Selected senders are CONTROLLED (from the store via props), not VM-owned.
+
+**i18n:** `room|search|sender_filter_button`, `…_button_active` ("…(%(count)s selected)"), `…_clear`, `…_label`.
+
+**Tests (all green, 173 across the affected suites):** Searching-test (+11: every path/pagination/over-fetch/empty-[]),
+SearchSessionStore-test (+1), RoomSearchSenderFilterViewModel-test (+2), RoomSearchSenderFilter-test (+7 incl. controlled
+multi-select accumulation + aria count), RoomView-test (+2: onSearchSendersChange re-search + senders remount
+re-hydration). tsc clean (only the 4 pre-existing vendored matrix-js-sdk errors), eslint/prettier/i18n:lint clean. Jest
+via `scratchpad/webjest.sh` (allowlist incl. matrix-js-sdk + @element-hq/web-shared-components).
+
+**Adversarial review (4 lenses → 6 confirmed):** fixed = a11y count in aria-label (#4), empty-`[]` coverage (#6),
+test-cast comment (#5); refuted-by-test = the rapid multi-select "stale closure" race (#2 — React flushes discrete
+clicks and the control is a controlled component, proven by the accumulation test); pushed back = the `onSearch`
+default-param debounce-after-cancel race (#1 — **pre-existing**, not introduced by slice 2; `senders` defaults to
+`undefined` after cancel = no filter = no regression). **Deferred (polish):** an `inProgress` disabled/aria-busy state on
+the menu items while a search is in flight (#3 — functional behaviour is already correct via AbortController + searchId;
+would need threading `inProgress` down the RightPanel chain). PostHog interaction metric for the sender filter deferred
+(same upstream analytics-events gap as the stepper / jump-to-date). In-picker member text-search omitted in v1 (a large
+room shows a long checkbox list) — future enhancement.
+
+## 4. Slice 3 (next) — Phase 4 searchable media tabs, or Phase 3 combinations
+Per the master plan: Phase 3's structured filters (jump-to-date slice 1 + sender slice 2) are done. Next per
+`search-improvement-plan.md` §5 is **Phase 4** (split `FilePanel` into searchable Media/Files/Links/Music/Voice tabs;
+needs INDEX_VERSION bump + re-backfill to index media filenames). Combining `from:` + jump-to-date + term into one query
+("from Alice in March") is a natural Phase 3 polish if wanted before Phase 4.

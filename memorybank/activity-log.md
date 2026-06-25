@@ -1406,3 +1406,45 @@ not committed).
   gate rework) and re-enables the all-rooms `canStep` branch. Then P3 from:/date filters, P4 media tabs, P5
   reach/ranking/health-check. PostHog stepping event still pending an upstream `@matrix-org/analytics-events` schema add.
 - Slices 1–5 + slice-5 commit **pushed this session** (user asked to commit+push; origin now has the work).
+
+## Session 25 (2026-06-25) — Search Phase 3 **slice 2**: `from:`/sender filter (TDD + adversarial review)
+
+Continued the search initiative. Confirmed slice 1 (jump-to-date in search) is committed (HEAD `f9adbf3`) and the tree
+was clean; the start-of-session git snapshot was stale. Implemented **Phase 3 slice 2** (the `from:`/sender filter)
+end-to-end, TDD per task, then a 4-lens adversarial-review workflow.
+
+**Process:** 6-agent `sender-filter-understand` Understand workflow (query-construction / Seshat-merge / search-header-MVVM
+/ member-picker-Compound / tests-i18n) → synthesized a file-by-file plan with 11 TDD tasks → verified its `mustVerify`
+items against source (icon export, test-file existence, `combinedPagination` Seshat branch) → TDD RED→GREEN per task →
+4-lens adversarial-review workflow (backend-correctness / state-mvvm / ui-edge-a11y / tests-i18n; 6 confirmed, 3 refuted)
+→ triaged findings (receiving-code-review skill) → applied fixes → re-verified.
+
+**What shipped** (locked decisions from session 24 honoured: homeserver `IRoomEventFilter.senders` native + Seshat
+over-fetch client-side post-filter, no native rebuild; Compound member-picker in the search header). Full detail in
+`search-phase3-plan.md` §3. Highlights:
+- `Searching.ts`: `senders?` threaded through all search + pagination paths; `filterSeshatResultsBySender` +
+  `SESHAT_SENDER_OVERFETCH_LIMIT`; `ISeshatSearchResults.senderFilter` carry for paginated re-filtering. Documented the
+  degraded-combined over-fetch cache-overflow as an accepted v1 limitation; count left to the slice-5 dual-denominator.
+- State: `senders` on `SearchSessionParams`/`SearchInfo`; `RoomView.onSearchSendersChange` re-search; plumbed through
+  RightPanel → RoomSummaryCardView. **Review-found bug:** `searchInfoFromSession` dropped `senders` on remount → fixed +
+  regression test (verified RED-without-fix).
+- UI: `RoomSearchSenderFilterViewModel` (MVVM v2) + `RoomSearchSenderFilter` Compound multi-select Menu, mounted beside
+  jump-to-date. i18n: `room|search|sender_filter_*`.
+
+**Adversarial review (6 confirmed):** fixed a11y count-in-aria-label (#4), empty-`[]` test (#6), test-cast comment (#5);
+**refuted-by-test** the rapid multi-select "stale closure" race (#2 — controlled component + React discrete-event flush,
+proven by an accumulation test); **pushed back** on the `onSearch` debounce-after-cancel race (#1 — pre-existing, the
+`senders` default is `undefined` after cancel = no filter = no regression). **Deferred:** menu-item `inProgress`
+disabled/aria-busy state (#3 — behaviour already correct via AbortController+searchId); PostHog; in-picker text-search.
+
+**Verify:** 173 affected web Jest pass (Searching 48, SearchSessionStore 19, RoomSearchSenderFilter 7, VM 2,
+RoomSummaryCardView, RoomView 73, RightPanel); tsc clean (only the 4 pre-existing vendored matrix-js-sdk errors);
+eslint `--max-warnings 0` / prettier / i18n:lint clean. Jest via `scratchpad/webjest.sh`.
+
+### WHERE I LEFT OFF — Phase 3 done; Phase 4 next
+- Phase 3 structured filters complete (slice 1 jump-to-date, slice 2 sender). Next per `search-improvement-plan.md` §5
+  is **Phase 4** (searchable typed media tabs — split `FilePanel`, needs INDEX_VERSION bump + re-backfill), or a Phase 3
+  polish combining `from:` + jump-to-date + term into one query first. PostHog metrics still pending the upstream
+  `@matrix-org/analytics-events` schema add.
+- **Slice 2 is UNCOMMITTED** (working tree has the slice-2 changes; jest needs the `--transformIgnorePatterns`
+  workaround). Review and commit when ready, per the per-slice commit cadence (slice 1 = `f9adbf3`).
