@@ -1195,6 +1195,47 @@ export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
 }
 
 /**
+ * A single search result enriched for the Telegram-style results dropdown (search Phase 6): the jumpable location
+ * ({@link SearchMatch}) plus the data a compact row needs — sender MXID, the matched message body and timestamp.
+ */
+export interface SearchResultPreview extends SearchMatch {
+    /** The MXID of the matched event's sender. */
+    sender: string;
+    /** The matched message body (plain text) shown as the row preview. */
+    body: string;
+    /** The matched event's origin-server timestamp (ms), used to render the row date. */
+    ts: number;
+}
+
+/**
+ * Build the ordered list of result previews for the search results dropdown.
+ *
+ * Ordered identically to {@link extractSearchMatches} (newest-first by timestamp, stable, undated last, results
+ * missing an event/room id skipped) so that preview row index `i` maps to match `i` — letting a row click reuse the
+ * existing {@link SearchMatch}-based live-timeline stepping. Pure: the backend results are not mutated.
+ */
+export function extractSearchResultPreviews(results: ISearchResults): SearchResultPreview[] {
+    const previews: SearchResultPreview[] = [];
+    for (const result of results.results ?? []) {
+        const event = result.context.getEvent();
+        const eventId = event.getId();
+        const roomId = event.getRoomId();
+        if (eventId && roomId) {
+            previews.push({
+                roomId,
+                eventId,
+                sender: event.getSender() ?? "",
+                body: event.getContent().body ?? "",
+                // Default an absent timestamp to 0 so it sorts last and never produces a NaN comparison.
+                ts: event.getTs() ?? 0,
+            });
+        }
+    }
+    previews.sort((a, b) => b.ts - a.ts);
+    return previews;
+}
+
+/**
  * Build the ordered list of terms to highlight in matched message bodies for a set of search results.
  *
  * Mirrors the enrichment the results list applies (see RoomSearchView): the literal search term is always
@@ -1260,6 +1301,11 @@ export interface SearchInfo {
      * Ordered list of match locations (display order) used to step through matches in the live timeline.
      */
     matches?: SearchMatch[];
+    /**
+     * Ordered list of result previews (parallel to {@link matches}) rendered as rows in the Telegram-style results
+     * dropdown (search Phase 6). See {@link extractSearchResultPreviews}.
+     */
+    previews?: SearchResultPreview[];
     /**
      * Index into {@link matches} of the currently-focused match, or -1/undefined when no match is active.
      */

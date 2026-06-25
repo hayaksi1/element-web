@@ -19,6 +19,7 @@ import { logger } from "matrix-js-sdk/src/logger";
 import eventSearch, {
     extractSearchHighlights,
     extractSearchMatches,
+    extractSearchResultPreviews,
     hardenSeshatSearchTerm,
     getRoomSearchChain,
     searchPagination,
@@ -927,6 +928,75 @@ describe("Searching", () => {
                 { roomId: "!predecessor:example.org", eventId: "$mid" },
                 { roomId: "!current:example.org", eventId: "$old" },
             ]);
+        });
+    });
+
+    describe("extractSearchResultPreviews", () => {
+        const eventMapper = (obj: Partial<IEvent>): MatrixEvent => new MatrixEvent(obj);
+
+        const makeResult = (eventId: string, ts: number, body: string, sender = "@user:example.org"): SearchResult =>
+            SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: "!room:example.org",
+                        event_id: eventId,
+                        sender,
+                        origin_server_ts: ts,
+                        content: { body, msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                },
+                eventMapper,
+            );
+
+        it("returns newest-first preview rows carrying sender, body and timestamp (parallel to extractSearchMatches)", () => {
+            const results = {
+                results: [
+                    makeResult("$old", 100, "older"),
+                    makeResult("$new", 300, "newer"),
+                    makeResult("$mid", 200, "middle"),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchResultPreviews(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$new", sender: "@user:example.org", body: "newer", ts: 300 },
+                { roomId: "!room:example.org", eventId: "$mid", sender: "@user:example.org", body: "middle", ts: 200 },
+                { roomId: "!room:example.org", eventId: "$old", sender: "@user:example.org", body: "older", ts: 100 },
+            ]);
+        });
+
+        it("skips results whose matched event lacks an id or room id", () => {
+            const bad = SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        sender: "@user:example.org",
+                        origin_server_ts: 1,
+                        content: { body: "match", msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                } as unknown as Parameters<typeof SearchResult.fromJson>[0],
+                eventMapper,
+            );
+            const results = {
+                results: [makeResult("$a", 5, "a"), bad],
+                highlights: [],
+                count: 2,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchResultPreviews(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$a", sender: "@user:example.org", body: "a", ts: 5 },
+            ]);
+        });
+
+        it("returns an empty list when there are no results", () => {
+            const results = { results: [], highlights: [], count: 0 } as unknown as ISearchResults;
+            expect(extractSearchResultPreviews(results)).toEqual([]);
         });
     });
 

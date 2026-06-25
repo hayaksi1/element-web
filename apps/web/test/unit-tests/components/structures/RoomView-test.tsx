@@ -25,7 +25,17 @@ import {
 } from "matrix-js-sdk/src/matrix";
 import { type CryptoApi, CryptoEvent, UserVerificationStatus } from "matrix-js-sdk/src/crypto-api";
 import { KnownMembership } from "matrix-js-sdk/src/types";
-import { act, cleanup, fireEvent, render, type RenderResult, screen, waitFor, findByRole } from "jest-matrix-react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    type RenderResult,
+    screen,
+    waitFor,
+    within,
+    findByRole,
+} from "jest-matrix-react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -252,6 +262,82 @@ describe("RoomView", () => {
         await mountRoomView(ref);
         return ref.current!;
     };
+
+    describe("Telegram-style search header (Phase 6)", () => {
+        it("opens the top search header on FocusMessageSearch and hides it on cancel", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            const ref = createRef<RoomView>();
+            await mountRoomView(ref);
+            expect(ref.current).toBeTruthy();
+
+            // The normal room header is shown initially — no top search bar.
+            expect(screen.queryByTestId("room-search-header")).not.toBeInTheDocument();
+            expect(ref.current!.state.searchHeaderActive).toBeFalsy();
+
+            // Cmd+F dispatches FocusMessageSearch -> the top search bar replaces the header.
+            act(() => {
+                defaultDispatcher.fire(Action.FocusMessageSearch);
+            });
+            await waitFor(() => expect(screen.getByTestId("room-search-header")).toBeInTheDocument());
+            expect(ref.current!.state.searchHeaderActive).toBe(true);
+
+            // Cancelling restores the normal header.
+            await userEvent.click(
+                within(screen.getByTestId("room-search-header")).getByRole("button", { name: "Cancel" }),
+            );
+            await waitFor(() => expect(screen.queryByTestId("room-search-header")).not.toBeInTheDocument());
+            expect(ref.current!.state.searchHeaderActive).toBe(false);
+        });
+
+        it("shows the results dropdown and jumps to the live timeline when a row is clicked", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            const ref = createRef<RoomView>();
+            const { container } = await mountRoomView(ref);
+            expect(ref.current).toBeTruthy();
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            startSearch(ref, {
+                searchId: 7,
+                roomId: room.roomId,
+                term: "gemini",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [
+                        SearchResult.fromJson(
+                            {
+                                rank: 1,
+                                result: {
+                                    content: { body: "gemini hit", msgtype: "m.text" },
+                                    type: "m.room.message",
+                                    event_id: "$hit",
+                                    sender: "@alice:example.org",
+                                    origin_server_ts: 5000,
+                                    room_id: room.roomId,
+                                },
+                                context: { events_before: [], events_after: [], profile_info: {} },
+                            },
+                            eventMapper,
+                        ),
+                    ],
+                    highlights: [],
+                    count: 1,
+                }) as unknown as SearchInfo["promise"],
+            });
+
+            // Once the promise settles, onSearchUpdate fills `previews` and the dropdown row appears.
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("gemini hit")).toBeInTheDocument();
+                return el;
+            });
+
+            // Clicking the dropdown row jumps the live timeline to that match (ViewRoom by event id + cursor set).
+            const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
+            await userEvent.click(within(dropdown).getByText("gemini hit"));
+            await expect(prom).resolves.toEqual(expect.objectContaining({ event_id: "$hit" }));
+            expect(ref.current!.state.search!.currentMatchIndex).toBe(0);
+        });
+    });
 
     describe("in-room search match stepping", () => {
         it("steps to the next match when a SearchMatchStep(next) action is dispatched", async () => {
@@ -1539,7 +1625,7 @@ describe("RoomView", () => {
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
 
             const roomViewRef = createRef<RoomView>();
-            const { container, getByText, findByLabelText } = await mountRoomView(roomViewRef);
+            const { container, findByLabelText } = await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
             // @ts-ignore - triggering a search organically is a lot of work
             act(() =>
@@ -1587,7 +1673,9 @@ describe("RoomView", () => {
                 expect(container.querySelector(".mx_RoomView_searchResultsPanel")).toBeVisible();
             });
 
-            const searchResultTile = getByText("search term").closest(".mx_EventTile");
+            // Scope to the results panel: the term now also appears in the top-of-chat search bar input (Phase 6).
+            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
+            const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
 
             await userEvent.hover(searchResultTile!);
@@ -1607,7 +1695,7 @@ describe("RoomView", () => {
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
 
             const roomViewRef = createRef<RoomView>();
-            const { container, getByText, findByLabelText } = await mountRoomView(roomViewRef);
+            const { container, findByLabelText } = await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
             // @ts-ignore - triggering a search organically is a lot of work
             act(() =>
@@ -1656,7 +1744,9 @@ describe("RoomView", () => {
             });
             const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
 
-            const searchResultTile = getByText("search term").closest(".mx_EventTile");
+            // Scope to the results panel: the term now also appears in the top-of-chat search bar input (Phase 6).
+            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
+            const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
 
             await userEvent.hover(searchResultTile!);
