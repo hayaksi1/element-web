@@ -232,9 +232,76 @@ confirm in manual QA, not unit-testable here. The two new `RoomView` stepping te
 1380-line suite (with a `toBeTruthy()` mount guard) to avoid a **pre-existing** cross-test isolation leak that
 nulls the mount when they run last — the leak itself is out of slice-3 scope.
 
+## Slice 4 — Out-of-window / encrypted edge cases + predecessor-chain safety — ✅ DONE (session 21, TDD, adversarial-reviewed)
+
+**Scope decision (user, this session):** "Defer with design." The plan's one-liner *"All-rooms scope: arrows switch
+room before jumping"* turned out to be **architecturally infeasible as a slice**: RoomView is keyed by room id
+(`LoggedInView.tsx:737` → `<RoomView key={currentRoomId} />`), so any cross-room `ViewRoom` **unmounts/remounts**
+RoomView and destroys the in-instance search session (`searchNavVm` + `state.search`; there is no search store). The
+code even states the assumption: `RoomView.tsx:770-771` "the roomID will not change for the lifetime of the RoomView
+instance." So slice 4 shipped the **safe, complete** edge-case half and re-scoped all-rooms into its own dedicated
+**Slice 6 (SearchSessionStore)** below, rather than half-building a multi-week, HIGH-risk cross-room feature.
+
+**Shipped (RED→GREEN for the production change; 3-lens adversarial-review workflow):**
+
+1. **Predecessor-chain stepping safety (the real bug, production fix).** A `SearchScope.Room` search **also searches
+   upgraded predecessor rooms** (#32258, `getRoomSearchChain` → `eventIndexSearch`/server leg in `Searching.ts`), so
+   its completed results can contain matches whose event lives in a **different (predecessor) room**. Slice-1's
+   stepper assumed Room scope = current room only, so stepping into such a match would `dispatch(ViewRoom
+   {room_id: predecessorRoom})` → unmount the room-keyed RoomView → **lose the search session** (commonly an E2EE
+   upgraded room). **Fix:** `RoomView.onSearchUpdate` now filters the steppable match list to
+   `m.roomId === this.getRoomId()`. Predecessor matches stay visible in the results list (`RoomSearchView`, which
+   renders the full result set) but are excluded from the "k of N" **live** stepper. The common non-upgraded case
+   (`getRoomSearchChain` → `[roomId]`) is unaffected (filter is a no-op). `state.search.matches` is set to the same
+   filtered list, so the slice-2 highlight derivation (`matches[currentMatchIndex].eventId`) stays consistent.
+2. **Out-of-window reachability (already generic — confirmed + locked by test).** Stepping to any match dispatches
+   `ViewRoom {event_id, highlighted, scroll_into_view}`; the SDK's `loadTimeline` builds a fresh
+   `TimelineWindow(eventId)` (`TimelinePanel.tsx:1461`) that contextually back-paginates to any event id in the room —
+   the same permalink/reply-jump path, which also drives decryption for E2EE/Seshat hits. **No production change**
+   (the capability was built generically in slice 1); slice 4 locks the contract with a test that steps to a deeper
+   (out-of-window) match and asserts it is requested by id with the session surviving.
+
+**Files:** `apps/web/src/components/structures/RoomView.tsx` (11-line filter + rationale comment, only production
+change). Tests: `RoomView-test.tsx` — two new tests in the **early** `in-room search match stepping` describe
+("does not step to matches from a predecessor room", "requests an out-of-window match by event id"); `Searching-test.ts`
+— `extractSearchMatches` characterization (helper stays scope-agnostic / cross-room; live-timeline scoping is the
+caller's job). **Verify: 93 web Jest pass (Searching 30 + RoomView 63); tsc only the 4 pre-existing vendored
+matrix-js-sdk errors; eslint/prettier clean; no new i18n.**
+
+**Documented limitations (deliberate):** (a) When predecessors hold matches, the "k of N" live stepper undercounts vs
+the list's "N results found" (steppable = current-room subset) — correct, not a bug; Slice 6 makes the rest steppable.
+(b) Thread-only matches and the slice-2 malformed-edit case still no-op gracefully (loadTimeline jumps to live end) —
+out of scope. (c) The new mount-heavy tests live in the early describe because of a **pre-existing** cross-test
+isolation leak (a client-less RoomView re-renders → `shouldEncryptRoomWithSingle3rdPartyInvite` crash) that strikes
+whichever mount-heavy test runs last in the later describes; the leak itself is out of slice scope.
+
 ## Later slices (next sessions)
-- **Slice 4 — Out-of-window / encrypted edge cases.** Confirm Seshat-result event ids resolve in the live
-  timeline (E2EE); contextual back-pagination already handled by TimelineWindow — add tests for a match not in
-  the loaded window. All-rooms scope: arrows switch room before jumping.
 - **Slice 5 — Polish.** Hide the results list once stepping starts (toggle back via a "list" affordance);
-  PostHog tracking; pcss for the active live tile.
+  PostHog tracking; pcss for the active live tile. **Also (slice-4 adversarial-review finding):** the header can
+  show TWO conflicting totals before the first arrow press — the results-list summary "N results found" (`count`,
+  full backend estimate across the predecessor chain) and the "k of N" stepper (`matches.length`, current-room
+  loaded page, ≤SEARCH_LIMIT). `RoomSearchAuxPanel` only hides the summary once `currentMatchIndex>=0`. Fix:
+  hide the summary whenever the stepper is present (`navigationVm` total>0), or unify the denominators, or label
+  the stepper "k of N loaded". (Pre-existing for the >SEARCH_LIMIT case since slice 1; slice 4 documented it in
+  `onSearchUpdate`.)
+- **Slice 6 — All-rooms (and predecessor-room) cross-room stepping via a `SearchSessionStore`.** *(Large, HIGH risk —
+  the deferred half of slice 4. The defining blocker: RoomView is room-id-keyed, so the search session cannot survive
+  a room switch while it lives on the component instance.)*
+  - **Design:** lift the search session out of `RoomView` into a new MVVM-v2 store, e.g.
+    `apps/web/src/stores/SearchSessionStore.ts` (or fold into `RoomViewStore`). It owns: `term`, `scope`, ordered
+    `matches: SearchMatch[]` (cross-room, unfiltered), `currentMatchIndex`, `highlights`, `searchId`, and the
+    `AbortController`. The `RoomSearchNavigationViewModel` reads/writes the store instead of an instance field.
+  - **Stepping:** `next/previous` advance the cursor in the store, then `dispatch(ViewRoom {room_id, event_id,
+    highlighted, scroll_into_view})`. When `room_id` differs from the current room, RoomView **remounts** for the new
+    room; on mount it **re-hydrates** the live stepper from the store (matches/index/term/highlights) and re-shows the
+    search header + arrows — so stepping continues seamlessly across rooms (and into predecessor rooms, which then no
+    longer need the slice-4 current-room filter).
+  - **Lifecycle hazards to handle (verified in slice 4):** the result-click clear (`onRoomViewStoreUpdate`
+    `RoomView.tsx:795-804`, gated on `timelineRenderingType===Search` + `initialEventId` change) and the edit-clear
+    (`RoomView.tsx:1302 search:undefined`) must NOT fire during a cross-room *stepping* jump — distinguish "stepping
+    jump" from "user clicked a result/edit" via a store flag, mirroring slice-1's flip-to-Room-mode-before-dispatch
+    trick but now surviving the remount. Abort the search promise only on real cancel, not on remount. Re-enable the
+    all-rooms branch of `canStep` (drop the `scope===Room` gate) once the store exists.
+  - **Tests:** store unit tests (cursor + cross-room order + dispose/abort); a remount-and-rehydrate integration
+    test (step from room A to a match in room B → RoomView remounts for B → stepper continues, header persists);
+    predecessor-room stepping now allowed; the slice-4 current-room filter is removed.

@@ -1,5 +1,48 @@
 # Activity Log
 
+## 2026-06-25 (session 21) — Search Phase 2 slice 4: out-of-window/encrypted edge cases + predecessor-chain stepping safety
+
+Directive: "continue the task, read memorybank to detect where you are." Slices 1–3 done & committed (HEAD `277d3a8`);
+next was slice 4 (out-of-window/encrypted edge cases + all-rooms scope).
+
+### Key finding that reshaped the slice (verified in code, not assumed)
+`RoomView` is **keyed by room id** — `LoggedInView.tsx:737` `<RoomView key={currentRoomId} />` — so a cross-room
+`ViewRoom` **unmounts/remounts** RoomView and destroys the in-instance search session (`searchNavVm` + `state.search`;
+there is **no** search store). `RoomView.tsx:770-771` even states the assumption ("roomID will not change for the
+lifetime of the RoomView instance"). ⇒ the plan's one-liner *"All-rooms scope: arrows switch room before jumping"* is
+**not a slice** — it needs a `SearchSessionStore` that survives the remount (HIGH risk). **Asked the user** → decision:
+**"Defer with design"** — ship the safe edge-case half now, re-scope all-rooms as a dedicated **Slice 6**.
+
+### The real bug slice 4 fixes (predecessor-chain × room-keyed RoomView)
+A `SearchScope.Room` search **also searches upgraded predecessor rooms** (#32258, `getRoomSearchChain` →
+`eventIndexSearch` Seshat leg / server leg in `Searching.ts`), so its completed results can contain matches whose
+event lives in a **different (predecessor) room** — commonly an **E2EE** upgraded room. Slice-1's stepper assumed Room
+scope = current room, so stepping such a match would `dispatch(ViewRoom {room_id: predecessorRoom})` → unmount the
+room-keyed RoomView → **lose the session**. This is the concrete "encrypted edge case."
+
+### Shipped (TDD RED→GREEN for the production change; 3-lens adversarial-review workflow)
+- **Production fix (11 lines):** `RoomView.onSearchUpdate` filters the steppable match list to
+  `m.roomId === this.getRoomId()`. Predecessor matches stay in the results list (`RoomSearchView` renders the full
+  set) but are excluded from the "k of N" **live** stepper. Common non-upgraded case = no-op. `state.search.matches`
+  set to the same filtered list → slice-2 highlight derivation stays consistent.
+- **Out-of-window:** no production change (built generically in slice 1 — `ViewRoom {event_id,…}` →
+  `loadTimeline` → fresh `TimelineWindow(eventId)` back-paginates context, E2EE decryption included). Locked with a
+  test that steps to a deeper match and asserts request-by-id + session survival.
+- **Tests:** two new `RoomView-test` tests placed in the **early** `in-room search match stepping` describe (a
+  pre-existing cross-test isolation leak crashes whichever mount-heavy test runs *last* in the later describes — a
+  client-less RoomView re-renders into `shouldEncryptRoomWithSingle3rdPartyInvite`; early placement keeps state clean,
+  and it's their correct semantic home). RED proven: predecessor test fails ("0 of 2" not "0 of 1") without the
+  filter. Plus a `Searching-test` characterizing `extractSearchMatches` as scope-agnostic/cross-room.
+
+### Verification (all green)
+93 web Jest pass (Searching 30 + RoomView 63, via `corepack pnpm -C apps/web exec jest … --transformIgnorePatterns`
+workaround); `tsc` only the 4 pre-existing vendored matrix-js-sdk errors; eslint `--max-warnings 0` + prettier clean;
+no new i18n; exactly 3 files changed (1 prod + 2 test).
+
+### Next
+Slice 5 (hide list while stepping, PostHog, pcss) → **Slice 6** = all-rooms + predecessor cross-room stepping via the
+`SearchSessionStore` (design written in `search-phase2-plan.md`) → Phases 3–5. Commit prepared; push pending user OK.
+
 ## 2026-06-25 (session 17) — Search Phase 2 slice 1: in-timeline match stepping (k-of-N + live-timeline arrows)
 
 Directive: "continue where you left off" → Search **Phase 2** (the biggest Telegram-parity win). User decision this
