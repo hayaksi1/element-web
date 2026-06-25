@@ -809,9 +809,11 @@ export default class MessagePanel extends React.Component<IProps, IState> {
         const highlight = eventId === this.props.highlightedEventId;
 
         // While stepping through search matches in the live timeline, highlight the matched terms in the body of
-        // the focused match only (the same `mx_EventTile_searchHighlight` styling used in the results list).
-        const searchHighlights =
-            eventId === this.props.searchHighlightEventId ? this.props.searchHighlights : undefined;
+        // the focused match only (the same `mx_EventTile_searchHighlight` styling used in the results list), and
+        // mark that whole tile as the active stepping match so it stands out (`mx_EventTile_searchHighlightActive`).
+        const isSearchHighlightMatch =
+            this.props.searchHighlightEventId !== undefined && eventId === this.props.searchHighlightEventId;
+        const searchHighlights = isSearchHighlightMatch ? this.props.searchHighlights : undefined;
 
         const readReceipts = this.readReceiptsByEvent.get(eventId);
 
@@ -841,6 +843,7 @@ export default class MessagePanel extends React.Component<IProps, IState> {
                 lastSuccessful={wrappedEvent.lastSuccessfulWeSent}
                 isSelectedEvent={highlight}
                 highlights={searchHighlights}
+                isSearchHighlightMatch={isSearchHighlightMatch}
                 getRelationsForEvent={this.props.getRelationsForEvent}
                 showReactions={this.props.showReactions}
                 layout={this.props.layout}

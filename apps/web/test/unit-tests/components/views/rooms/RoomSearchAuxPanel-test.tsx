@@ -37,12 +37,13 @@ describe("RoomSearchAuxPanel", () => {
             />,
         );
 
-        expect(screen.getByText("0 of 2")).toBeInTheDocument();
+        // `exact: false` so this stays robust to the shared-components stepper label ("… loaded").
+        expect(screen.getByText("0 of 2", { exact: false })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Next match" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Previous match" })).toBeInTheDocument();
     });
 
-    it("should hide the results-count summary while stepping a match (counter is the source of truth)", () => {
+    it("should keep the results-count summary visible while stepping a match (keep both, stepper labelled loaded)", () => {
         const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
         navigationVm.setMatches([
             { roomId: "!r:e", eventId: "$a" },
@@ -67,8 +68,58 @@ describe("RoomSearchAuxPanel", () => {
             />,
         );
 
-        expect(screen.queryByText("results found", { exact: false })).not.toBeInTheDocument();
-        expect(screen.getByText("1 of 2")).toBeInTheDocument();
+        // We now keep BOTH the backend "N results found" summary and the "k of N loaded" stepper visible while
+        // stepping (the stepper's "loaded" label disambiguates the two denominators), instead of hiding the summary.
+        expect(screen.getByText("results found", { exact: false })).toBeInTheDocument();
+        expect(screen.getByText("1 of 2", { exact: false })).toBeInTheDocument();
+    });
+
+    it("shows a back-to-results button while stepping and invokes onBackToResults when clicked", () => {
+        const onBackToResults = jest.fn();
+        const navigationVm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
+        navigationVm.setMatches([{ roomId: "!r:e", eventId: "$a" }]);
+        navigationVm.next(); // step to the first match
+
+        render(
+            <RoomSearchAuxPanel
+                searchInfo={{
+                    searchId: 1234,
+                    count: 1,
+                    term: "abcd",
+                    scope: SearchScope.Room,
+                    promise: new Promise(() => {}),
+                    currentMatchIndex: 0,
+                }}
+                isRoomEncrypted={false}
+                onSearchScopeChange={jest.fn()}
+                onCancelClick={jest.fn()}
+                onBackToResults={onBackToResults}
+                navigationVm={navigationVm}
+            />,
+        );
+
+        screen.getByRole("button", { name: "Back to results" }).click();
+        expect(onBackToResults).toHaveBeenCalled();
+    });
+
+    it("does not show the back-to-results button when not stepping", () => {
+        render(
+            <RoomSearchAuxPanel
+                searchInfo={{
+                    searchId: 1234,
+                    count: 5,
+                    term: "abcd",
+                    scope: SearchScope.Room,
+                    promise: new Promise(() => {}),
+                }}
+                isRoomEncrypted={false}
+                onSearchScopeChange={jest.fn()}
+                onCancelClick={jest.fn()}
+                onBackToResults={jest.fn()}
+            />,
+        );
+
+        expect(screen.queryByRole("button", { name: "Back to results" })).not.toBeInTheDocument();
     });
 
     it("should not render match navigation when there are no matches", () => {
