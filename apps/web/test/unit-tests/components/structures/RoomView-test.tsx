@@ -337,6 +337,56 @@ describe("RoomView", () => {
             await expect(prom).resolves.toEqual(expect.objectContaining({ event_id: "$hit" }));
             expect(ref.current!.state.search!.currentMatchIndex).toBe(0);
         });
+
+        it("keeps the live timeline visible behind the bounded results dropdown (Phase 7 — Bug #2)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            const ref = createRef<RoomView>();
+            const { container } = await mountRoomView(ref);
+            expect(ref.current).toBeTruthy();
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            startSearch(ref, {
+                searchId: 8,
+                roomId: room.roomId,
+                term: "gemini",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [
+                        SearchResult.fromJson(
+                            {
+                                rank: 1,
+                                result: {
+                                    content: { body: "gemini hit", msgtype: "m.text" },
+                                    type: "m.room.message",
+                                    event_id: "$hit",
+                                    sender: "@alice:example.org",
+                                    origin_server_ts: 5000,
+                                    room_id: room.roomId,
+                                },
+                                context: { events_before: [], events_after: [], profile_info: {} },
+                            },
+                            eventMapper,
+                        ),
+                    ],
+                    highlights: [],
+                    count: 1,
+                }) as unknown as SearchInfo["promise"],
+            });
+
+            await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("gemini hit")).toBeInTheDocument();
+            });
+
+            // The old full-list results view is isolated as a hidden data engine...
+            expect(container.querySelector(".mx_RoomView_searchDataEngine")).toBeInTheDocument();
+            // ...and the live conversation timeline is NOT hidden (no display:none), so it shows behind the dropdown.
+            const livePanel = container.querySelector(
+                ".mx_RoomView_messagePanel:not(.mx_RoomView_messagePanelSearchSpinner)",
+            ) as HTMLElement | null;
+            expect(livePanel).toBeTruthy();
+            expect(livePanel!.style.display).not.toBe("none");
+        });
     });
 
     describe("in-room search match stepping", () => {

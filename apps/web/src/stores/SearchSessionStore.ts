@@ -54,6 +54,8 @@ export interface SearchSessionResults {
     previews?: SearchResultPreview[];
     highlights?: string[];
     count?: number;
+    /** Whether more result pages remain to be paginated in (search Phase 7). */
+    hasMore?: boolean;
     error?: Error;
 }
 
@@ -69,6 +71,8 @@ export interface SearchSession extends SearchSessionParams {
     currentMatchIndex: number;
     highlights: string[];
     count?: number;
+    /** Whether more result pages remain to be paginated into the results dropdown (search Phase 7). */
+    hasMore?: boolean;
     inProgress: boolean;
     error?: Error;
 }
@@ -124,6 +128,7 @@ export class SearchSessionStore extends EventEmitter {
             previews: [],
             currentMatchIndex: -1,
             highlights: [],
+            hasMore: false,
             inProgress: true,
         };
         this.steppingJump = false;
@@ -142,6 +147,7 @@ export class SearchSessionStore extends EventEmitter {
             previews: results.previews ?? this.session.previews,
             highlights: results.highlights ?? this.session.highlights,
             count: results.count,
+            hasMore: results.hasMore ?? this.session.hasMore,
             error: results.error,
             // A fresh result set invalidates the cursor; RoomView resets its mirror in lockstep.
             currentMatchIndex: -1,
