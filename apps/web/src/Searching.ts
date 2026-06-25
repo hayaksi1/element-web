@@ -1093,6 +1093,21 @@ export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
 }
 
 /**
+ * Build the ordered list of terms to highlight in matched message bodies for a set of search results.
+ *
+ * Mirrors the enrichment the results list applies (see RoomSearchView): the literal search term is always
+ * highlighted even if the backend (Synapse/Seshat) did not echo it back, and terms are ordered longest-first so
+ * that overlapping highlights favour the more specific term. Pure — the backend `highlights` array is not mutated.
+ */
+export function extractSearchHighlights(results: ISearchResults, term: string): string[] {
+    const highlights = [...(results.highlights ?? [])];
+    if (!highlights.includes(term)) {
+        highlights.push(term);
+    }
+    return highlights.sort((a, b) => b.length - a.length);
+}
+
+/**
  * Information about a message search in progress.
  */
 export interface SearchInfo {
@@ -1136,6 +1151,11 @@ export interface SearchInfo {
      * Index into {@link matches} of the currently-focused match, or -1/undefined when no match is active.
      */
     currentMatchIndex?: number;
+    /**
+     * Terms to highlight in matched message bodies (longest-first), used to highlight the focused match in the
+     * live timeline while stepping. See {@link extractSearchHighlights}.
+     */
+    highlights?: string[];
     /**
      * Describe the error if any occured.
      */

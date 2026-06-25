@@ -148,6 +148,13 @@ interface IProps {
     // ID of an event to highlight. If undefined, no event will be highlighted.
     highlightedEventId?: string;
 
+    // Terms to highlight in the body of the focused search match while stepping through search results in the
+    // live timeline (Phase 2). Only applied to the tile whose id matches `searchHighlightEventId`.
+    searchHighlights?: string[];
+
+    // Id of the event whose body should have `searchHighlights` applied. If undefined, no body is highlighted.
+    searchHighlightEventId?: string;
+
     // The room these events are all in together, if any.
     // (The notification panel won't have a room here, for example.)
     room?: Room;
@@ -801,6 +808,11 @@ export default class MessagePanel extends React.Component<IProps, IState> {
         const eventId = mxEv.getId()!;
         const highlight = eventId === this.props.highlightedEventId;
 
+        // While stepping through search matches in the live timeline, highlight the matched terms in the body of
+        // the focused match only (the same `mx_EventTile_searchHighlight` styling used in the results list).
+        const searchHighlights =
+            eventId === this.props.searchHighlightEventId ? this.props.searchHighlights : undefined;
+
         const readReceipts = this.readReceiptsByEvent.get(eventId);
 
         const callEventGrouper = this.props.callEventGroupers.get(mxEv.getContent().call_id);
@@ -828,6 +840,7 @@ export default class MessagePanel extends React.Component<IProps, IState> {
                 lastInSection={lastInSection}
                 lastSuccessful={wrappedEvent.lastSuccessfulWeSent}
                 isSelectedEvent={highlight}
+                highlights={searchHighlights}
                 getRelationsForEvent={this.props.getRelationsForEvent}
                 showReactions={this.props.showReactions}
                 layout={this.props.layout}

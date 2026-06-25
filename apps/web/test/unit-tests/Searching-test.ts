@@ -16,6 +16,7 @@ import {
 import { logger } from "matrix-js-sdk/src/logger";
 
 import eventSearch, {
+    extractSearchHighlights,
     extractSearchMatches,
     hardenSeshatSearchTerm,
     getRoomSearchChain,
@@ -848,6 +849,30 @@ describe("Searching", () => {
         it("returns an empty list when there are no results", () => {
             const results = { results: [], highlights: [], count: 0 } as unknown as ISearchResults;
             expect(extractSearchMatches(results)).toEqual([]);
+        });
+    });
+
+    describe("extractSearchHighlights", () => {
+        it("appends the search term and sorts longest-first", () => {
+            const results = { results: [], highlights: ["bb", "dddd"], count: 0 } as unknown as ISearchResults;
+            expect(extractSearchHighlights(results, "ccc")).toEqual(["dddd", "ccc", "bb"]);
+        });
+
+        it("does not duplicate the term when the backend already returned it", () => {
+            const results = { results: [], highlights: ["match", "xy"], count: 0 } as unknown as ISearchResults;
+            expect(extractSearchHighlights(results, "match")).toEqual(["match", "xy"]);
+        });
+
+        it("returns just the term when the backend highlights are empty", () => {
+            const results = { results: [], highlights: [], count: 0 } as unknown as ISearchResults;
+            expect(extractSearchHighlights(results, "boat")).toEqual(["boat"]);
+        });
+
+        it("does not mutate the backend highlights array", () => {
+            const backendHighlights = ["bb", "dddd"];
+            const results = { results: [], highlights: backendHighlights, count: 0 } as unknown as ISearchResults;
+            extractSearchHighlights(results, "ccc");
+            expect(backendHighlights).toEqual(["bb", "dddd"]);
         });
     });
 });
