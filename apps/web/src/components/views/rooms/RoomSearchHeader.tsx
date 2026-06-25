@@ -147,6 +147,15 @@ const RoomSearchHeader: React.FC<Props> = ({
                             ref={searchInputRef}
                             autoFocus={autoFocus}
                             onKeyDown={onKeyDown}
+                            onClick={() => {
+                                // Clicking the search box while a match is focused in the live timeline (stepping)
+                                // brings the Telegram-style results dropdown back — the intuitive way to return to
+                                // the list after opening a result, alongside the explicit "back to results" button
+                                // (search Phase 8, Bug #2). A plain focus/no-op when the list is already shown. Uses a
+                                // real click (not onFocus) so the programmatic autofocus after a cross-room stepping
+                                // remount never spuriously kicks the user out of stepping.
+                                if (isSteppingMatch) onBackToResults?.();
+                            }}
                         />
                     </Box>
                     {/* Telegram-style "from:"/sender filter; renders only when the room has other members. */}
