@@ -61,7 +61,8 @@ import WidgetUtils from "../../../../src/utils/WidgetUtils";
 import { WidgetType } from "../../../../src/widgets/WidgetType";
 import WidgetStore from "../../../../src/stores/WidgetStore";
 import { type ViewRoomErrorPayload } from "../../../../src/dispatcher/payloads/ViewRoomErrorPayload";
-import { SearchScope } from "../../../../src/Searching";
+import { type SearchInfo, SearchScope } from "../../../../src/Searching";
+import { SearchSessionStore } from "../../../../src/stores/SearchSessionStore";
 import { MEGOLM_ENCRYPTION_ALGORITHM } from "../../../../src/utils/crypto";
 import MatrixClientContext from "../../../../src/contexts/MatrixClientContext";
 import { type ViewUserPayload } from "../../../../src/dispatcher/payloads/ViewUserPayload.ts";
@@ -123,12 +124,43 @@ describe("RoomView", () => {
         unmockPlatformPeg();
         jest.clearAllMocks();
 
+        // The SearchSessionStore is a singleton that outlives each test; reset it so a search session never leaks
+        // into the next test (abort:false so we don't reject a still-pending mock promise).
+        SearchSessionStore.instance.clear({ abort: false });
+
         // Can't jest.restoreAllMocks() because some tests will break
         jest.spyOn(pinnedEventHooks, "usePinnedEvents").mockRestore();
         jest.spyOn(pinnedEventHooks, "useSortedFetchedPinnedEvents").mockRestore();
 
         cleanup();
     });
+
+    // Seed a completed search the way RoomView.onSearch would (the session now lives in the SearchSessionStore, so
+    // a directly-setState'd `search` no longer populates the store-backed match stepper on its own). RoomSearchView
+    // then resolves the promise and onSearchUpdate fills in the matches. This mirrors onSearch INCLUDING its
+    // resetFocusedEvent step — a flag-guarded no-event ViewRoom that drops any event the timeline was pinned to —
+    // so the result-click clear gate behaves the same as in production.
+    const startSearch = (ref: RefObject<RoomView | null>, search: SearchInfo): void => {
+        act(() => {
+            SearchSessionStore.instance.start({
+                searchId: search.searchId,
+                roomId: search.roomId,
+                term: search.term,
+                scope: search.scope,
+                promise: search.promise,
+                abortController: search.abortController ?? new AbortController(),
+            });
+            ref.current!.setState({ timelineRenderingType: TimelineRenderingType.Search, search });
+            if (stores.roomViewStore.getInitialEventId()) {
+                SearchSessionStore.instance.beginSteppingJump();
+                defaultDispatcher.dispatch<ViewRoomPayload>({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    metricsTrigger: undefined,
+                });
+            }
+        });
+    };
 
     const mountRoomView = async (
         ref?: RefObject<RoomView | null>,
@@ -263,13 +295,14 @@ describe("RoomView", () => {
         // "message search" below: a pre-existing cross-test isolation leak in this large suite leaves a
         // client-less RoomView re-rendering (and crashing in shouldEncryptRoomWithSingle3rdPartyInvite) for
         // whichever mount-heavy test runs last among the later describes. Running early keeps state clean.
-        it("does not step to matches from a predecessor room (would unmount the room-keyed RoomView)", async () => {
+        it("steps into a predecessor-room match (cross-room) via the SearchSessionStore", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
             // A room-scoped search of an upgraded room also searches its predecessor chain (#32258), so the
-            // completed result set can contain matches that live in a *different* room. RoomView is keyed by
-            // room id (LoggedInView), so jumping the live timeline into the predecessor would unmount the
-            // search session. Such cross-room matches must therefore be excluded from live-timeline stepping.
+            // completed result set can contain matches that live in a *different* room. The session now lives in the
+            // SearchSessionStore, which survives RoomView being re-mounted for the predecessor room — so these
+            // cross-room matches ARE steppable (the slice-4 current-room filter is gone): stepping into one
+            // dispatches ViewRoom for the predecessor room.
             const predRoom = new Room("!predecessor:example.org", cli, "@alice:example.org");
             rooms.set(predRoom.roomId, predRoom);
 
@@ -295,45 +328,42 @@ describe("RoomView", () => {
             await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
-            act(() =>
-                roomViewRef.current!.setState({
-                    timelineRenderingType: TimelineRenderingType.Search,
-                    search: {
-                        searchId: 1,
-                        roomId: room.roomId,
-                        term: "match",
-                        scope: SearchScope.Room,
-                        promise: Promise.resolve({
-                            results: [
-                                makeResult(room.roomId, "$current", "current match", 2),
-                                makeResult(predRoom.roomId, "$predecessor", "predecessor match", 1),
-                            ],
-                            highlights: [],
-                            count: 2,
-                        }),
-                    },
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [
+                        makeResult(room.roomId, "$current", "current match", 2),
+                        makeResult(predRoom.roomId, "$predecessor", "predecessor match", 1),
+                    ],
+                    highlights: [],
+                    count: 2,
                 }),
-            );
+            });
 
-            // Only the current-room match is steppable in the live timeline: this counter is the load-bearing
-            // guard — it reads "0 of 2" (and stepping could then reach the predecessor) if the current-room filter
-            // is removed. The predecessor match stays in the full result set (see the extractSearchMatches test)
-            // but is excluded from the "k of N" stepper.
-            await screen.findByText("0 of 1", { exact: false });
+            // Both matches are now steppable; the store holds the full, unfiltered cross-room match list.
+            await screen.findByText("0 of 2", { exact: false });
+            expect(SearchSessionStore.instance.matches).toHaveLength(2);
 
-            // Spy installed before stepping so the negative assertion below is evaluated across the whole flow.
             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
-            // Step forward across every steppable match; wrap-around keeps it on the single current-room match.
+            // Step to the newest ($current, this room) then the older ($predecessor, the predecessor room).
             await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await screen.findByText("1 of 2", { exact: false });
             await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await screen.findByText("2 of 2", { exact: false });
 
-            // The live timeline is only ever asked to jump within the current room — never into the predecessor
-            // room (which would unmount the room-keyed RoomView and tear down the search session).
+            // Stepping into the predecessor match dispatches ViewRoom for the *predecessor* room — in the real app
+            // this re-mounts the room-id-keyed RoomView, which re-hydrates the stepper from the store.
             expect(dispatchSpy).toHaveBeenCalledWith(
-                expect.objectContaining({ action: Action.ViewRoom, room_id: room.roomId, event_id: "$current" }),
-            );
-            expect(dispatchSpy).not.toHaveBeenCalledWith(
-                expect.objectContaining({ action: Action.ViewRoom, room_id: predRoom.roomId }),
+                expect.objectContaining({
+                    action: Action.ViewRoom,
+                    room_id: predRoom.roomId,
+                    event_id: "$predecessor",
+                    highlighted: true,
+                    scroll_into_view: true,
+                }),
             );
         });
 
@@ -362,22 +392,17 @@ describe("RoomView", () => {
             await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
-            act(() =>
-                roomViewRef.current!.setState({
-                    timelineRenderingType: TimelineRenderingType.Search,
-                    search: {
-                        searchId: 1,
-                        roomId: room.roomId,
-                        term: "match",
-                        scope: SearchScope.Room,
-                        promise: Promise.resolve({
-                            results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
-                            highlights: [],
-                            count: 2,
-                        }),
-                    },
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
                 }),
-            );
+            });
 
             await screen.findByText("0 of 2", { exact: false });
             const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
@@ -432,22 +457,17 @@ describe("RoomView", () => {
             await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
-            act(() =>
-                roomViewRef.current!.setState({
-                    timelineRenderingType: TimelineRenderingType.Search,
-                    search: {
-                        searchId: 1,
-                        roomId: room.roomId,
-                        term: "match",
-                        scope: SearchScope.Room,
-                        promise: Promise.resolve({
-                            results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
-                            highlights: [],
-                            count: 2,
-                        }),
-                    },
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
                 }),
-            );
+            });
 
             await screen.findByText("0 of 2", { exact: false });
             // Step into the live timeline (Room mode), then return to the results list via the affordance.
@@ -464,6 +484,310 @@ describe("RoomView", () => {
             expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
             expect(roomViewRef.current!.state.search).toBeDefined();
             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBeUndefined();
+        });
+
+        it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            // Simulate the state left after stepping from another room into a match that lives in THIS room: the
+            // session is in the SearchSessionStore with the focused match pointing here. A freshly-constructed
+            // RoomView (as if re-mounted by LoggedInView for the new room) must re-hydrate its search render state
+            // from the store so the header, "k of N" arrows and live highlight reappear without a results-list flash.
+            const store = SearchSessionStore.instance;
+            store.start({
+                searchId: 7,
+                roomId: "!origin:example.org", // the search was started from a different room
+                term: "match",
+                scope: SearchScope.All,
+                promise: Promise.resolve({ results: [], highlights: [], count: 2 }),
+                abortController: new AbortController(),
+            });
+            store.updateResults({
+                inProgress: false,
+                matches: [
+                    { roomId: room.roomId, eventId: "$here" },
+                    { roomId: "!origin:example.org", eventId: "$origin" },
+                ],
+                highlights: ["match"],
+                count: 2,
+            });
+            store.setCurrentMatchIndex(0); // focused on the match in THIS room
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            // The fresh RoomView re-hydrated the surviving session: search render state is restored from the store...
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(roomViewRef.current!.state.search!.term).toBe("match");
+            expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(0);
+            expect(roomViewRef.current!.state.search!.matches).toHaveLength(2);
+            // ...and the header counter renders (1-based) so stepping continues seamlessly.
+            await screen.findByText("1 of 2", { exact: false });
+        });
+
+        it("ends the search when a result is clicked (a non-stepping ViewRoom in Search mode)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({ results: [makeResult("$m1", "m1", 2)], highlights: [], count: 1 }),
+            });
+            await screen.findByText("0 of 1", { exact: false });
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+
+            // Clicking a result navigates to it (ViewRoom with an event id) — NOT a stepping jump — so the search
+            // session is torn down (the clear gate fires because no stepping-jump flag was set).
+            act(() =>
+                defaultDispatcher.dispatch<ViewRoomPayload>({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$m1",
+                    highlighted: true,
+                    scroll_into_view: true,
+                    metricsTrigger: undefined,
+                }),
+            );
+
+            await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(false);
+        });
+
+        it("re-clicking the last-stepped result after returning to results ends the search (stale-id fix)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$m1", "first", 2), makeResult("$m2", "second", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+            await screen.findByText("0 of 2", { exact: false });
+
+            // Step to the first match ($m1) — RoomViewStore.initialEventId becomes $m1.
+            await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+            await screen.findByText("1 of 2", { exact: false });
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$m1");
+
+            // Return to the results list: the flag-guarded self-dispatch resets the stale focused event without
+            // tearing down the still-alive session.
+            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBeNull());
+            expect(roomViewRef.current!.state.search).toBeDefined();
+
+            // Re-clicking that SAME result ($m1) now registers as an initialEventId change, so the search ends —
+            // the previously-deferred no-op is fixed.
+            act(() =>
+                defaultDispatcher.dispatch<ViewRoomPayload>({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$m1",
+                    highlighted: true,
+                    scroll_into_view: true,
+                    metricsTrigger: undefined,
+                }),
+            );
+            await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
+        });
+
+        it("ends the search when clicking the result for the event the search was started on", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            // View event $E first, so the live timeline is pinned to it (e.g. arriving via a permalink/notification).
+            act(() =>
+                defaultDispatcher.dispatch<ViewRoomPayload>({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$E",
+                    highlighted: true,
+                    scroll_into_view: true,
+                    metricsTrigger: undefined,
+                }),
+            );
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBe("$E"));
+
+            // Start a search (whose results include $E). onSearch drops the focused event so the search isn't pinned.
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({ results: [makeResult("$E", "the event", 1)], highlights: [], count: 1 }),
+            });
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBeNull());
+            await screen.findByText("0 of 1", { exact: false });
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+
+            // Clicking the result for $E — the exact event we were viewing when the search started — still ends the
+            // search (previously a no-op because the focused-event baseline equalled $E).
+            act(() =>
+                defaultDispatcher.dispatch<ViewRoomPayload>({
+                    action: Action.ViewRoom,
+                    room_id: room.roomId,
+                    event_id: "$E",
+                    highlighted: true,
+                    scroll_into_view: true,
+                    metricsTrigger: undefined,
+                }),
+            );
+            await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(false);
+        });
+
+        it("does not abort the in-flight search when RoomView unmounts (the session survives a remount)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const abortController = new AbortController();
+            const roomViewRef = createRef<RoomView>();
+            const { unmount } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: new Promise(() => {}), // never settles — stands in for an in-flight request
+                abortController,
+            });
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+
+            // Unmount WITHOUT cancelling (as a cross-room stepping jump re-mounts the room-id-keyed RoomView).
+            act(() => unmount());
+
+            // The session and its in-flight request must survive untouched — only an explicit cancel/logout aborts.
+            expect(abortController.signal.aborted).toBe(false);
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+        });
+
+        it("does not close the search on an EditEvent while a stepping jump is in flight", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const matchEvent = eventMapper({
+                room_id: room.roomId,
+                event_id: "$m1",
+                sender: cli.getSafeUserId(),
+                origin_server_ts: 2,
+                content: { body: "first", msgtype: "m.text" },
+                type: EventType.RoomMessage,
+            });
+            const matchResult = SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: room.roomId,
+                        event_id: "$m1",
+                        sender: cli.getSafeUserId(),
+                        origin_server_ts: 2,
+                        content: { body: "first", msgtype: "m.text" },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                },
+                eventMapper,
+            );
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({ results: [matchResult], highlights: [], count: 1 }),
+            });
+            await screen.findByText("0 of 1", { exact: false });
+
+            // A stepping jump is in flight (flag set, not yet consumed). An EditEvent dispatched in this window must
+            // NOT tear the surviving session down (a genuine edit, with no jump in flight, still closes it).
+            act(() => {
+                SearchSessionStore.instance.beginSteppingJump();
+                defaultDispatcher.dispatch({
+                    action: Action.EditEvent,
+                    event: matchEvent,
+                    timelineRenderingType: roomViewRef.current!.state.timelineRenderingType,
+                });
+            });
+
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
         });
     });
 
@@ -1320,22 +1644,17 @@ describe("RoomView", () => {
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
             // A completed single-room search drives the stepper organically via onSearchUpdate.
-            act(() =>
-                roomViewRef.current!.setState({
-                    timelineRenderingType: TimelineRenderingType.Search,
-                    search: {
-                        searchId: 1,
-                        roomId: room.roomId,
-                        term: "match",
-                        scope: SearchScope.Room,
-                        promise: Promise.resolve({
-                            results: [makeResult("$match1", "first match"), makeResult("$match2", "second match")],
-                            highlights: [],
-                            count: 2,
-                        }),
-                    },
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$match1", "first match"), makeResult("$match2", "second match")],
+                    highlights: [],
+                    count: 2,
                 }),
-            );
+            });
 
             // Once results arrive, the counter + arrows render in the header (browsing, Search render mode).
             await screen.findByText("0 of 2", { exact: false });
@@ -1363,48 +1682,62 @@ describe("RoomView", () => {
             expect(roomViewRef.current!.state.search!.currentMatchIndex).toBe(0);
         });
 
-        it("does not enable the match stepper for all-rooms searches", async () => {
+        it("enables the match stepper for all-rooms searches and steps across rooms", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
+            // All-rooms matches span rooms; the SearchSessionStore survives the cross-room re-mount, so the stepper
+            // is enabled for scope=All too (the slice-4 scope===Room gate is gone).
+            const otherRoom = new Room("!other:example.org", cli, "@alice:example.org");
+            rooms.set(otherRoom.roomId, otherRoom);
+
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (roomId: string, eventId: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body: "a match", msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
             const roomViewRef = createRef<RoomView>();
             await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
-            act(() =>
-                roomViewRef.current!.setState({
-                    timelineRenderingType: TimelineRenderingType.Search,
-                    search: {
-                        searchId: 1,
-                        term: "match",
-                        scope: SearchScope.All,
-                        promise: Promise.resolve({
-                            results: [
-                                SearchResult.fromJson(
-                                    {
-                                        rank: 1,
-                                        result: {
-                                            room_id: room.roomId,
-                                            event_id: "$match1",
-                                            sender: cli.getSafeUserId(),
-                                            origin_server_ts: 1,
-                                            content: { body: "a match", msgtype: "m.text" },
-                                            type: EventType.RoomMessage,
-                                        },
-                                        context: { profile_info: {}, events_before: [], events_after: [] },
-                                    },
-                                    eventMapper,
-                                ),
-                            ],
-                            highlights: [],
-                            count: 1,
-                        }),
-                    },
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: undefined, // all-rooms search
+                term: "match",
+                scope: SearchScope.All,
+                promise: Promise.resolve({
+                    results: [makeResult(room.roomId, "$here", 2), makeResult(otherRoom.roomId, "$there", 1)],
+                    highlights: [],
+                    count: 2,
                 }),
-            );
+            });
 
-            await screen.findByText("1 result found", { exact: false });
-            expect(screen.queryByRole("button", { name: "Next match" })).not.toBeInTheDocument();
+            // The stepper IS enabled for all-rooms searches now, with the full cross-room match list.
+            await screen.findByText("0 of 2", { exact: false });
+            expect(screen.getByRole("button", { name: "Next match" })).toBeInTheDocument();
+
+            const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
+            await userEvent.click(screen.getByRole("button", { name: "Next match" })); // $here (this room)
+            await screen.findByText("1 of 2", { exact: false });
+            await userEvent.click(screen.getByRole("button", { name: "Next match" })); // $there (the other room)
+            await screen.findByText("2 of 2", { exact: false });
+
+            // Stepping reaches a match in a different room, dispatching ViewRoom for that room.
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ action: Action.ViewRoom, room_id: otherRoom.roomId, event_id: "$there" }),
+            );
         });
     });
 
