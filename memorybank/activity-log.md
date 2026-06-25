@@ -1147,3 +1147,45 @@ same as slice 1's jump no-op; fixing would regress the #32356 blank-tile guard. 
 - Slice 3: chronological ordering + wrap-around + keyboard (Enter=next / Shift+Enter=prev while search box focused).
   Then slice 4 (out-of-window/encrypted edge cases, all-rooms) → slice 5 (hide list while stepping, PostHog, pcss).
 - Slice 2 committed this session. (jest needs the `--transformIgnorePatterns` workaround — see memory.)
+
+## Session 20 (2026-06-25) — Search Phase 2 **slice 3**: chronological ordering + wrap-around + keyboard (TDD + reviewed)
+
+Continued the initiative. Confirmed slices 1/1B/2 committed (cdce4a2, d0f086a, dc4ce66, b5d6b8a) and tree clean.
+Implemented **Phase 2 slice 3** (the three remaining stepping affordances) end-to-end, TDD per task.
+
+**What it does:** (1) match stepping is now **chronological** (newest-first by event ts) so up/down mean a stable
+newer/older; (2) stepping **wraps** at both ends and the arrows stay enabled with ≥1 match; (3) **Enter = next /
+Shift+Enter = previous** while the right-panel search box is focused.
+
+**Files:** `Searching.ts` (`extractSearchMatches` sorts by `getTs() ?? 0`, stable); `RoomSearchNavigationViewModel.ts`
+(`next`/`previous` wrap; `canPrevious`/`canNext` = total>0); `dispatcher/actions.ts` + new
+`payloads/SearchMatchStepPayload.ts`; `RoomSummaryCardViewModel.tsx` (`useSearchInput` dispatches `SearchMatchStep`
+on Enter/Shift+Enter, IME-guarded); `RoomView.tsx` (`onAction` `SearchMatchStep` → `searchNavVm.next/previous`).
+
+**Decision (plan's "optional wrap"):** chose **wrap** over clamp — matches the ⌘F/browser-find model from Phase 1 and
+keeps Enter-stepping from dead-ending. Clamp is a small `computeSnapshot`+step revert if ever wanted.
+
+**Process:** understand (direct reads + 1 Explore for the search-bar/keyboard infra) → TDD RED→GREEN per task →
+**4-dimension adversarial-review workflow** (vm-math / ordering / keyboard-dispatch / tests-conventions) with
+per-finding verification → applied 6 confirmed findings (also TDD for the two behavioral ones):
+- **NaN-safe ts** (`getTs() ?? 0`): SDK masks an absent `origin_server_ts` with `!`; an undated match would make
+  `b.ts-a.ts` NaN and silently corrupt order. Undated now sinks to bottom. (+1 Searching test)
+- **IME guard** (`!e.nativeEvent?.isComposing`): don't hijack the Enter that confirms a CJK composition. (+1 test)
+- JSDoc fix (app requests `SearchOrderBy.Recent` from both backends — sort is normalising, not rank→recency);
+  RoomView stepping tests hardened with a `toBeTruthy()` mount guard + placed early to dodge a **pre-existing**
+  suite-wide isolation leak (out of scope); +1 symmetric single-match wrap test.
+
+**Verify:** **124 web Jest** (Searching 36, nav VM 13, RoomSummaryCard 21, RoomView 54) + **5 shared-components
+vitest** pass; tsc clean (only the pre-existing matrix-js-sdk wasm-type noise), eslint/prettier clean; i18n no-diff.
+
+**Jest runner gotcha (this session):** the recreated `scratchpad/webjest.sh` MUST use
+`corepack pnpm -C apps/web exec jest` — the older `./node_modules/.bin/jest` form mis-resolves the babel config and
+fails every suite with "Cannot use import statement outside a module". Pattern: relative
+`node_modules/.pnpm/(?!(<allowlist incl. matrix-js-sdk|matrix-events-sdk|@matrix-org|oidc-client-ts|...>)).+$`.
+
+### WHERE I LEFT OFF — Phase 2 slice 4 next
+- Slice 4: out-of-window / encrypted edge cases + all-rooms scope (arrows switch room before jumping). Then slice 5
+  (hide results list while stepping, PostHog, pcss for the active live tile). Then P3 from:/date filters, P4 media
+  tabs, P5 reach/ranking/health-check.
+- Slice 3 committed this session (one commit). Push still deferred (origin lacks slices 1/1B/2/3 — user pushes at the
+  end of the initiative, not per slice).

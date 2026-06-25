@@ -144,6 +144,7 @@ import { PinnedMessageBanner } from "../views/rooms/PinnedMessageBanner";
 import { ScopedRoomContextProvider, useScopedRoomContext } from "../../contexts/ScopedRoomContext";
 import { DeclineAndBlockInviteDialog } from "../views/dialogs/DeclineAndBlockInviteDialog";
 import { type FocusMessageSearchPayload } from "../../dispatcher/payloads/FocusMessageSearchPayload.ts";
+import { type SearchMatchStepPayload } from "../../dispatcher/payloads/SearchMatchStepPayload.ts";
 import { isRoomEncrypted } from "../../hooks/useIsEncrypted";
 import { type RoomViewStore } from "../../stores/RoomViewStore.tsx";
 import { RoomStatusBarViewModel } from "../../viewmodels/room/RoomStatusBar.ts";
@@ -1372,6 +1373,15 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             case Action.FocusMessageSearch:
                 if ((payload as FocusMessageSearchPayload).initialText) {
                     this.onSearch(payload.initialText);
+                }
+                break;
+            case Action.SearchMatchStep:
+                // Step the in-room search match cursor in response to Enter / Shift+Enter in the search box.
+                // The view model no-ops when there is nothing to step (e.g. no matches loaded).
+                if ((payload as SearchMatchStepPayload).direction === "previous") {
+                    this.searchNavVm.previous();
+                } else {
+                    this.searchNavVm.next();
                 }
                 break;
         }

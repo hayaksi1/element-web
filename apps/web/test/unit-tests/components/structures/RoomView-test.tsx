@@ -45,6 +45,7 @@ import { MatrixClientPeg } from "../../../../src/MatrixClientPeg";
 import { Action } from "../../../../src/dispatcher/actions";
 import defaultDispatcher from "../../../../src/dispatcher/dispatcher";
 import { type ViewRoomPayload } from "../../../../src/dispatcher/payloads/ViewRoomPayload";
+import { type SearchMatchStepPayload } from "../../../../src/dispatcher/payloads/SearchMatchStepPayload";
 import { RoomView } from "../../../../src/components/structures/RoomView";
 import SettingsStore from "../../../../src/settings/SettingsStore";
 import { SettingLevel } from "../../../../src/settings/SettingLevel";
@@ -218,6 +219,46 @@ describe("RoomView", () => {
         await mountRoomView(ref);
         return ref.current!;
     };
+
+    describe("in-room search match stepping", () => {
+        it("steps to the next match when a SearchMatchStep(next) action is dispatched", async () => {
+            const instance = await getRoomViewInstance();
+            // Guard against test-isolation pollution: a cross-test leak elsewhere in this large suite can leave
+            // the mount returning null, which would otherwise surface as a cryptic property-of-null deref below.
+            expect(instance).toBeTruthy();
+            const nextSpy = jest.spyOn(instance.searchNavVm, "next");
+            const previousSpy = jest.spyOn(instance.searchNavVm, "previous");
+
+            act(() => {
+                defaultDispatcher.dispatch<SearchMatchStepPayload>({
+                    action: Action.SearchMatchStep,
+                    direction: "next",
+                });
+            });
+            await flushPromises();
+
+            expect(nextSpy).toHaveBeenCalledTimes(1);
+            expect(previousSpy).not.toHaveBeenCalled();
+        });
+
+        it("steps to the previous match when a SearchMatchStep(previous) action is dispatched", async () => {
+            const instance = await getRoomViewInstance();
+            expect(instance).toBeTruthy();
+            const nextSpy = jest.spyOn(instance.searchNavVm, "next");
+            const previousSpy = jest.spyOn(instance.searchNavVm, "previous");
+
+            act(() => {
+                defaultDispatcher.dispatch<SearchMatchStepPayload>({
+                    action: Action.SearchMatchStep,
+                    direction: "previous",
+                });
+            });
+            await flushPromises();
+
+            expect(previousSpy).toHaveBeenCalledTimes(1);
+            expect(nextSpy).not.toHaveBeenCalled();
+        });
+    });
 
     it("gets a room view store from MultiRoomViewStore when given a room ID", async () => {
         stores.multiRoomViewStore.getRoomViewStoreForRoom = jest.fn().mockReturnValue(stores.roomViewStore);

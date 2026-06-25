@@ -11,6 +11,7 @@ import { type MatrixClient, type Room } from "matrix-js-sdk/src/matrix";
 import { useRoomSummaryCardViewModel } from "../../../../../src/components/viewmodels/right_panel/RoomSummaryCardViewModel";
 import { mkStubRoom, stubClient, withClientContextRenderOptions } from "../../../../test-utils";
 import defaultDispatcher from "../../../../../src/dispatcher/dispatcher";
+import { Action } from "../../../../../src/dispatcher/actions";
 import { DefaultTagID } from "../../../../../src/stores/room-list-v3/skip-list/tag";
 import RightPanelStore from "../../../../../src/stores/right-panel/RightPanelStore";
 import { RightPanelPhases } from "../../../../../src/stores/right-panel/RightPanelStorePhases";
@@ -260,6 +261,58 @@ describe("useRoomSummaryCardViewModel", () => {
 
             expect(onSearchCancel).toHaveBeenCalled();
             expect(mockInputElement?.value).toBe("");
+        });
+
+        it("dispatches a next match-step on Enter", () => {
+            jest.spyOn(hooks, "useAccountData").mockReturnValue({});
+            const spy = jest.spyOn(defaultDispatcher, "dispatch");
+            const { result } = render();
+
+            const event = {
+                key: "Enter",
+                shiftKey: false,
+                preventDefault: jest.fn(),
+                stopPropagation: jest.fn(),
+            };
+            result.current.onUpdateSearchInput(event as any);
+
+            expect(event.preventDefault).toHaveBeenCalled();
+            expect(spy).toHaveBeenCalledWith({ action: Action.SearchMatchStep, direction: "next" });
+        });
+
+        it("dispatches a previous match-step on Shift+Enter", () => {
+            jest.spyOn(hooks, "useAccountData").mockReturnValue({});
+            const spy = jest.spyOn(defaultDispatcher, "dispatch");
+            const { result } = render();
+
+            const event = {
+                key: "Enter",
+                shiftKey: true,
+                preventDefault: jest.fn(),
+                stopPropagation: jest.fn(),
+            };
+            result.current.onUpdateSearchInput(event as any);
+
+            expect(event.preventDefault).toHaveBeenCalled();
+            expect(spy).toHaveBeenCalledWith({ action: Action.SearchMatchStep, direction: "previous" });
+        });
+
+        it("does not step on the Enter that confirms an IME composition", () => {
+            jest.spyOn(hooks, "useAccountData").mockReturnValue({});
+            const spy = jest.spyOn(defaultDispatcher, "dispatch");
+            const { result } = render();
+
+            const event = {
+                key: "Enter",
+                shiftKey: false,
+                nativeEvent: { isComposing: true },
+                preventDefault: jest.fn(),
+                stopPropagation: jest.fn(),
+            };
+            result.current.onUpdateSearchInput(event as any);
+
+            expect(event.preventDefault).not.toHaveBeenCalled();
+            expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ action: Action.SearchMatchStep }));
         });
     });
 });

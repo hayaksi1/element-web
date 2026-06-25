@@ -195,9 +195,44 @@ onto the original). Result: no live highlight for that match — **graceful** (n
 jump no-op and the pre-existing results-list non-render for the same case. Not fixed here to avoid regressing the
 #32356 guard; revisit only if real malformed edits surface.
 
+## Slice 3 — Ordering + wrap-around + keyboard — ✅ DONE (session 20, TDD, adversarial-reviewed)
+
+**Shipped (RED→GREEN each, then a 4-dimension adversarial-review workflow; 6 confirmed findings applied):**
+
+1. **Chronological ordering.** `extractSearchMatches` (`Searching.ts`) now sorts matches **newest-first by
+   `event.getTs()`** (stable tiebreak preserves backend order), so down/next = older and up/previous = newer hold
+   regardless of backend order. Review hardening: `getTs() ?? 0` (the SDK masks a possibly-absent
+   `origin_server_ts` with `!`; an undated match would make `b.ts-a.ts` NaN and silently corrupt order) — undated
+   matches now sink to the bottom; JSDoc corrected (the app requests `SearchOrderBy.Recent` from both backends, so
+   the sort is a normalising guarantee, not a rank→recency correction).
+2. **Wrap-around.** `RoomSearchNavigationViewModel` `next`/`previous` now **wrap** at the ends (next at oldest →
+   newest; previous at newest / from the empty cursor → oldest); `canPrevious`/`canNext` are `total > 0` so the
+   arrows stay enabled whenever there is ≥1 match. Decision (the plan's "optional wrap"): chose **wrap** over
+   clamp — consistent with the ⌘F/browser-find model adopted in Phase 1 and keeps Enter-stepping from
+   dead-ending. (Clamp is a small revert of `computeSnapshot` + the two step methods if ever wanted.)
+3. **Keyboard.** **Enter = next, Shift+Enter = previous** while the right-panel search box is focused. New
+   `Action.SearchMatchStep` + `SearchMatchStepPayload` (`{direction: "next"|"previous"}`), dispatched from
+   `useSearchInput.onUpdateSearchInput` (`RoomSummaryCardViewModel.tsx`, mirrors the existing `FocusMessageSearch`
+   dispatch pattern) and handled by `RoomView.onAction` → `this.searchNavVm.next()/previous()`. `preventDefault`
+   on Enter; the Escape branch was refactored to preserve prior behaviour. Review hardening: guard
+   `!e.nativeEvent?.isComposing` so the Enter that **confirms an IME (CJK) composition** is not hijacked.
+
+Files: `Searching.ts`, `viewmodels/search/RoomSearchNavigationViewModel.ts`,
+`dispatcher/actions.ts` (+`payloads/SearchMatchStepPayload.ts`),
+`components/viewmodels/right_panel/RoomSummaryCardViewModel.tsx`, `components/structures/RoomView.tsx`.
+Tests: Searching `extractSearchMatches` (ordering + stable + undated); nav VM rewritten for wrap (both
+directions, single-match, empty no-op); `RoomSummaryCardViewModel` Enter/Shift+Enter/IME dispatch; `RoomView`
+`SearchMatchStep`→VM delegation; `SearchMatchNavigation.test` name fix. **124 web Jest + 5 shared-components
+vitest pass; tsc/eslint/prettier clean; no new i18n.**
+
+**Documented limitations (deliberate, not slice-3 regressions):** keyboard stepping reaches the VM only while a
+**completed single-room** search has matches (slice-1 `canStep` gate) — Enter in all-rooms/in-progress scope is a
+no-op (VM guards). Focus retention after a jump (so repeated Enter keeps working) is a runtime/UX property to
+confirm in manual QA, not unit-testable here. The two new `RoomView` stepping tests were placed early in the
+1380-line suite (with a `toBeTruthy()` mount guard) to avoid a **pre-existing** cross-test isolation leak that
+nulls the mount when they run last — the leak itself is out of slice-3 scope.
+
 ## Later slices (next sessions)
-- **Slice 3 — Ordering + wrap-around + keyboard.** Define chronological order (down=older), Enter=next /
-  Shift+Enter=prev while the search box is focused, optional wrap.
 - **Slice 4 — Out-of-window / encrypted edge cases.** Confirm Seshat-result event ids resolve in the live
   timeline (E2EE); contextual back-pagination already handled by TimelineWindow — add tests for a match not in
   the loaded window. All-rooms scope: arrows switch room before jumping.
