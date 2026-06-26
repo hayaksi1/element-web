@@ -56,7 +56,7 @@ vi.mock("./ipc.js", () => ({
 }));
 
 vi.mock("./config.js", () => ({
-    getBrand: vi.fn(() => "Element"),
+    getConfig: vi.fn(() => ({ brand: "Element" })),
 }));
 
 const getPath = vi.mocked(app.getPath);

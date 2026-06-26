@@ -12,6 +12,7 @@ import { randomArray } from "./utils.js";
 import { consumeDisplayMediaCallback } from "./displayMediaCallback.js";
 import Store, { clearDataAndRelaunch } from "./store.js";
 import { isValidThemeColor } from "./background-color.js";
+import { getConfig } from "./config.js";
 
 let focusHandlerAttached = false;
 ipcMain.on("loudNotification", function (): void {
@@ -254,7 +255,7 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
     });
 });
 
-ipcMain.handle("getConfig", () => global.vectorConfig);
+ipcMain.handle("getConfig", getConfig);
 
 const initialisePromiseWithResolvers = Promise.withResolvers<void>();
 export const initialisePromise = initialisePromiseWithResolvers.promise;

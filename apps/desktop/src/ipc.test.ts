@@ -7,6 +7,8 @@ Please see LICENSE files in the repository root for full details.
 
 import { expect, describe, it, beforeEach, vi } from "vitest";
 
+import { getConfig } from "./config.js";
+
 interface CapturerSource {
     id: string;
     name: string;
@@ -54,6 +56,7 @@ vi.mock("./store.js", () => ({
 }));
 vi.mock("./utils.js", () => ({ randomArray }));
 vi.mock("./displayMediaCallback.js", () => ({ consumeDisplayMediaCallback }));
+vi.mock("./config.js");
 
 await import("./ipc.js");
 
@@ -221,5 +224,18 @@ describe("callDisplayMediaCallback", () => {
 
         await expect(callIpcWithArgs("callDisplayMediaCallback", [{ id: "s1" }], 24)).resolves.toBeUndefined();
         expect(send).toHaveBeenCalledWith("ipcReply", { id: 24, reply: null });
+    });
+});
+
+describe("getConfig", () => {
+    it("returns the loaded config to the renderer", () => {
+        const config = { brand: "BRAND", help_url: "HELP_URL", web_base_url: "WEB_BASE_URL" };
+        vi.mocked(getConfig).mockReturnValue(config);
+
+        const handler = ipcHandlers["getConfig"];
+        expect(handler).toBeDefined();
+
+        expect(handler({})).toStrictEqual(config);
+        expect(getConfig).toHaveBeenCalled();
     });
 });

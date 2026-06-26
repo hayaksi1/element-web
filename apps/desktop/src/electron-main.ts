@@ -27,9 +27,7 @@ import {
 // eslint-disable-next-line n/file-extension-in-import
 import * as Sentry from "@sentry/electron/main";
 import path, { dirname } from "node:path";
-import fs from "node:fs";
 import { URL, fileURLToPath } from "node:url";
-import minimist from "minimist";
 
 import "./ipc.js";
 import "./seshat.js";
@@ -46,8 +44,6 @@ import { setDisplayMediaCallback } from "./displayMediaCallback.js";
 import { WindowStateManager } from "./window-state.js";
 import { shouldQuitAfterConfirm } from "./confirm-quit.js";
 import { setupMacosTitleBar } from "./macos-titlebar.js";
-import { type Json, type JsonObject, loadJsonFile } from "./utils.js";
-import { deepMergeConfig, loadMergedLocalConfig } from "./config.js";
 import { setupMediaAuth } from "./media-auth.js";
 import { setupMediaPermissions } from "./media-permissions.js";
 import { type RendererRecovery, setupRendererRecovery } from "./renderer-recovery.js";
@@ -56,175 +52,26 @@ import { resolveWindowCloseBehavior } from "./window-close.js";
 import { getBuildConfig } from "./build-config.js";
 import { getAsarPath } from "./asar.js";
 import { getIconPath } from "./icon.js";
+import { getArgs } from "./args.js";
+import { type ConfigOptions, getConfig, loadConfig } from "./config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const argv = minimist(process.argv, {
-    alias: { help: "h" },
-});
-
-if (argv["help"]) {
-    console.log("Options:");
-    console.log("  --profile-dir {path}: Path to where to store the profile.");
-    console.log(
-        `  --profile {name}:     Name of alternate profile to use, allows for running multiple accounts.\n` +
-            `                         Ignored if --profile-dir is specified.\n` +
-            `                         The ELEMENT_PROFILE_DIR environment variable may be used to change the default profile path.\n` +
-            `                         It is overridden by --profile-dir, but can be combined with --profile.`,
-    );
-    console.log("  --devtools:           Install and use react-devtools and react-perf.");
-    console.log(
-        `  --config:             Path to the config.json file. May also be specified via the ELEMENT_DESKTOP_CONFIG_JSON environment variable.\n` +
-            `                         Otherwise use the default user location '${app.getPath("userData")}'`,
-    );
-    console.log("  --no-update:          Disable automatic updating.");
-    console.log("  --hidden:             Start the application hidden in the system tray.");
-    console.log("  --help:               Displays this help message.");
-    console.log("And more such as --proxy, see: https://electronjs.org/docs/api/command-line-switches");
-    app.exit();
-}
-
-const LocalConfigLocation = process.env.ELEMENT_DESKTOP_CONFIG_JSON ?? argv["config"];
-const LocalConfigFilename = "config.json";
-
-// Electron creates the user data directory (with just an empty 'Dictionaries' directory...)
-// as soon as the app path is set, so pick a random path in it that must exist if it's a
-// real user data directory.
-function isRealUserDataDir(d: string): boolean {
-    return fs.existsSync(path.join(d, "IndexedDB"));
-}
-
 const buildConfig = getBuildConfig();
 const protocolHandler = new ProtocolHandler(buildConfig.protocol);
+const args = getArgs(protocolHandler);
 
-// check if we are passed a profile in the SSO callback url
-let userDataPath: string;
-
-const userDataPathInProtocol = protocolHandler.getProfileFromDeeplink(argv["_"]);
-if (userDataPathInProtocol) {
-    userDataPath = userDataPathInProtocol;
-} else if (argv["profile-dir"]) {
-    userDataPath = argv["profile-dir"];
-} else {
-    let newUserDataPath = process.env.ELEMENT_PROFILE_DIR ?? app.getPath("userData");
-    if (argv["profile"]) {
-        newUserDataPath += "-" + argv["profile"];
-    }
-    const newUserDataPathExists = isRealUserDataDir(newUserDataPath);
-    let oldUserDataPath = path.join(app.getPath("appData"), app.getName().replace("Element", "Riot"));
-    if (argv["profile"]) {
-        oldUserDataPath += "-" + argv["profile"];
-    }
-
-    const oldUserDataPathExists = isRealUserDataDir(oldUserDataPath);
-    console.log(newUserDataPath + " exists: " + (newUserDataPathExists ? "yes" : "no"));
-    console.log(oldUserDataPath + " exists: " + (oldUserDataPathExists ? "yes" : "no"));
-    if (!newUserDataPathExists && oldUserDataPathExists) {
-        console.log("Using legacy user data path: " + oldUserDataPath);
-        userDataPath = oldUserDataPath;
-    } else {
-        userDataPath = newUserDataPath;
-    }
-}
-app.setPath("userData", userDataPath);
-
-const homeserverProps = ["default_is_url", "default_hs_url", "default_server_name", "default_server_config"] as const;
-
-function loadLocalConfigFile(): Json {
-    // Read config from (in precedence order) an explicit ELEMENT_DESKTOP_CONFIG_JSON/--config path,
-    // else the per-user userData config, else a machine-wide path for MDM/enterprise deployments.
-    // See config.ts and element-web#32351.
-    return loadMergedLocalConfig({
-        platform: process.platform,
-        userDataPath: app.getPath("userData"),
-        productName: app.getName(),
-        env: process.env,
-        explicitLocation: LocalConfigLocation,
-    });
-}
-
-let loadConfigPromise: Promise<void> | undefined;
+app.setPath("userData", args.userDataPath);
 
 // Renderer crash auto-recovery for the main window (element-web#32222). Held at module scope so the
 // dock `activate` / `second-instance` relaunch handlers can route a crashed renderer through the same
 // capped recovery rather than reloading inline (which would re-arm an already-given-up crash loop).
 let rendererRecovery: RendererRecovery | undefined;
-// Loads the config from asar, and applies a config.json from userData atop if one exists
-// Writes config to `global.vectorConfig`. Idempotent, returns the same promise on subsequent calls.
-function loadConfig(): Promise<void> {
-    if (loadConfigPromise) return loadConfigPromise;
-
-    async function actuallyLoadConfig(): Promise<void> {
-        const asarPath = await getAsarPath();
-
-        try {
-            console.log(`Loading app config: ${path.join(asarPath, LocalConfigFilename)}`);
-            global.vectorConfig = loadJsonFile(asarPath, LocalConfigFilename);
-        } catch {
-            // it would be nice to check the error code here and bail if the config
-            // is unparsable, but we get MODULE_NOT_FOUND in the case of a missing
-            // file or invalid json, so node is just very unhelpful.
-            // Continue with the defaults (ie. an empty config)
-            global.vectorConfig = {};
-        }
-
-        try {
-            // Load local config and use it to override values from the one baked with the build
-            const localConfig = loadLocalConfigFile();
-
-            // If the local config has a homeserver defined, don't use the homeserver from the build
-            // config. This is to avoid a problem where Riot thinks there are multiple homeservers
-            // defined, and panics as a result.
-            if (Object.keys(localConfig).find((k) => homeserverProps.includes(<any>k))) {
-                // Rip out all the homeserver options from the vector config
-                global.vectorConfig = Object.keys(global.vectorConfig)
-                    .filter((k) => !homeserverProps.includes(<any>k))
-                    .reduce(
-                        (obj, key) => {
-                            obj[key] = global.vectorConfig[key];
-                            return obj;
-                        },
-                        {} as Omit<Partial<(typeof global)["vectorConfig"]>, keyof typeof homeserverProps>,
-                    );
-            }
-
-            // Deep-merge so nested config sections (room_directory, features, setting_defaults,
-            // element_call, …) merge rather than being clobbered by a shallow Object.assign.
-            global.vectorConfig = deepMergeConfig(global.vectorConfig, localConfig as JsonObject);
-        } catch (e) {
-            if (e instanceof SyntaxError) {
-                await app.whenReady();
-                void dialog.showMessageBox({
-                    type: "error",
-                    title: `Your ${global.vectorConfig.brand || "Element"} is misconfigured`,
-                    message:
-                        `Your custom ${global.vectorConfig.brand || "Element"} configuration contains invalid JSON. ` +
-                        `Please correct the problem and reopen ${global.vectorConfig.brand || "Element"}.`,
-                    detail: e.message || "",
-                });
-            }
-
-            // Could not load local config, this is expected in most cases.
-        }
-
-        // Tweak modules paths as they assume the root is at the same level as webapp, but for `vector://vector/webapp` it is not.
-        if (Array.isArray(global.vectorConfig.modules)) {
-            global.vectorConfig.modules = global.vectorConfig.modules.map((m) => {
-                if (m.startsWith("/")) {
-                    return "/webapp" + m;
-                }
-                return m;
-            });
-        }
-    }
-    loadConfigPromise = actuallyLoadConfig();
-    return loadConfigPromise;
-}
 
 // Configure Electron Sentry and crashReporter using sentry.dsn in config.json if one is present.
 async function configureSentry(): Promise<void> {
-    await loadConfig();
-    const { dsn, environment } = global.vectorConfig.sentry || {};
+    const config = await loadConfig(args.localConfigPath);
+    const { dsn, environment } = config.sentry || {};
     if (dsn) {
         console.log(`Enabling Sentry with dsn=${dsn} environment=${environment}`);
         Sentry.init({
@@ -268,9 +115,6 @@ if (!gotLock) {
     app.exit();
 }
 
-// do this after we know we are the primary instance of the app
-protocolHandler.initialise(userDataPath);
-
 // Register the scheme the app is served from as 'standard'
 // which allows things like relative URLs and IndexedDB to
 // work.
@@ -301,7 +145,7 @@ app.enableSandbox();
 // We disable media controls here. We do this because calls use audio and video elements and they sometimes capture the media keys. See https://github.com/vector-im/element-web/issues/15704
 app.commandLine.appendSwitch("disable-features", "HardwareMediaKeyHandling,MediaSessionService");
 
-const store = Store.initialize(argv["storage-mode"]); // must be called before any async actions
+const store = Store.initialize(args.storageMode); // must be called before any async actions
 
 // Disable hardware acceleration if the setting has been set.
 if (store.get("disableHardwareAcceleration")) {
@@ -313,10 +157,11 @@ app.on("ready", async () => {
     console.debug("Reached Electron ready state");
 
     let asarPath: string;
+    let config: ConfigOptions;
 
     try {
         asarPath = await getAsarPath();
-        await loadConfig();
+        config = await loadConfig(args.localConfigPath);
     } catch (e) {
         console.log("App setup failed: exiting", e);
         process.exit(1);
@@ -327,7 +172,7 @@ app.on("ready", async () => {
         return;
     }
 
-    if (argv["devtools"]) {
+    if (args.devtools) {
         try {
             const { installExtension, REACT_DEVELOPER_TOOLS } = await import("electron-devtools-installer");
             installExtension(REACT_DEVELOPER_TOOLS)
@@ -390,11 +235,10 @@ app.on("ready", async () => {
         });
     });
 
-    // Minimist parses `--no-`-prefixed arguments as booleans with value `false` rather than verbatim.
-    if (argv["update"] === false) {
+    if (!args.update) {
         console.log("Auto update disabled via command line flag");
-    } else if (global.vectorConfig["update_base_url"]) {
-        void updater.start(global.vectorConfig["update_base_url"]);
+    } else if (config.update_base_url) {
+        void updater.start(config.update_base_url);
     } else {
         console.log("No update_base_url is defined: auto update is disabled");
     }
@@ -456,7 +300,11 @@ app.on("ready", async () => {
         app.exit(1);
     }
 
-    void global.mainWindow.loadURL("vector://vector/webapp/");
+    // do this after we know we are the primary instance of the app
+    const hasDeeplink = protocolHandler.initialise(args);
+    if (!hasDeeplink) {
+        void global.mainWindow.loadURL("vector://vector/webapp/");
+    }
 
     if (process.platform === "darwin") {
         setupMacosTitleBar(global.mainWindow);
@@ -477,7 +325,7 @@ app.on("ready", async () => {
         if (restoreState.isMaximized) global.mainWindow.maximize();
         windowState.monitor(global.mainWindow);
 
-        if (!argv["hidden"]) {
+        if (!args.hidden) {
             global.mainWindow.show();
         } else {
             // hide here explicitly because maximize() above can show the window
@@ -616,7 +464,7 @@ function confirmQuit(): boolean {
             buttons: [
                 _t("action|cancel"),
                 _t("action|close_brand", {
-                    brand: global.vectorConfig.brand || "Element",
+                    brand: getConfig().brand,
                 }),
             ],
             message: _t("confirm_quit"),

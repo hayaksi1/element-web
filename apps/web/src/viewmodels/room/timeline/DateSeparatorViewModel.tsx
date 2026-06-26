@@ -13,7 +13,8 @@ import {
 } from "@element-hq/web-shared-components";
 
 import { formatFullDateNoTime, getDaysArray } from "../../../DateUtils";
-import { _t, getUserLanguage } from "../../../languageHandler";
+import { _t } from "../../../languageHandler";
+import { getUserLanguage } from "../../../i18n/settings";
 import SettingsStore from "../../../settings/SettingsStore";
 import { UIFeature } from "../../../settings/UIFeature";
 import { jumpToDateInRoom } from "../../../utils/jumpToDate";
