@@ -744,14 +744,94 @@ describe("RoomView", () => {
             });
 
             // The session must survive: pre-fix the clear gate fired and tore it down — the user's "it resets itself".
+            // With the durable guard kept across the WHOLE return-to-results transition (never dropped on a transient
+            // un-pinned frame), survival no longer hinges on the exact moment the async clearing ViewRoom lands.
             expect(roomViewRef.current!.state.search).toBeDefined();
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
-            expect(stores.roomViewStore.getInitialEventId()).toBe("$newer");
 
-            // Drain the deferred clearing ViewRoom (held pending above to keep the race window open) so its timer
-            // can't leak into the next test; once it lands the timeline un-pins and the session stays alive.
+            // Drain any deferred clearing ViewRoom so its timer can't leak into the next test; the session stays alive
+            // once the timeline has fully un-pinned.
             await flushPromises();
             expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+        });
+
+        it("keeps the search alive when a background RoomViewStore update races a result-row click before its jump lands", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+
+            const roomViewRef = createRef<RoomView>();
+            const { container } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+
+            // Wait for the Telegram-style results dropdown to render its rows.
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("newer match")).toBeInTheDocument();
+                return el;
+            });
+
+            // Click a result ROW. onActivateSearchMatch arms the durable guard (steppingTarget=$newer), flips to the
+            // live timeline (Room mode) and dispatches an ASYNC (window.setTimeout) ViewRoom($newer). A synchronous
+            // fireEvent keeps that jump PENDING — no macrotask flush — so the live timeline is NOT yet pinned: exactly
+            // the packaged-build window where constant background RoomViewStore emissions arrive before our own jump
+            // has landed (jsdom produces none on its own, which is why the prior tests never caught this).
+            fireEvent.click(within(dropdown).getByText("newer match"));
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+            expect(stores.roomViewStore.getInitialEventId()).toBeNull();
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$newer");
+
+            // A background emission (sync / read receipts / setViewRoomOpts on RoomLoaded) lands in that window. It
+            // must NOT unguard the durable target merely because the live timeline is transiently un-pinned while our
+            // own jump is still queued. Pre-fix, the clear gate's else-branch nulled steppingTarget right here — the
+            // single defect behind the "search resets itself" report.
+            await act(async () => {
+                stores.roomViewStore.emit(UPDATE_EVENT);
+            });
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$newer");
+
+            // The user reopens the list (clicks the search box / back-to-results) BEFORE the jump has landed. This
+            // flips to Search mode; resetFocusedEvent no-ops because nothing is pinned yet, so it cannot re-arm the
+            // guard. The session's survival now rests entirely on the guard never having been nulled above.
+            fireEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+
+            // Drain the deferred ViewRoom($newer): it finally pins the live timeline while we are in Search mode. The
+            // clear gate must recognise $newer as our own navigation (it equals the durable target) and leave the
+            // session intact — pre-fix the target was null here so the gate fired clear({abort:true}) and tore the
+            // search down to an empty bar ("it resets itself").
+            await flushPromises();
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
         });
 
         it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
@@ -891,9 +971,11 @@ describe("RoomView", () => {
             });
             await screen.findByText("0 of 1", { exact: false });
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+            // The header is active (as it is once the user opens search), so we can prove the gate FULLY closes it.
+            act(() => roomViewRef.current!.setState({ searchHeaderActive: true }));
 
-            // Clicking a result navigates to it (ViewRoom with an event id) — NOT a stepping jump — so the search
-            // session is torn down (the clear gate fires because no stepping-jump flag was set).
+            // Navigating to an event we did not pin (a ViewRoom with an event id, NOT a stepping jump) ends the search:
+            // the clear gate fires because no stepping-jump flag was set and the event is not the durable target.
             act(() =>
                 defaultDispatcher.dispatch<ViewRoomPayload>({
                     action: Action.ViewRoom,
@@ -907,9 +989,11 @@ describe("RoomView", () => {
 
             await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(false);
+            // ...and the search header is fully dismissed (not left as an empty bar over the timeline).
+            expect(roomViewRef.current!.state.searchHeaderActive).toBe(false);
         });
 
-        it("re-clicking the last-stepped result after returning to results ends the search (stale-id fix)", async () => {
+        it("re-clicking the last-stepped result after returning to results keeps the search alive", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
@@ -931,7 +1015,7 @@ describe("RoomView", () => {
                 );
 
             const roomViewRef = createRef<RoomView>();
-            await mountRoomView(roomViewRef);
+            const { container } = await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
 
             startSearch(roomViewRef, {
@@ -952,28 +1036,28 @@ describe("RoomView", () => {
             await screen.findByText("1 of 2", { exact: false });
             expect(stores.roomViewStore.getInitialEventId()).toBe("$m1");
 
-            // Return to the results list: the flag-guarded self-dispatch resets the stale focused event without
-            // tearing down the still-alive session.
+            // Return to the results list: the still-alive session is preserved and the durable stepping target stays
+            // pinned to $m1 (it is dropped only by a new search / cancel), so a subsequent re-click is recognised as
+            // our own navigation rather than a navigate-away.
             await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
             await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBeNull());
             expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$m1");
 
-            // Re-clicking that SAME result ($m1) now registers as an initialEventId change, so the search ends —
-            // the previously-deferred no-op is fixed.
-            act(() =>
-                defaultDispatcher.dispatch<ViewRoomPayload>({
-                    action: Action.ViewRoom,
-                    room_id: room.roomId,
-                    event_id: "$m1",
-                    highlighted: true,
-                    scroll_into_view: true,
-                    metricsTrigger: undefined,
-                }),
-            );
-            await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
+            // Re-click that SAME result row ($m1): per the chosen UX it KEEPS the search open and simply jumps back to
+            // the message — it does NOT end the search. The clear gate excludes it because it equals the durable
+            // stepping target. (Previously this ended the search; the racy guard-clearing that enabled it was the root
+            // of the "resets itself" bug, so the behaviour was intentionally changed.)
+            const dropdown = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+            await userEvent.click(within(dropdown).getByText("first"));
+            await flushPromises();
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$m1");
         });
 
-        it("ends the search when clicking the result for the event the search was started on", async () => {
+        it("keeps the search alive when clicking the result for the event the search was started on", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
@@ -1023,8 +1107,11 @@ describe("RoomView", () => {
             await screen.findByText("0 of 1", { exact: false });
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
 
-            // Clicking the result for $E — the exact event we were viewing when the search started — still ends the
-            // search (previously a no-op because the focused-event baseline equalled $E).
+            // $E stayed the durable stepping target across the search-open clear (onSearch pins the pre-search focused
+            // event to guard the clearing window). Clicking the result for $E is therefore recognised as our own
+            // navigation, NOT a navigate-away, so it KEEPS the search alive and simply jumps to it — per the chosen
+            // "result clicks keep the session alive" UX. (The racy guard-clearing that used to end it here is exactly
+            // what produced the "resets itself" bug.)
             act(() =>
                 defaultDispatcher.dispatch<ViewRoomPayload>({
                     action: Action.ViewRoom,
@@ -1035,8 +1122,9 @@ describe("RoomView", () => {
                     metricsTrigger: undefined,
                 }),
             );
-            await waitFor(() => expect(roomViewRef.current!.state.search).toBeUndefined());
-            expect(SearchSessionStore.instance.hasActiveSession()).toBe(false);
+            await flushPromises();
+            expect(roomViewRef.current!.state.search).toBeDefined();
+            expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
         });
 
         it("does not abort the in-flight search when RoomView unmounts (the session survives a remount)", async () => {
