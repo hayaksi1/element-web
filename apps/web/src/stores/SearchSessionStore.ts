@@ -102,7 +102,9 @@ export class SearchSessionStore extends EventEmitter {
     // flag, so it is immune to the race the flag has: any unrelated RoomViewStore emission landing between
     // {@link beginSteppingJump} and our own ViewRoom being processed used to consume the flag early, so the real
     // stepping/return update then saw it already false and the gate wrongly tore the session down (the packaged-build
-    // "search resets itself" bug). Persisted — not consumed — and reset only when results change or the session ends.
+    // "search resets itself" bug). Persisted — not consumed — and reset ONLY by start()/clear(); deliberately kept
+    // across updateResults() and across returns to the results list so a transient un-pinned frame can never unguard
+    // the clear gate mid-jump (search Phase 8c).
     private steppingTargetEventId: string | null = null;
 
     public constructor() {
@@ -211,15 +213,6 @@ export class SearchSessionStore extends EventEmitter {
      */
     public get steppingTarget(): string | null {
         return this.steppingTargetEventId;
-    }
-
-    /**
-     * Drop the durable stepping target. Called by RoomView once its own clearing navigation has un-pinned the live
-     * timeline (focus back to null, idle in the results list): from then on a genuine click on the previously
-     * stepped/started event must register as a user navigation and end the search. Not view state, so never emitted.
-     */
-    public clearSteppingTarget(): void {
-        this.steppingTargetEventId = null;
     }
 
     /**
