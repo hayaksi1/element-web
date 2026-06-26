@@ -1571,3 +1571,44 @@ rebuilt** via `scratchpad/build-macos.sh` (log `scratchpad/build-macos-phase8e.l
 verified to contain `focusedMatch ×49` + `mx_EventTile_searchFlash ×63`. Plan: `memorybank/search-phase8e-plan.md`.
 Committed + pushed at end of session. **Known limitation (defer):** re-flash on re-activating the SAME already-focused
 event needs a JS animation-restart token (CSS alone can't); reduced-motion users get a static tint, not a flash (a11y).
+
+## Session 36 (2026-06-26) — Upstream-sync planning: port element-web v1.12.22 → develop into the fork (research + phased plan only)
+
+User: the fork was created from the **v1.12.22 source tarball** + ~48 custom commits (Telegram search + macOS desktop);
+upstream has moved on; bring the fork up to date with `element-hq/element-web` so a clean PR can be sent — **without
+breaking ANY built feature**. Asked me to clone upstream to tmp, use subagents, and write a comprehensive phased plan to
+`memorybank/update-phases/` for execution in later sessions. Mid-session the user added: use **Codex as a sidecar**
+(42%/5h budget, track it). **This session is PLANNING ONLY — nothing implemented.**
+
+**Investigation (all empirical, not estimated):** cloned upstream to `/tmp/element-web-upstream` (561M, 659 tags), added
+it as remote `upstream`, fetched `develop` + tag `v1.12.22`. Established the fork is a **source drop with zero shared git
+ancestry** (root commit 3294bcc == v1.12.22 + CLAUDE.md, **0 code diff**) → so plain merge/rebase won't work, but
+**v1.12.22 is a perfect synthetic 3-way merge base** (graft it). Computed the delta: **70 commits / 395 files**
+(v1.12.22..develop), ~80% dependency/CI maintenance; v1.12.22 is a clean ancestor of develop AND the latest release tag;
+target = develop (also the PR base). Computed the three file sets: U-only 366 (bulk adopt), C-only 150 (keep + API-drift
+check), overlap 29. Ran a real **`git merge-tree`** (base v1.12.22) → **only 10 actual conflicts** (not 29): 8 are the
+desktop config-de-globalling (#33468 + #33827 deeplinks), web side = DateSeparator import (#33948) + EventIndex test
+relocation (#33898, jest→vitest); the EventIndexPeg-test conflict is a dir-rename false-positive. Confirmed jest survives
+on develop (vitest migration is additive — fork's ~60 jest tests safe) and prettier→oxfmt (#33844; config byte-identical
+→ low churn).
+
+**Analysis (ultracode):** ran a **12-agent Workflow** (`element-upstream-sync-analysis`, 443K tokens, 142 tool calls) —
+1 commit-categorizer + 8 per-cluster conflict analysts + 3 cross-cutting (oxfmt, jest/vitest, dependency/API-drift), each
+reading both diffs + the memorybank for feature intent and emitting structured merge strategies. Full report archived at
+the session task output `tasks/w4nxrcs4x.output`. Used the **Codex sidecar (1 call, read-only)** to independently
+cross-check the single hardest file `config.ts` (#33468) — it confirmed the structural+semantic classification and caught
+a ripple: #33468 removes `getBrand()`/`global.vectorConfig`, breaking even **fork-only** files (renderer-recovery.ts,
+tray.ts, updater.ts). Agents corrected several of my hint guesses: upstream's RoomView/RoomHeader/RoomSublist edits are
+just the #33946 Sonar dead-code tidy in fork-untouched regions (so **all web/search clusters are LOW risk, zero search
+logic conflicts**); the only genuinely HIGH-risk cluster is desktop #33468/#33827.
+
+**Deliverable:** wrote **`memorybank/update-phases/`** — README + master plan + 7 self-contained phase files (756 lines):
+(1) setup/graft/integration-branch, (2) deps+lockfile-regen+toolchain decisions [matrix-js-sdk **keep 41.8.0**, adopt
+oxfmt, keep jest], (3) run the grafted `git merge` + adopt 366 U-only + review 19 auto-merges, (4) **desktop conflicts**
+(per-file recipes for #33468 config-de-global + #33827 deeplinks, Codex-verified), (5) web conflicts + search auto-merge
+verification, (6) API-drift sweep / snapshots / knip --strict / oxfmt normalize / CLAUDE.md update, (7) full green-gate +
+macOS QA (reuses `manual-qa-checklist.md`) + PR prep. Recorded the initiative in long-term memory
+(`upstream-sync-initiative.md` + MEMORY.md). Ground-truth scratchpad: `empirical_facts.md`, `codex_config_merge.md`,
+`{U_only,C_only,I_conflict_surface,changelog_70}.txt`. **Decisions flagged (recommended defaults set):** matrix-js-sdk
+pin, oxfmt vs prettier, PR shape (merge now / rebase-onto-develop later), SPDX header. **Codex budget used this session:
+1 call.** Committed + pushed at end of session.
