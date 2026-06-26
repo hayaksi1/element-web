@@ -14,6 +14,25 @@ rm -rf apps/desktop/webapp
 cp -R apps/web/webapp apps/desktop/webapp
 ls apps/desktop/webapp/index.html
 
+# Inject config.json into the webapp BEFORE packing the asar. The webpack build (`nx build`) does NOT
+# emit a config.json, and the canonical desktop build copies one in via fetch-package.ts's `-d <cfgdir>`
+# step (<cfgdir>/config.json -> webapp/config.json). Without this the app ships configless and boots to
+# "Invalid configuration: no default server specified" — never reaching the welcome/login page.
+CFG="$ROOT/apps/web/config.json"
+if [ ! -f "$CFG" ]; then
+    echo "WARN: $CFG missing — writing offline-safe default (matrix.org default, custom URLs allowed)"
+    cat > "$CFG" <<'JSON'
+{
+    "default_server_config": { "m.homeserver": { "base_url": "https://matrix-client.matrix.org", "server_name": "matrix.org" } },
+    "disable_custom_urls": false,
+    "brand": "Element"
+}
+JSON
+fi
+cp "$CFG" apps/desktop/webapp/config.json
+echo "Injected config.json into webapp:"
+cat apps/desktop/webapp/config.json
+
 echo "==== [3/5] Packing webapp.asar ===="
 rm -f apps/desktop/webapp.asar
 corepack pnpm -C apps/desktop run asar-webapp

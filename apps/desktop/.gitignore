@@ -20,3 +20,5 @@ yarn-error.log
 .DS_Store
 /playwright-report
 .pnpm-store
+# Local/dev config (injected into webapp at build time; mirrors apps/web/.gitignore)
+/config.json
