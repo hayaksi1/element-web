@@ -51,10 +51,6 @@ export default {
                 "src/utils/EventPresentationContextProvider.tsx!",
                 // This is just an awful side-effect import
                 "src/stores/LifecycleStore.ts!",
-                // Fork: superseded in-room-search component from search Phase 2 (k-of-N stepper aux panel);
-                // currently unwired (the active search UI lives in RoomSearchHeader/RoomSearchView). Kept for
-                // now so `knip --strict` (#33893) passes — candidate for deletion or re-wiring.
-                "src/components/views/rooms/RoomSearchAuxPanel.tsx!",
             ],
             project: [
                 "**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}!",
