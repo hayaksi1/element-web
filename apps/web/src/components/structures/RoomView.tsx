@@ -757,8 +757,20 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // Consume the stepping-jump flag exactly once per store update. A stepping jump (set by the match stepper
         // just before its ViewRoom dispatch) must not be treated as a user navigation by the clear gate below.
         const wasSteppingJump = SearchSessionStore.instance.consumeSteppingJump();
+        // While the Telegram-style results list is shown (a search is active but no match is focused) the live
+        // timeline behind it must stay UN-pinned. Otherwise the pin is kept via `getInitialEventId() ??
+        // this.state.initialEventId`: the store value lags our async no-event un-pin ViewRoom, and the `??` fallback
+        // resurrects the just-viewed match from local state — so a background RoomViewStore emission (constant on the
+        // packaged build) re-pins/re-scrolls the conversation to a previously-opened result (the first-clicked one,
+        // whose pin lingered longest) when the user reopens the list. Forcing the pin clear here makes the un-pin
+        // race-proof. Stepping (a match focused, Room mode) and the non-search timeline are unaffected (search Phase 8d).
+        const searchResultsListShown =
+            this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) < 0;
         const initialEventId = this.roomViewStore.getInitialEventId() ?? this.state.initialEventId;
-        if (initialEventId) {
+        if (searchResultsListShown) {
+            newState.initialEventId = undefined;
+            newState.isInitialEventHighlighted = false;
+        } else if (initialEventId) {
             let initialEvent = room?.findEventById(initialEventId);
             // The event does not exist in the current sync data
             // We need to fetch it to know whether to route this request
@@ -2248,9 +2260,12 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         this.setState((state) => ({
             timelineRenderingType: TimelineRenderingType.Search,
             search: state.search ? { ...state.search, currentMatchIndex: undefined } : undefined,
+            // Un-pin the live timeline immediately so reopening the results list never re-scrolls the conversation
+            // back to the just-viewed match; onRoomViewStoreUpdate keeps it un-pinned while the list shows (Phase 8d).
+            initialEventId: undefined,
+            isInitialEventHighlighted: false,
         }));
-        // Drop the focused event the last stepping jump left behind, so re-clicking that same result ends the search
-        // (see resetFocusedEvent + the clear gate).
+        // Drop the focused event the last stepping jump left behind so the live timeline un-pins in the store too.
         this.resetFocusedEvent();
     };
 

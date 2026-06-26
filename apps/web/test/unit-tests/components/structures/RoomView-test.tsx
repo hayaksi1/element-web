@@ -834,6 +834,140 @@ describe("RoomView", () => {
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
         });
 
+        // search Phase 8d: returning to the results list must leave the live timeline UN-pinned. Before the fix,
+        // onRoomViewStoreUpdate kept the local mirror via `getInitialEventId() ?? this.state.initialEventId`, so the
+        // just-viewed match lingered in component state after the no-event un-pin ViewRoom landed — and reopening the
+        // list re-scrolled the conversation back to a previously-opened (the first-clicked) result.
+        it("un-pins the live timeline when returning to the results list so a stale match can't re-scroll it (Phase 8d)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+            // Resolve the matched events locally so onRoomViewStoreUpdate pins synchronously (no fetchInitialEvent).
+            const matchEvents: Record<string, MatrixEvent> = {
+                $newer: eventMapper({ event_id: "$newer", room_id: room.roomId, type: EventType.RoomMessage }),
+                $older: eventMapper({ event_id: "$older", room_id: room.roomId, type: EventType.RoomMessage }),
+            };
+            jest.spyOn(room, "findEventById").mockImplementation((id: string) => matchEvents[id]);
+
+            const roomViewRef = createRef<RoomView>();
+            const { container } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("older match")).toBeInTheDocument();
+                return el;
+            });
+
+            // Click a result row → the live timeline pins to that match (store + local mirror).
+            await userEvent.click(within(dropdown).getByText("older match"));
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBe("$older"));
+            await waitFor(() => expect(roomViewRef.current!.state.initialEventId).toBe("$older"));
+
+            // Return to the list. The store un-pins, and the LOCAL mirror must un-pin too — otherwise the conversation
+            // stays anchored to (and a later frame re-scrolls to) the just-viewed match.
+            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBeNull());
+            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+        });
+
+        it("does not re-pin the conversation to a stale match when a background update races returning to the list (Phase 8d)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+            const matchEvents: Record<string, MatrixEvent> = {
+                $newer: eventMapper({ event_id: "$newer", room_id: room.roomId, type: EventType.RoomMessage }),
+                $older: eventMapper({ event_id: "$older", room_id: room.roomId, type: EventType.RoomMessage }),
+            };
+            jest.spyOn(room, "findEventById").mockImplementation((id: string) => matchEvents[id]);
+
+            const roomViewRef = createRef<RoomView>();
+            const { container } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("older match")).toBeInTheDocument();
+                return el;
+            });
+
+            // Pin the live timeline to $older.
+            await userEvent.click(within(dropdown).getByText("older match"));
+            await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBe("$older"));
+
+            // Click "Back to results": resetFocusedEvent queues an ASYNC no-event ViewRoom, so the store still holds
+            // $older until it lands. A synchronous fireEvent keeps that un-pin pending — the packaged-build window.
+            fireEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Search);
+            expect(stores.roomViewStore.getInitialEventId()).toBe("$older");
+
+            // A background RoomViewStore emission lands in that window. While the results list is shown the live
+            // timeline must stay un-pinned: pre-fix this re-applied `$older ?? local` and re-scrolled to $older.
+            await act(async () => {
+                stores.roomViewStore.emit(UPDATE_EVENT);
+            });
+            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+
+            await flushPromises();
+            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+        });
+
         it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
