@@ -1045,6 +1045,109 @@ describe("RoomView", () => {
             expect(SearchSessionStore.instance.steppingTarget).toBe("$newer");
         });
 
+        // search Phase 8e: clicking a result must land the conversation on the match WITH the jump flash
+        // (isInitialEventHighlighted), the centered scroll (initialEventScrollIntoView) and the live in-bubble term
+        // highlight (stepping) — and KEEP them when the async search settles (or a "load more" page lands) while the
+        // match is focused. Pre-fix, that settled onSearchUpdate nulled the volatile cursor, so a constant background
+        // RoomViewStore emission (packaged build) made onRoomViewStoreUpdate treat the focused jump as "results list
+        // shown" and clobber isInitialEventHighlighted -> false, drop the stepping render (no term highlight) and
+        // re-show the dropdown over the timeline — the user saw no blink, no highlight, message stranded at the
+        // bottom. The durable SearchSessionStore.focusedMatch keeps stepping alive across that race.
+        it("keeps the clicked match flashed + scrolled + pinned when a search update races mid-step (Phase 8e)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+            // Resolve the matched events locally so onRoomViewStoreUpdate pins synchronously (no fetchInitialEvent).
+            const matchEvents: Record<string, MatrixEvent> = {
+                $newer: eventMapper({ event_id: "$newer", room_id: room.roomId, type: EventType.RoomMessage }),
+                $older: eventMapper({ event_id: "$older", room_id: room.roomId, type: EventType.RoomMessage }),
+            };
+            jest.spyOn(room, "findEventById").mockImplementation((id: string) => matchEvents[id]);
+
+            const roomViewRef = createRef<RoomView>();
+            const { container } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: ["match"],
+                    count: 2,
+                }),
+            });
+
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("older match")).toBeInTheDocument();
+                return el;
+            });
+
+            // Click a result row → jump to the match: pinned, flashed (highlighted) and scrolled into view (centered).
+            await userEvent.click(within(dropdown).getByText("older match"));
+            await waitFor(() => expect(roomViewRef.current!.state.initialEventId).toBe("$older"));
+            expect(roomViewRef.current!.state.isInitialEventHighlighted).toBe(true);
+            expect(roomViewRef.current!.state.initialEventScrollIntoView).toBe(true);
+            // No pixel offset → TimelinePanel.initTimeline uses offsetBase 0.5, centering the match vertically
+            // (the "lands at the bottom instead of centered" symptom).
+            expect(roomViewRef.current!.state.initialEventPixelOffset).toBeUndefined();
+            expect(SearchSessionStore.instance.focusedMatch).toBe("$older");
+            // The results dropdown is hidden while a match is focused (live timeline shown).
+            expect(container.querySelector(".mx_RoomSearchResults")).toBeNull();
+
+            // The async search settles AGAIN while the match is focused — onSearchUpdate fires (this is the real
+            // packaged-build trigger: the live request resolves at/after the click instant, or a "load more" page
+            // lands). It re-derives the cursor onto the focused match rather than nulling it.
+            const settledResults = {
+                results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                highlights: ["match"],
+                count: 2,
+            };
+            await act(async () => {
+                (
+                    roomViewRef.current as unknown as {
+                        onSearchUpdate: (
+                            inProgress: boolean,
+                            results: typeof settledResults,
+                            error: Error | null,
+                        ) => void;
+                    }
+                ).onSearchUpdate(false, settledResults, null);
+            });
+            // ... then a constant background RoomViewStore emission runs onRoomViewStoreUpdate.
+            await act(async () => {
+                stores.roomViewStore.emit(UPDATE_EVENT);
+            });
+            await flushPromises();
+
+            // The focused match stays flashed, pinned and in stepping (live timeline + in-bubble highlight) — the
+            // clobber must NOT collapse it to the results list.
+            expect(roomViewRef.current!.state.isInitialEventHighlighted).toBe(true);
+            expect(roomViewRef.current!.state.initialEventId).toBe("$older");
+            expect(SearchSessionStore.instance.focusedMatch).toBe("$older");
+            expect(roomViewRef.current!.state.timelineRenderingType).toBe(TimelineRenderingType.Room);
+            expect(container.querySelector(".mx_RoomSearchResults")).toBeNull();
+        });
+
         it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 

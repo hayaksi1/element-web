@@ -771,8 +771,14 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // immune to the lagged store/state. A fresh search with nothing viewed yet has no target → undefined → the
         // overlay covers the live bottom, which is correct. Stepping (a match focused, Room mode) and the non-search
         // timeline are unaffected (search Phase 8d2).
+        //
+        // "Results list shown" must be derived from the DURABLE SearchSessionStore.focusedMatch, NOT the volatile
+        // `state.search.currentMatchIndex`: a settled search update (or a "load more" page) landing while a match is
+        // focused nulls that cursor, and a background emission then read it here as "no match focused", took this
+        // branch mid-jump and clobbered the live flash + in-bubble highlight + centered scroll (search Phase 8e).
+        // focusedMatch is null only when genuinely viewing the list, and survives result updates.
         const searchResultsListShown =
-            this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) < 0;
+            this.state.search !== undefined && SearchSessionStore.instance.focusedMatch === null;
         const searchAnchorEventId = SearchSessionStore.instance.steppingTarget ?? undefined;
         const initialEventId = this.roomViewStore.getInitialEventId() ?? this.state.initialEventId;
         if (searchResultsListShown) {
@@ -2048,8 +2054,14 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                 highlights: freshHighlights ?? this.state.search?.highlights,
                 // Whether more result pages remain to be paginated into the dropdown (search Phase 7).
                 hasMore,
-                // The stepper cursor is reset whenever the result set changes; keep view-state in sync with the store.
-                currentMatchIndex: undefined,
+                // Keep the local cursor mirror in lockstep with the store, which `updateResults` above re-derived. If
+                // a match is still focused (a settled update / "load more" landing mid-step) keep the mirror on it so
+                // RoomSearchHeader's stepping affordances stay correct through the race; otherwise undefined (viewing
+                // the list). The durable stepping signal is SearchSessionStore.focusedMatch (search Phase 8e).
+                currentMatchIndex:
+                    SearchSessionStore.instance.focusedMatch !== null
+                        ? SearchSessionStore.instance.currentMatchIndex
+                        : undefined,
                 error: error ?? undefined,
                 inProgress,
             },
@@ -2769,10 +2781,13 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
         const hiddenHighlightCount = this.getHiddenHighlightCount();
 
-        // While stepping through matches in the live timeline (currentMatchIndex set), we show the live
-        // MessagePanel jumped to the match instead of the results list, but keep the search header.
+        // While stepping a match in the live timeline (a match is focused) we show the live MessagePanel jumped to
+        // the match instead of the results list, but keep the search header. Derived from the DURABLE
+        // SearchSessionStore.focusedMatch, not the volatile `state.search.currentMatchIndex`: a settled search update
+        // landing mid-step nulls that cursor, which used to drop the live timeline + in-bubble highlight back to the
+        // results dropdown until the next step (search Phase 8e).
         const isSteppingSearchMatch =
-            this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) >= 0;
+            this.state.search !== undefined && SearchSessionStore.instance.focusedMatch !== null;
 
         let aux: JSX.Element | undefined;
         let previewBar;
@@ -2926,7 +2941,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         let searchHighlightEventId: string | undefined;
         let searchHighlights: string[] | undefined;
         if (isSteppingSearchMatch && this.state.search) {
-            searchHighlightEventId = this.state.search.matches?.[this.state.search.currentMatchIndex!]?.eventId;
+            // The focused match's event id straight from the durable store signal — robust against the volatile
+            // `currentMatchIndex` being nulled by a settled search update mid-step (search Phase 8e).
+            searchHighlightEventId = SearchSessionStore.instance.focusedMatch ?? undefined;
             searchHighlights = this.state.search.highlights;
         }
 

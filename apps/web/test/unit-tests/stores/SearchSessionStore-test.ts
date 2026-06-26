@@ -255,6 +255,81 @@ describe("SearchSessionStore", () => {
         });
     });
 
+    describe("focusedMatch (durable stepping marker)", () => {
+        const matches = [match("!a:server", "$1"), match("!b:server", "$2"), match("!c:server", "$3")];
+
+        it("defaults to null", () => {
+            start();
+            expect(store.focusedMatch).toBeNull();
+        });
+
+        it("tracks the focused match's event id when the cursor moves to it", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1);
+            expect(store.focusedMatch).toBe("$2");
+        });
+
+        it("clears to null when the cursor returns to the results list (-1)", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1);
+            store.setCurrentMatchIndex(-1);
+            expect(store.focusedMatch).toBeNull();
+        });
+
+        it("survives a fresh result set so a settled search update mid-step cannot collapse stepping", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1);
+            // The async search settles again / a "load more" page lands WHILE a match is focused. Unlike the
+            // volatile cursor (which updateResults resets), the durable focus must survive — otherwise a background
+            // RoomViewStore emission makes RoomView treat the focused jump as "results list shown" and clobbers the
+            // live flash + in-bubble highlight + centered scroll (the packaged-build result-click regression).
+            store.updateResults({ inProgress: false, matches });
+            expect(store.focusedMatch).toBe("$2");
+            // The cursor is re-derived back onto the focused match (not reset to -1), so the "k of N" counter stays.
+            expect(store.currentMatchIndex).toBe(1);
+        });
+
+        it("re-derives the cursor onto the focused match when its index shifts in new results", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(2); // focus $3
+            // A new result set where $3 is now at index 0.
+            store.updateResults({
+                inProgress: false,
+                matches: [match("!c:server", "$3"), match("!a:server", "$1")],
+            });
+            expect(store.focusedMatch).toBe("$3");
+            expect(store.currentMatchIndex).toBe(0);
+        });
+
+        it("clears the focus when the focused match drops out of a fresh result set", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1); // focus $2
+            // A new result set that no longer contains $2 — the focus must drop so the UI falls back to the list
+            // coherently (not strand on a hidden timeline with a "0 of N" counter).
+            store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
+            expect(store.focusedMatch).toBeNull();
+            expect(store.currentMatchIndex).toBe(-1);
+        });
+
+        it("resets to null on a new search (start) and on clear", () => {
+            start();
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1);
+            start();
+            expect(store.focusedMatch).toBeNull();
+
+            store.updateResults({ inProgress: false, matches });
+            store.setCurrentMatchIndex(1);
+            store.clear();
+            expect(store.focusedMatch).toBeNull();
+        });
+    });
+
     describe("logout reset", () => {
         it("clears the session and aborts on Action.OnLoggedOut", () => {
             const abortController = start();

@@ -9,6 +9,17 @@ Please see LICENSE files in the repository root for full details.
 
 $left-gutter: 64px;
 
+@media (prefers-reduced-motion: no-preference) {
+    @keyframes mx_EventTile_searchFlash {
+        0% {
+            background-color: $event-selected-color;
+        }
+        100% {
+            background-color: transparent;
+        }
+    }
+}
+
 .mx_EventTile {
     --EventTile_content-margin-inline-end: 34px;
     --EventTile_group_line-spacing-block-start: 1px;
@@ -196,11 +207,7 @@ $left-gutter: 64px;
         &:focus-visible:focus-within,
         &.mx_EventTile_actionBarFocused,
         &.mx_EventTile_isEditing,
-        &.mx_EventTile_selected,
-        /* The live tile currently focused while stepping search matches (Phase 2 slice 5) reuses the
-           subtle "selected" background + the accent stroke below, so it stands out from a hovered tile
-           and from the mention/keyword highlight while the match stays focused. */
-        &.mx_EventTile_searchHighlightActive {
+        &.mx_EventTile_selected {
             .mx_EventTile_line {
                 background-color: $event-selected-color;
             }
@@ -208,8 +215,7 @@ $left-gutter: 64px;
 
         /* this is used for the tile for the event which is selected via the URL. */
         &.mx_EventTile_isEditing,
-        &.mx_EventTile_selected,
-        &.mx_EventTile_searchHighlightActive {
+        &.mx_EventTile_selected {
             > .mx_EventTile_line {
                 /* TODO: ultimately we probably want some transition on here. */
                 box-shadow: inset var(--EventTile-box-shadow-offset-x) 0 0 var(--EventTile-box-shadow-spread-radius)
@@ -230,6 +236,47 @@ $left-gutter: 64px;
         &:hover {
             .mx_EventTile_line {
                 background-color: $event-selected-color;
+            }
+        }
+
+        &.mx_EventTile_searchHighlightActive,
+        &.mx_EventTile_selected.mx_EventTile_searchHighlightActive,
+        &:focus-visible:focus-within.mx_EventTile_searchHighlightActive,
+        &.mx_EventTile_actionBarFocused.mx_EventTile_searchHighlightActive {
+            .mx_EventTile_line {
+                background-color: transparent;
+            }
+
+            > .mx_EventTile_line {
+                box-shadow: none;
+            }
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            &.mx_EventTile_searchHighlightActive,
+            &.mx_EventTile_selected.mx_EventTile_searchHighlightActive,
+            &:focus-visible:focus-within.mx_EventTile_searchHighlightActive,
+            &.mx_EventTile_actionBarFocused.mx_EventTile_searchHighlightActive {
+                .mx_EventTile_line {
+                    animation-name: mx_EventTile_searchFlash;
+                    animation-duration: 1200ms;
+                    animation-timing-function: ease-out;
+                    animation-iteration-count: 1;
+                    animation-fill-mode: forwards;
+                }
+            }
+        }
+
+        /* Reduced-motion users get no flash, so keep a static highlight on the focused match rather than nothing,
+           so the active result is still distinguishable. */
+        @media (prefers-reduced-motion: reduce) {
+            &.mx_EventTile_searchHighlightActive,
+            &.mx_EventTile_selected.mx_EventTile_searchHighlightActive,
+            &:focus-visible:focus-within.mx_EventTile_searchHighlightActive,
+            &.mx_EventTile_actionBarFocused.mx_EventTile_searchHighlightActive {
+                .mx_EventTile_line {
+                    background-color: $event-selected-color;
+                }
             }
         }
     }

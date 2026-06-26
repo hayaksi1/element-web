@@ -95,10 +95,7 @@ Please see LICENSE files in the repository root for full details.
     }
 
     &:hover,
-    &.mx_EventTile_selected,
-    /* Focused search-stepping match (Phase 2 slice 5): give the bubble the same subtle band as the
-       selected/hover state so the active match is distinguishable in bubble layout too. */
-    &.mx_EventTile_searchHighlightActive {
+    &.mx_EventTile_selected {
         &::before {
             background: $eventbubble-bg-hover;
         }
@@ -106,6 +103,41 @@ Please see LICENSE files in the repository root for full details.
         .mx_EventTile_avatar {
             img {
                 box-shadow: 0 0 0 3px $eventbubble-bg-hover;
+            }
+        }
+    }
+
+    /* Focused search-stepping match (Phase 2 slice 5 / Phase 8e): at rest the band is transparent so that, after
+       the one-shot flash below fades, only the inline matched term (.mx_EventTile_searchHighlight) stays marked. */
+    &.mx_EventTile_searchHighlightActive,
+    &.mx_EventTile_selected.mx_EventTile_searchHighlightActive {
+        &::before {
+            background: transparent;
+        }
+    }
+
+    /* Motion users: flash the whole band once when the match becomes focused, then fade to nothing (Telegram-style
+       "jump to result" highlight). Re-fires each step as the active class lands on a fresh keyed tile. */
+    @media (prefers-reduced-motion: no-preference) {
+        &.mx_EventTile_searchHighlightActive,
+        &.mx_EventTile_selected.mx_EventTile_searchHighlightActive {
+            &::before {
+                animation-name: mx_EventTile_searchFlash;
+                animation-duration: 1200ms;
+                animation-timing-function: ease-out;
+                animation-iteration-count: 1;
+                animation-fill-mode: forwards;
+            }
+        }
+    }
+
+    /* Reduced-motion users get no flash, so keep a static band on the focused match rather than nothing, so the
+       active result is still distinguishable. */
+    @media (prefers-reduced-motion: reduce) {
+        &.mx_EventTile_searchHighlightActive,
+        &.mx_EventTile_selected.mx_EventTile_searchHighlightActive {
+            &::before {
+                background: $eventbubble-bg-hover;
             }
         }
     }
