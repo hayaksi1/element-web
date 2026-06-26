@@ -1612,3 +1612,48 @@ macOS QA (reuses `manual-qa-checklist.md`) + PR prep. Recorded the initiative in
 `{U_only,C_only,I_conflict_surface,changelog_70}.txt`. **Decisions flagged (recommended defaults set):** matrix-js-sdk
 pin, oxfmt vs prettier, PR shape (merge now / rebase-onto-develop later), SPDX header. **Codex budget used this session:
 1 call.** Committed + pushed at end of session.
+
+## Session 37 (2026-06-26) — Upstream-sync EXECUTION begins: Phase 1 (graft/branch/dry-run) + Phase 2 SDK-drift scan
+
+User: read `memorybank/update-phases/` and **execute Phase 1**; use subagents/tools carefully so the heavily-worked
+codebase (search + macOS desktop) isn't broken; follow CLAUDE.md. Clarified: pushes go to **gitea** (`origin`), GitHub
+`element-hq/element-web` is upstream (latest develop == `ed768f6`). The phased plan itself was committed on `main`
+(`9636d3b` "docs(memorybank): comprehensive upstream-sync plan") since session 36 → **fork tip is now `9636d3b`, not
+`862383cd`**.
+
+**Phase 1 — setup/graft/integration-branch (DONE, LOW risk, no fork code touched):**
+- Re-pointed `upstream` remote from the `/tmp/element-web-upstream` mirror to the real
+  `https://github.com/element-hq/element-web.git`; `git ls-remote` confirmed GitHub's live develop tip == local
+  `upstream/develop` == `ed768f69e1` (= "ed768f6") — **no advancement**, develop objects already fully in the local
+  object store (so the merge no longer depends on `/tmp` surviving).
+- **1.2 pristine-base gate PASSED:** `git diff v1.12.22 3294bcc` shows ONLY `.claude/settings.json` + `CLAUDE.md`
+  (132 insertions, **0 code diffs**) → the fork base is byte-identical to v1.12.22, a perfect synthetic merge-base.
+- **1.3 graft:** `git replace --graft 3294bcc v1.12.22`. NB the **tag-object** SHA is `6bfc4ddfef` but it peels to the
+  **commit** `94636e8d` (RiotRobot "v1.12.22", Jun 23 2026) — `git merge-base` returns the commit, so the phase-1 doc's
+  "should resolve to 6bfc4ddfef" was a cosmetic tag-vs-commit conflation. Verified: ROOT's effective parent is now
+  `94636e8d`; `merge-base HEAD upstream/develop` == `94636e8d`; v1.12.22 is a clean **linear** ancestor of develop
+  (70 ahead / **0** behind). (Briefly chased a false "MISMATCH" from comparing the tag SHA to the commit SHA — resolved.)
+- **1.4:** created integration branch **`upstream-sync`** off fork HEAD; `main` untouched at `9636d3b`, tree clean.
+- **1.5 dry-run:** `git merge-tree --merge-base=v1.12.22 HEAD upstream/develop` → **exactly the 10 predicted conflicts**
+  (8 desktop: config.ts/.test, ipc.ts/.test, electron-main, auto-launch, webcontents-handler; 2 web: DateSeparatorViewModel
+  import, EventIndex.test relocation; + the EventIndexPeg-test dir-rename file-location false-positive). The 11th-looking
+  grep line was the suggested move-target inside conflict #10's sentence, not a separate file. **Plan confirmed; merge NOT
+  yet run** (that's Phase 3).
+- Verification gate: all 6 checks PASS (merge-base==v1.12.22, on upstream-sync, tree clean, main==9636d3b, graft ref
+  present, upstream→GitHub). Rollback if needed: `git switch main && git branch -D upstream-sync && git replace -d 3294bcc…`.
+
+**Phase 2 — deps/toolchain (STARTED; investigation done, decisions recorded; no code merged — execution is Phase 3):**
+- Cleared the plan's flagged **matrix-js-sdk open risk** via a read-only subagent scan of all `v1.12.22..develop` changed
+  TS files. **VERDICT: SAFE to keep `41.8.0`** (high confidence). Installed version confirmed 41.8.0 (pnpm store +
+  lockfile). Of 258 changed .ts/.tsx, 114 import matrix-js-sdk; only 8 files introduced 12 "new" symbol names and **all 12
+  exist in 41.8.0** (`EmptyObject`, `MapWithDefault`, `logger` are the only genuinely-modern ones — all present; the rest
+  — `MatrixClient`/`Room`/`ClientEvent`/`MatrixEvent`/`SyncState`/`Direction`/`EventTimeline`/`EventType`/`IEvent` — only
+  looked new because test files reshuffled imports). No new SDK subpath introduced. 41.8.0 is the **same-week** release
+  line as the merge target (no 41→42 major gap), so the floating develop pin is unnecessary. **Residual caveat:**
+  member-level usage on already-imported types can't be proven pre-merge read-only → closed by the `tsc` gate in Phase 7.
+- **Decisions (recommended defaults, per the plan we co-authored):** keep **matrix-js-sdk 41.8.0** (evidence above);
+  **adopt oxfmt** (upstream #33844 deletes prettier; `.oxfmtrc.jsonc` byte-identical to fork prettier settings → near-zero
+  churn; CLAUDE.md `lint:prettier-fix`→`lint:fmt-fix` to update in Phase 6); **keep jest** (develop's vitest migration is
+  additive — fork's ~60 jest tests safe, no action). knip `--strict` (#33893) flagged as the real lint risk → fix in
+  Phase 6. Lockfile strategy (take upstream lock+workspace wholesale, re-apply fork's auto-launch/electron-window-state
+  removals, regen via `pnpm install`) is **staged for Phase 3**. Checkpoint committed + pushed to `origin/upstream-sync`.
