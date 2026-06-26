@@ -834,11 +834,13 @@ describe("RoomView", () => {
             expect(SearchSessionStore.instance.hasActiveSession()).toBe(true);
         });
 
-        // search Phase 8d: returning to the results list must leave the live timeline UN-pinned. Before the fix,
-        // onRoomViewStoreUpdate kept the local mirror via `getInitialEventId() ?? this.state.initialEventId`, so the
-        // just-viewed match lingered in component state after the no-event un-pin ViewRoom landed — and reopening the
-        // list re-scrolled the conversation back to a previously-opened (the first-clicked) result.
-        it("un-pins the live timeline when returning to the results list so a stale match can't re-scroll it (Phase 8d)", async () => {
+        // search Phase 8d2: returning to the results list must leave the live timeline anchored to the LAST-VIEWED
+        // match, so the conversation stays on the message the user was just reading. Two earlier symptoms were both
+        // wrong derivations of this pin: pre-8d, `getInitialEventId() ?? this.state.initialEventId` resurrected a
+        // stale earlier match on a background emission → reopening jumped to the FIRST-clicked result. The 8d fix
+        // over-corrected to `undefined`, un-pinning the timeline so it fell to the live bottom → reopening jumped to
+        // the LATEST message. The durable fix pins to SearchSessionStore.steppingTarget — the match we returned from.
+        it("keeps the live timeline anchored to the last-viewed match when returning to the results list (Phase 8d2)", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
@@ -892,14 +894,16 @@ describe("RoomView", () => {
             await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBe("$older"));
             await waitFor(() => expect(roomViewRef.current!.state.initialEventId).toBe("$older"));
 
-            // Return to the list. The store un-pins, and the LOCAL mirror must un-pin too — otherwise the conversation
-            // stays anchored to (and a later frame re-scrolls to) the just-viewed match.
+            // Return to the list. The STORE focused event un-pins (so a re-click of the same row still registers in
+            // the clear gate), but the LOCAL mirror must stay on $older — the anchor — so reopening the list does not
+            // move the conversation to the latest message or to an earlier result.
             await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
             await waitFor(() => expect(stores.roomViewStore.getInitialEventId()).toBeNull());
-            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+            expect(roomViewRef.current!.state.initialEventId).toBe("$older");
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$older");
         });
 
-        it("does not re-pin the conversation to a stale match when a background update races returning to the list (Phase 8d)", async () => {
+        it("keeps the conversation on the last-viewed match when a background update races returning to the list (Phase 8d2)", async () => {
             room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
 
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
@@ -958,14 +962,87 @@ describe("RoomView", () => {
             expect(stores.roomViewStore.getInitialEventId()).toBe("$older");
 
             // A background RoomViewStore emission lands in that window. While the results list is shown the live
-            // timeline must stay un-pinned: pre-fix this re-applied `$older ?? local` and re-scrolled to $older.
+            // timeline must stay anchored to the last-viewed match ($older) — NOT the first result and NOT the live
+            // bottom (undefined → latest message). The anchor is the durable steppingTarget, immune to the lagged
+            // store value and to any stale local mirror.
             await act(async () => {
                 stores.roomViewStore.emit(UPDATE_EVENT);
             });
-            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+            expect(roomViewRef.current!.state.initialEventId).toBe("$older");
 
             await flushPromises();
-            expect(roomViewRef.current!.state.initialEventId).toBeUndefined();
+            expect(roomViewRef.current!.state.initialEventId).toBe("$older");
+        });
+
+        // search Phase 8d2: the reported regression was a MULTI-click one — view several results, reopen the list,
+        // and it jumped back to the FIRST-clicked result (later, to the LATEST message). The anchor must always track
+        // the MOST-RECENTLY-viewed match, never an earlier one and never the live bottom.
+        it("anchors the list to the most-recently-viewed match after several result clicks (Phase 8d2)", async () => {
+            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+
+            const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
+            const makeResult = (eventId: string, body: string, ts: number) =>
+                SearchResult.fromJson(
+                    {
+                        rank: 1,
+                        result: {
+                            room_id: room.roomId,
+                            event_id: eventId,
+                            sender: cli.getSafeUserId(),
+                            origin_server_ts: ts,
+                            content: { body, msgtype: "m.text" },
+                            type: EventType.RoomMessage,
+                        },
+                        context: { profile_info: {}, events_before: [], events_after: [] },
+                    },
+                    eventMapper,
+                );
+            const matchEvents: Record<string, MatrixEvent> = {
+                $newer: eventMapper({ event_id: "$newer", room_id: room.roomId, type: EventType.RoomMessage }),
+                $older: eventMapper({ event_id: "$older", room_id: room.roomId, type: EventType.RoomMessage }),
+            };
+            jest.spyOn(room, "findEventById").mockImplementation((id: string) => matchEvents[id]);
+
+            const roomViewRef = createRef<RoomView>();
+            const { container } = await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            startSearch(roomViewRef, {
+                searchId: 1,
+                roomId: room.roomId,
+                term: "match",
+                scope: SearchScope.Room,
+                promise: Promise.resolve({
+                    results: [makeResult("$newer", "newer match", 2), makeResult("$older", "older match", 1)],
+                    highlights: [],
+                    count: 2,
+                }),
+            });
+
+            const dropdown = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("older match")).toBeInTheDocument();
+                return el;
+            });
+
+            // View $older, return to the list — the anchor is $older.
+            await userEvent.click(within(dropdown).getByText("older match"));
+            await waitFor(() => expect(roomViewRef.current!.state.initialEventId).toBe("$older"));
+            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            expect(roomViewRef.current!.state.initialEventId).toBe("$older");
+
+            // Now view $newer, return to the list — the anchor must FOLLOW to $newer, not stick on the first-clicked
+            // $older (the original "jumps to first result" bug).
+            const dropdown2 = await waitFor(() => {
+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
+                expect(within(el).getByText("newer match")).toBeInTheDocument();
+                return el;
+            });
+            await userEvent.click(within(dropdown2).getByText("newer match"));
+            await waitFor(() => expect(roomViewRef.current!.state.initialEventId).toBe("$newer"));
+            await userEvent.click(screen.getByRole("button", { name: "Back to results" }));
+            expect(roomViewRef.current!.state.initialEventId).toBe("$newer");
+            expect(SearchSessionStore.instance.steppingTarget).toBe("$newer");
         });
 
         it("re-hydrates the live stepper from the store when re-mounted for the focused match's room", async () => {
