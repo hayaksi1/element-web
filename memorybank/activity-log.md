@@ -1,5 +1,65 @@
 # Activity Log
 
+## 2026-06-26 (session 40) — Upstream-sync Phase 6+7 DONE: full green-gate + feature audit + MERGE COMMITTED (graft removed). Push/PR pending user OK.
+
+Directive: "continue with phase 7, use subagents, don't break the codebase." Picked up the resumable in-progress merge
+(MERGE_HEAD=`ed768f69`=upstream/develop, graft present, **0 unmerged** — Phases 1–5 staged). **Finding: Phase 6 was already
+substantially done (unlogged since session 39)** — verified empirically, not assumed.
+
+### Phase 6 state found already-applied (verified)
+
+- matrix-js-sdk **re-pinned 41.8.0** (the session-39 `#develop` divergence was reconciled) + **lockfile regenerated**
+  (`--frozen-lockfile` clean). getBrand/global.vectorConfig = **0 refs** (6.1). No stale `!!raw-loader!` (6.4 — only the
+  legit `?raw`→jest-raw-loader map). **oxfmt --check clean** across 3888 files (6.5 already normalized). **CLAUDE.md updated**
+  (6.6). Snapshots regenerated for compound-web **9.4.1→9.7.0** (6.2 — all 794 pass). SPDX header on config.ts/config.test.ts
+  **restored to upstream tri-license** (decision #4 resolved); only `store.ts` keeps an old Apache-2.0 header (pre-existing,
+  minor PR note). knip --strict clean (6.3).
+
+### Phase 7.1 green-gate — ALL GREEN (modulo the 4 known vendored matrix-js-sdk .d.ts errors)
+
+- **Frozen install** clean (lock deterministic w/ 41.8.0). **tsc**: web + **desktop (all 5 sub-configs)** + every module/package
+  clean; only the 4 vendored SDK errors remain. **oxfmt/eslint(--max-warnings 0)/stylelint/knip --strict**: clean.
+- **web jest (FULL suite via `scratchpad/webjest.sh`)**: **693 suites / 6853 tests / 794 snapshots — 0 fail.**
+- **desktop vitest**: **309 / 25 files** (was 267; +upstream args/tray/vectormenu). **web vitest (colocated)**: **413 / 40**
+  (incl. relocated EventIndex.test.ts 29). **shared-components vitest (unit)**: 781 pass / 6 skip / **1 fail**.
+- The 1 shared-components failure (`UploadButton` ctrl+click, chromium browser-mode) is **NOT merge-caused** — proven
+  byte-identical to upstream/develop (whole-dir `git diff v1.12.22 HEAD` empty) on the same compound-web 9.7.0 upstream
+  ships green; deterministic local-env browser-mode diff (macOS headless vs CI linux-docker). Out of scope, like the
+  CI-only visual snapshots.
+- **web webpack production build**: bundle emitted, **0 errors**, 4 benign warnings (vendored element-call CSS calc + size
+  limits). All CSS/PCSS/`?raw`/asset imports resolve post-merge.
+
+### Phase 7.3 feature-preservation audit (8-agent Workflow `upstream-sync-feature-audit` + critic; substitutes for packaged macOS QA)
+
+Workflow was flaky (5/8 agents hit the StructuredOutput retry cap — a FORMATTING failure, not feature failure; deeplink
+agent returned a stub). **Two thorough GOOD verdicts: section-DnD #33606/#33800 INTACT** (producer/consumer field
+consistency `canBeReordered`/`displaySectionReleaseAnnouncement` confirmed, @dnd-kit dep installed+bundled) and
+**Seshat resilience INTACT** (n-gram IPC chain end-to-end, flood guard #33501, backfill #33955/6, AES arm64 #33954).
+For the failed dimensions I **verified directly**: deeplink #33827 (`protocol.ts initialise→hasDeeplink`, `args.ts:88`,
+`electron-main.ts:304-305` gate — coexists with close-to-hide), config+MDM deep-merge reimplant (`getConfigCandidatePaths`
++ `deepMergeConfig` w/ proto-pollution guard on upstream's de-globalled skeleton), RoomView search (all
+SearchSessionStore/steppingTarget/consumeSteppingJump/focusedMatch markers present), UserMenu #33900/QuickSettings #33923.
+**Every one is ALSO test-covered by a passing suite** (25 desktop `.test.ts` files all green; full web jest green). Feature
+preservation comprehensively proven.
+
+### Phase 7.2 + 7.5 — MERGE COMMITTED, graft removed
+
+- Committed `29d823f86f` "Merge upstream/develop into the fork (v1.12.22 → develop)" — two parents `3cde8bb` (fork) +
+  `ed768f69` (develop). Single merge commit (oxfmt was applied inline during conflict resolution, tree already clean → no
+  separate format commit). 422 files. Working tree clean, 0 unmerged/unstaged/untracked.
+- **Graft removed** (`git replace -d 3294bcc`). Parents unchanged; **`git merge-base HEAD upstream/develop` = ed768f69** →
+  real shared ancestry now exists, so **future develop syncs are ordinary `git merge`s**.
+
+### NOT done (pending user) — push + PR shaping + live QA
+
+- **Push held** (per repo convention — `git push origin upstream-sync`, branch is local only).
+- **Phase 7.4 PR shaping is a user DECISION** (see `phase-7-verify-pr.md` §7.4 + `memorybank/upstream-pr-review.md`):
+  element-hq PR targets `develop`; derive clean feature branches via `git rebase --onto upstream/develop v1.12.22 <fork-commits>`;
+  private bits (config-bake/MDM) likely stay in the fork. Land `upstream-sync`→`main` (ff) first if desired.
+- **Live packaged macOS QA** still required for true-runtime behaviors tests can't prove (TCC mic/cam prompts, real Seshat
+  sqlite round-trip + CJK, real deeplink OS navigation, window-geometry restore on a signed build) — see
+  `memorybank/manual-qa-checklist.md`. To resume: `corepack pnpm install`; web jest via `scratchpad/webjest.sh`.
+
 ## 2026-06-26 (session 39) — Upstream-sync Phase 5 DONE & VERIFIED (web conflicts + auto-merge verify), still MID-MERGE (NOT committed)
 
 Directive: "continue with phase 5, use subagents, don't break the codebase." Picked up the resumable in-progress merge
