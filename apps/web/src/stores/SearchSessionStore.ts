@@ -106,6 +106,16 @@ export class SearchSessionStore extends EventEmitter {
     // across updateResults() and across returns to the results list so a transient un-pinned frame can never unguard
     // the clear gate mid-jump (search Phase 8c).
     private steppingTargetEventId: string | null = null;
+    // Durable marker of the focused match's event id (or null when viewing the results list), set by
+    // {@link setCurrentMatchIndex}, reset by start()/clear() and (only) when the focused match drops out of a fresh
+    // result set in {@link updateResults}. Unlike {@link SearchSession.currentMatchIndex}
+    // — which updateResults invalidates to -1 on every fresh/in-progress result set — this survives a result update,
+    // so it is the robust "are we stepping a match, and which one" signal. RoomView derives its stepping render +
+    // the result-click clear gate's "results list shown" test from this rather than from the volatile cursor: a
+    // settled search update (or a "load more" page) landing while a match is focused used to null the cursor, and a
+    // background RoomViewStore emission then treated the focused jump as the results list and clobbered the live
+    // flash + in-bubble highlight + centered scroll on the packaged build (the result-click regression).
+    private focusedMatchEventId: string | null = null;
 
     public constructor() {
         super();
@@ -143,6 +153,7 @@ export class SearchSessionStore extends EventEmitter {
         };
         this.steppingJump = false;
         this.steppingTargetEventId = null;
+        this.focusedMatchEventId = null;
         this.emit(SearchSessionStoreEvent.Update);
     }
 
@@ -151,17 +162,30 @@ export class SearchSessionStore extends EventEmitter {
      */
     public updateResults(results: SearchSessionResults): void {
         if (!this.session) return;
+        const matches = results.matches ?? this.session.matches;
+        // A fresh result set invalidates the index-based cursor, BUT if a match is still focused (durable
+        // {@link focusedMatchEventId}, e.g. a settled search/"load more" landed mid-step) re-derive the cursor onto
+        // that same match by event id so stepping and the "k of N" counter stay put — instead of snapping back to
+        // "no match" (-1) and collapsing the live highlight. No focus → -1 (viewing the list).
+        const refocusedIndex = this.focusedMatchEventId
+            ? matches.findIndex((m) => m.eventId === this.focusedMatchEventId)
+            : -1;
+        // If the focused match dropped out of the new result set entirely, stop treating it as focused too, so the
+        // UI falls back to the results list coherently instead of stranding on a hidden live timeline with a
+        // "0 of N" counter and no back-to-results affordance.
+        if (refocusedIndex < 0) {
+            this.focusedMatchEventId = null;
+        }
         this.session = {
             ...this.session,
             inProgress: results.inProgress,
-            matches: results.matches ?? this.session.matches,
+            matches,
             previews: results.previews ?? this.session.previews,
             highlights: results.highlights ?? this.session.highlights,
             count: results.count,
             hasMore: results.hasMore ?? this.session.hasMore,
             error: results.error,
-            // A fresh result set invalidates the cursor; RoomView resets its mirror in lockstep.
-            currentMatchIndex: -1,
+            currentMatchIndex: refocusedIndex,
         };
         // Fresh results end any in-flight one-shot stepping jump. NB: deliberately do NOT clear steppingTargetEventId
         // here — returning from stepping to the results list re-mounts RoomView's hidden RoomSearchView data engine,
@@ -176,6 +200,10 @@ export class SearchSessionStore extends EventEmitter {
      * Move the focused-match cursor. `-1` means "no match focused" (viewing the results list).
      */
     public setCurrentMatchIndex(index: number): void {
+        // Record the durable focused-match marker BEFORE the no-op guard below, so returning to the list
+        // (setCurrentMatchIndex(-1)) always clears it even when the cursor was already -1 (e.g. a prior
+        // updateResults left it there). A focused index maps to that match's event id; -1 clears the focus.
+        this.focusedMatchEventId = index >= 0 ? (this.session?.matches[index]?.eventId ?? null) : null;
         if (!this.session || this.session.currentMatchIndex === index) return;
         this.session = { ...this.session, currentMatchIndex: index };
         this.emit(SearchSessionStoreEvent.Update);
@@ -216,6 +244,15 @@ export class SearchSessionStore extends EventEmitter {
     }
 
     /**
+     * The focused match's event id, or null when viewing the results list. Durable: survives {@link updateResults}
+     * (reset only by start()/clear()), so it is the race-free "stepping a match?" signal RoomView renders from —
+     * see {@link focusedMatchEventId}.
+     */
+    public get focusedMatch(): string | null {
+        return this.focusedMatchEventId;
+    }
+
+    /**
      * End the session. Aborts the in-flight request unless `abort` is false (the session is never cleared on a
      * remount, so the surviving promise is never rejected by a room switch).
      */
@@ -226,6 +263,7 @@ export class SearchSessionStore extends EventEmitter {
         this.session = null;
         this.steppingJump = false;
         this.steppingTargetEventId = null;
+        this.focusedMatchEventId = null;
         this.emit(SearchSessionStoreEvent.Update);
     }
 

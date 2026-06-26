@@ -1503,3 +1503,71 @@ mirroring the sender filter), `key={room.roomId}`, refreshed `extractSearchMatch
 sender-filter change; indicator-dot present/absent). **Verified:** 207 Jest across 8 suites; tsc clean (4 vendored only);
 eslint/prettier/i18n:lint clean. **Decision logged:** portable offline encrypted **web** search stays **Desktop-only**
 (offline-only/no-CDN constraint; multi-week spike). Committed + pushed at end of session.
+
+## Session 35 (2026-06-26) — Search Phase 8e: result-click "no flash / no in-bubble highlight / lands at bottom not centered" (TDD + Codex + adversarial review)
+
+User reported on the packaged macOS build: clicking a result row in the Telegram-style dropdown navigates to the right
+message, but (1) it does NOT flash/blink, (2) the matched term is NOT highlighted in the bubble, (3) it lands near the
+BOTTOM ("end of chat history") instead of centered — so you can't tell which message is the result. User asked me to
+research, delegate to Codex, use subagents, ask clarifying questions. **Decisions (AskUserQuestion):** highlight feel =
+**flash + keep term (Telegram-style)** (quick whole-message flash that fades ~1.2s, matched word stays highlighted while
+focused); centered (confirmed); **rebuild + reinstall to /Applications**.
+
+**Process:** read the memorybank (phases 6–8d2) instead of re-deriving; followed systematic-debugging + TDD. Ran a
+parallel investigation **workflow** (`search-result-jump-investigation`, 5 readers + Firecrawl Telegram + a Codex
+agent), then a **Codex MCP read-only trace** and a **deterministic-jsdom-repro subagent** — they CONVERGED. **Refuted two
+plausible-but-wrong leads before fixing** (the kind that derailed Phase 8b): (a) a Haiku "NaN pixelOffset" theory —
+disproved by reading `ScrollPanel.scrollToToken(token, pixelOffset = 0, …)`: JS default params apply to `undefined`, so
+it's `0`, not NaN, and `initTimeline` already uses `offsetBase = 0.5` (center) when `eventPixelOffset == null` →
+centering math was always correct; (b) "onSearchUpdate fires during stepping" — disproved by `RoomView.tsx:2881`: the
+`RoomSearchView` data engine that drives `onSearchUpdate` is UNMOUNTED while a match is focused.
+
+**Confirmed root cause (deterministic repro "COND-F"):** all three symptoms are ONE race.
+`searchResultsListShown` (onRoomViewStoreUpdate) and `isSteppingSearchMatch` + `searchHighlightEventId` (render) derived
+from the **volatile** `state.search.currentMatchIndex`. On the packaged build the real async search settles *at/after*
+the click; that settled `onSearchUpdate(false, results, …)` nulls the cursor (`RoomView.tsx:2052` local → undefined +
+`SearchSessionStore.updateResults` store → -1). A constant background `RoomViewStore` emission then runs
+`onRoomViewStoreUpdate`, sees `searchResultsListShown` true mid-jump and takes the clobber branch
+(`RoomView.tsx:778-780`): forces `isInitialEventHighlighted = false` (**no flash**), makes `isSteppingSearchMatch` false
+→ drops `searchHighlights`/`searchHighlightEventId` (**no in-bubble term highlight**) and re-mounts the dropdown overlay
+so the live timeline reads as buried (**not centered**). jsdom's mocked `Promise.resolve` settles BEFORE the click so the
+window never opens — why phases 8/8b/8c/8d/8d2 never caught it.
+
+**Fix — durable `focusedMatch` signal (mirrors the proven steppingTarget pattern):** `SearchSessionStore.ts` — new
+`focusedMatchEventId` + getter `focusedMatch`, set in `setCurrentMatchIndex` BEFORE the no-op guard (index>=0 →
+matches[index].eventId, else null), reset by `start()`/`clear()` AND when the focused match drops out of a fresh result
+set (coherent fall-back to the list — Codex review fix). `updateResults` now RE-DERIVES `currentMatchIndex` from
+`focusedMatchEventId` (`findIndex` by event id) instead of always -1, so a settled result mid-step keeps the cursor + the
+"k of N" counter on the focused match. `RoomView.tsx` — `searchResultsListShown`, `isSteppingSearchMatch`,
+`searchHighlightEventId` now derive from `SearchSessionStore.instance.focusedMatch`; `onSearchUpdate` syncs the local
+mirror to the store value while focused (keeps `RoomSearchHeader` affordances correct). Centering then falls out for
+free (the else-branch sets `pixelOffset = undefined` → offsetBase 0.5).
+
+**The actual blink:** there was **NO flash/keyframe animation in the fork** (`_EventTile.pcss` had only a static
+`mx_EventTile_selected`/`searchHighlightActive` tint + a literal `TODO: ultimately we probably want some transition on
+here`). **Delegated to Codex MCP (workspace-write), refined by me:** added `@keyframes mx_EventTile_searchFlash`
+($event-selected-color → transparent, 1200ms ease-out, fill forwards) gated to `prefers-reduced-motion: no-preference`,
+applied to the focused-match tile (`.mx_EventTile_line` / bubble `::before`), overriding the shared selected tint so it
+FADES and only the inline `.mx_EventTile_searchHighlight` matched word stays. `prefers-reduced-motion: reduce` → static
+tint fallback (a11y). Permalink (`.mx_EventTile_selected` alone) + edit (`.mx_EventTile_isEditing`) styling untouched.
+
+**TDD (RED→GREEN):** SearchSessionStore-test — new "focusedMatch (durable stepping marker)" block (7 tests incl. survives
+updateResults, re-derives index on shift, clears when the match drops out). RoomView-test — new Phase 8e test reproduces
+COND-F (click → settled `onSearchUpdate` while focused → background `emit(UPDATE_EVENT)`) and asserts the flash
+(`isInitialEventHighlighted`), centered scroll (`initialEventScrollIntoView` true + `initialEventPixelOffset` undefined),
+stepping survival and dropdown-hidden — RED pre-fix (isInitialEventHighlighted flipped false).
+
+**Review:** Codex MCP adversarial review of the full diff → 1 Medium (focusedMatch/cursor split if the focused match
+vanishes) FIXED + tested; 2 Low (test didn't pin pixelOffset → added; flash won't re-fire on re-activating the SAME
+already-focused event → accepted, stepping to *different* matches re-fires as tiles are keyed by event id — deferred).
+A subagent ran a 17-suite regression sweep.
+
+**Verified:** **374 jest / 17 suites green** (32 SearchSessionStore + 85 RoomView + adjacent EventTile 142, MessagePanel,
+TimelinePanel, Spotlight, Searching, HtmlUtils, RoomSearch*); 45 snapshots pass; stylelint/eslint/tsc (only the 4
+pre-existing matrix-js-sdk 41.8.0 vendored errors)/prettier/i18n:lint clean; no new i18n keys. Src+CSS diff +333/-21
+across `SearchSessionStore.ts`, `RoomView.tsx`, `_EventTile.pcss`, `_EventBubbleTile.pcss` (+ 2 tests). **macOS app
+rebuilt** via `scratchpad/build-macos.sh` (log `scratchpad/build-macos-phase8e.log`) and **reinstalled to
+/Applications/Element.app** — new `webapp.asar` md5 `80cf21e70752f6faee15ea12188bf23c` (was `b6100554…` = Phase 8d2),
+verified to contain `focusedMatch ×49` + `mx_EventTile_searchFlash ×63`. Plan: `memorybank/search-phase8e-plan.md`.
+Committed + pushed at end of session. **Known limitation (defer):** re-flash on re-activating the SAME already-focused
+event needs a JS animation-restart token (CSS alone can't); reduced-motion users get a static tint, not a flash (a11y).
