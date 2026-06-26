@@ -7,6 +7,11 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 echo "==== [1/5] Building local renderer (apps/web webpack --mode production) ===="
 date
+# Clean the renderer output first so webpack emits ONLY the current content-hashed bundle. Without this,
+# apps/web/webapp/bundles/<hash>/ accumulates stale dirs across rebuilds (incremental/cached builds don't
+# prune old hashes) and they get swept into webapp.asar — bloating it ~3-4x (526M -> 146M once pruned).
+# Discovered session 37; index.html only ever loads the current hash, so the stale dirs were dead weight.
+rm -rf apps/web/webapp
 corepack pnpm -C apps/web build
 
 echo "==== [2/5] Staging local webapp into apps/desktop/webapp ===="
