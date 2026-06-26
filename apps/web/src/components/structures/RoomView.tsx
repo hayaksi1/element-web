@@ -758,17 +758,25 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         // just before its ViewRoom dispatch) must not be treated as a user navigation by the clear gate below.
         const wasSteppingJump = SearchSessionStore.instance.consumeSteppingJump();
         // While the Telegram-style results list is shown (a search is active but no match is focused) the live
-        // timeline behind it must stay UN-pinned. Otherwise the pin is kept via `getInitialEventId() ??
-        // this.state.initialEventId`: the store value lags our async no-event un-pin ViewRoom, and the `??` fallback
-        // resurrects the just-viewed match from local state — so a background RoomViewStore emission (constant on the
-        // packaged build) re-pins/re-scrolls the conversation to a previously-opened result (the first-clicked one,
-        // whose pin lingered longest) when the user reopens the list. Forcing the pin clear here makes the un-pin
-        // race-proof. Stepping (a match focused, Room mode) and the non-search timeline are unaffected (search Phase 8d).
+        // timeline behind it must stay anchored to the LAST-VIEWED match, so reopening the list leaves the
+        // conversation exactly on the message the user was just reading. Deriving the pin from `getInitialEventId() ??
+        // this.state.initialEventId` is unreliable here: the store value lags our async no-event un-pin ViewRoom and
+        // the `??` fallback can resurrect a stale earlier match from local state — a background RoomViewStore emission
+        // (constant on the packaged build) then re-scrolled the conversation to the FIRST-clicked result (search
+        // Phase 8d). Forcing it to `undefined` instead un-pinned the timeline so it fell to the live bottom and jumped
+        // to the LATEST message (the regression Phase 8d traded in). The durable, deterministic anchor for both is
+        // SearchSessionStore.steppingTarget: the event our last internal navigation pinned — the clicked/stepped
+        // match, kept across the return to the list and reset only by start()/clear(). Pinning to it is stable across
+        // background emissions (same value every frame → eventId prop unchanged → TimelinePanel never re-scrolls) and
+        // immune to the lagged store/state. A fresh search with nothing viewed yet has no target → undefined → the
+        // overlay covers the live bottom, which is correct. Stepping (a match focused, Room mode) and the non-search
+        // timeline are unaffected (search Phase 8d2).
         const searchResultsListShown =
             this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) < 0;
+        const searchAnchorEventId = SearchSessionStore.instance.steppingTarget ?? undefined;
         const initialEventId = this.roomViewStore.getInitialEventId() ?? this.state.initialEventId;
         if (searchResultsListShown) {
-            newState.initialEventId = undefined;
+            newState.initialEventId = searchAnchorEventId;
             newState.isInitialEventHighlighted = false;
         } else if (initialEventId) {
             let initialEvent = room?.findEventById(initialEventId);
@@ -2260,12 +2268,16 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         this.setState((state) => ({
             timelineRenderingType: TimelineRenderingType.Search,
             search: state.search ? { ...state.search, currentMatchIndex: undefined } : undefined,
-            // Un-pin the live timeline immediately so reopening the results list never re-scrolls the conversation
-            // back to the just-viewed match; onRoomViewStoreUpdate keeps it un-pinned while the list shows (Phase 8d).
-            initialEventId: undefined,
+            // Anchor the live timeline to the last-viewed match (steppingTarget, set to the match we are returning
+            // from) so reopening the results list leaves the conversation on the message the user was just reading —
+            // not jumped to the first result (a stale-pin resurrection) nor to the live bottom/latest message (what
+            // un-pinning did). onRoomViewStoreUpdate keeps it pinned there while the list shows (search Phase 8d2).
+            initialEventId: SearchSessionStore.instance.steppingTarget ?? undefined,
             isInitialEventHighlighted: false,
         }));
-        // Drop the focused event the last stepping jump left behind so the live timeline un-pins in the store too.
+        // Clear the focused event in the STORE (not our local anchor) so a later click on the same result still
+        // registers in the result-click clear gate. resetFocusedEvent records it as the durable steppingTarget first,
+        // so the gate stays guarded while its async no-event ViewRoom is in flight.
         this.resetFocusedEvent();
     };
 
