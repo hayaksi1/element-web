@@ -6,6 +6,7 @@
 node_modules
 /.npmrc
 /*.log
+scratchpad/*.log
 package-lock.json
 .DS_Store
 **/.idea
