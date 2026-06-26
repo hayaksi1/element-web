@@ -18,8 +18,8 @@ hidden and not surfaced in search:
 - UI: clickable timeline **date separators** (chevron + "Jump to date") → `DateSeparatorContextMenuView` menu
   (Last week / Last month / Beginning / custom native `<input type=date>`), plus a **`/jumptodate YYYY-MM-DD`** slash command.
 - Gate: labs flag **`feature_jump_to_date`** (default **`false`**, [Settings.tsx:550](apps/web/src/settings/Settings.tsx#L550))
-  + `ServerSupportUnstableFeatureController` (MSC3030 `org.matrix.msc3030[.stable]`, stable v1.6) which **forces the value
-  to `false` when the server lacks MSC3030** (`getValueOverride` → `forcedValue`).
+    - `ServerSupportUnstableFeatureController` (MSC3030 `org.matrix.msc3030[.stable]`, stable v1.6) which **forces the value
+      to `false` when the server lacks MSC3030** (`getValueOverride` → `forcedValue`).
 - SDK (matrix-js-sdk 41.8.0): `timestampToEvent(roomId: string, timestamp: number, dir: Direction): Promise<{event_id: string; origin_server_ts: number}>`;
   `enum Direction { Backward="b", Forward="f" }`.
 - Offline-safe date control already exists:
@@ -47,6 +47,7 @@ from-scratch build. Mirrors Phase 1 (a real feature hidden behind a default-off 
 ## 2. Slice 1 — Jump-to-date in search (design)
 
 ### Architecture rationale (all verified)
+
 - **Reuse, don't rebuild.** Extract `pickDate`'s body into a shared util `jumpToDateInRoom(roomId, ts)`; the search
   control reuses the existing dumb shared Views (`DateSeparatorContextMenuView` + `DateSeparatorDatePickerView`) driven
   by a `DateSeparatorViewModel` instance for the current room (it already implements the shared
@@ -78,16 +79,19 @@ from-scratch build. Mirrors Phase 1 (a real feature hidden behind a default-off 
   renders-when-enabled / hidden-when-disabled / picking a date dispatches ViewRoom with the resolved event_id.
 
 ### i18n
+
 Reuse `room|jump_to_date`, `room|jump_to_date_beginning`, `room|jump_to_date_prompt`, `action|go`. Add one key for the
 search calendar button label (e.g. `room|search|jump_to_date_button`).
 
 ### Verification
+
 Jest via `scratchpad/webjest.sh` (allowlist incl. `matrix-js-sdk` + `@element-hq/web-shared-components`); shared
 component changes (none expected beyond reuse) via vitest. `tsc --noEmit` (only the 4 pre-existing vendored
 matrix-js-sdk errors), eslint `--max-warnings 0`, prettier, `i18n:lint`. **Not verifiable here:** real MSC3030 server
 round-trip on a live desktop build (unit tests mock `timestampToEvent`).
 
 ### Risks / deferred
+
 - Mid-search date pick relies on the slice-6 clear-gate; covered by a test that dispatches ViewRoom while in Search.
 - Combining `from:` + date into one query ("from Alice in March") is **Phase 3 slice 2+**, not slice 1 (slice 1 is a
   pure timeline teleport, matching the plan's "calendar teleports timeline").
@@ -107,6 +111,7 @@ local) leg cannot filter at query time so it **over-fetches** then **post-filter
 filter survives cross-room match-stepping remounts.
 
 **Backend (`Searching.ts`):**
+
 - `senders?: string[]` threaded through every search seam: `eventSearch` → `eventIndexSearch` →
   `{serverSideSearchProcess, localSearchProcess, chainSearchProcess, combinedSearch}` → `serverSideSearch`/`localSearch`.
 - Homeserver: `serverSideSearch` sets `filter.senders` (rides in the stored `_query` body → server-side pagination
@@ -124,6 +129,7 @@ filter survives cross-room match-stepping remounts.
   backend `count` vs loaded `matches.length` diverging — sender filter is just another reason).
 
 **State (`SearchSessionStore` + `SearchInfo` + `RoomView`):**
+
 - `senders?` added to `SearchSessionParams` (canonical, survives remount) + `SearchInfo` (the render mirror). `start()`
   spreads it; `updateResults()` preserves it.
 - `RoomView.onSearch(term, scope, senders = this.state.search?.senders)` threads senders to `eventSearch` + `start` +
@@ -133,6 +139,7 @@ filter survives cross-room match-stepping remounts.
 - Plumbed `onSearchSendersChange` + `searchSenders` down RoomView → `RightPanel` → `RoomSummaryCardView` → the control.
 
 **UI (MVVM v2):**
+
 - `apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.ts` (extends shared `BaseViewModel`) — owns the
   candidate catalogue: `room.getJoinedMembers()` minus the current user (`room.myUserId`), sorted by display name.
 - `apps/web/src/components/views/right_panel/RoomSearchSenderFilter.tsx` — Compound `Menu` of `CheckboxMenuItem`s
@@ -159,6 +166,7 @@ would need threading `inProgress` down the RightPanel chain). PostHog interactio
 room shows a long checkbox list) — future enhancement.
 
 ## 4. Slice 3 (next) — Phase 4 searchable media tabs, or Phase 3 combinations
+
 Per the master plan: Phase 3's structured filters (jump-to-date slice 1 + sender slice 2) are done. Next per
 `search-improvement-plan.md` §5 is **Phase 4** (split `FilePanel` into searchable Media/Files/Links/Music/Voice tabs;
 needs INDEX_VERSION bump + re-backfill to index media filenames). Combining `from:` + jump-to-date + term into one query

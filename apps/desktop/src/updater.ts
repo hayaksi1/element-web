@@ -14,7 +14,7 @@ import path from "node:path";
 import { getSquirrelExecutable } from "./squirrelhooks.js";
 import { _t } from "./language-helper.js";
 import { initialisePromise } from "./ipc.js";
-import { getBrand } from "./config.js";
+import { getConfig } from "./config.js";
 
 const UPDATE_POLL_INTERVAL_MS = 60 * 60 * 1000;
 const INITIAL_UPDATE_DELAY_MS = 30 * 1000;
@@ -188,7 +188,7 @@ export async function available(): Promise<boolean> {
             initialisePromise.then(() => {
                 ipcMain.emit("showToast", {
                     title: _t("eol|title"),
-                    description: _t("eol|no_more_updates", { brand: getBrand() }),
+                    description: _t("eol|no_more_updates", { brand: getConfig().brand }),
                 });
             });
             console.warn("Auto update not supported, macOS version too old");
@@ -199,7 +199,7 @@ export async function available(): Promise<boolean> {
             initialisePromise.then(() => {
                 ipcMain.emit("showToast", {
                     title: _t("eol|title"),
-                    description: _t("eol|warning", { brand: getBrand() }),
+                    description: _t("eol|warning", { brand: getConfig().brand }),
                 });
             });
         }
@@ -212,7 +212,7 @@ export async function available(): Promise<boolean> {
             initialisePromise.then(() => {
                 ipcMain.emit("showToast", {
                     title: _t("updater|not_writable_title"),
-                    description: _t("updater|not_writable_description", { brand: getBrand() }),
+                    description: _t("updater|not_writable_description", { brand: getConfig().brand }),
                 });
             });
             console.warn("Auto update not supported, app is installed in a non-writable location");

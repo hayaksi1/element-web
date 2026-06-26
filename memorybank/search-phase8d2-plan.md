@@ -11,11 +11,13 @@
 > 8d2) → questioned the architecture per systematic-debugging Phase 4.5.
 
 ## Root cause (Opus main-loop trace)
+
 `this.state.initialEventId` is the prop that drives `TimelinePanel`'s scroll position
 ([RoomView.tsx render, eventId={this.state.initialEventId}](../apps/web/src/components/structures/RoomView.tsx)).
 The results-list overlay (`RoomSearchResults`) is a **bounded** overlay (Phase 7) — the live timeline shows behind
 and below it — so where that timeline sits is user-visible. The list-shown branch in `onRoomViewStoreUpdate` set
 `initialEventId`:
+
 - pre-8d: from `getInitialEventId() ?? this.state.initialEventId` → a background emission resurrected a **stale
   earlier match** → jumped to the FIRST-clicked result.
 - 8d: forced to `undefined` → **un-pinned** the timeline → it fell to the live bottom → jumped to the **LATEST
@@ -27,6 +29,7 @@ leaves the conversation put. That value is already tracked durably as `SearchSes
 `resetFocusedEvent`; reset ONLY by `start()`/`clear()`).
 
 ## The fix (RoomView.tsx)
+
 1. `onRoomViewStoreUpdate` list-shown branch ([~:767-779](../apps/web/src/components/structures/RoomView.tsx#L767)):
    `const searchAnchorEventId = SearchSessionStore.instance.steppingTarget ?? undefined;` and set
    `newState.initialEventId = searchAnchorEventId` (was `undefined`). Stable across background emissions (same value
@@ -42,7 +45,9 @@ and the `steppingTarget` lifecycle — so the 8b/8c "search resets itself" fix i
 STORE's `getInitialEventId()` + `steppingTarget`, not `state.initialEventId`.
 
 ## TDD (RoomView-test "in-room search match stepping")
+
 Rewrote the two 8d tests (which asserted the now-wrong `initialEventId === undefined`) + added one:
+
 - "keeps the live timeline anchored to the last-viewed match when returning to the results list (8d2)" — click
   `$older`, Back → `state.initialEventId === "$older"` (RED pre-fix: `undefined`).
 - "keeps the conversation on the last-viewed match when a background update races returning to the list (8d2)" —
@@ -53,13 +58,15 @@ Rewrote the two 8d tests (which asserted the now-wrong `initialEventId === undef
   the `undefined` pin drove a crashing re-render path — and is clean post-fix.)
 
 ## Results
+
 RoomView-test 84/84 (incl. 3 8d2 tests; also updated 6 stale full-component snapshots that embed the Phase 8d
 header Search button — fc04b14 updated RoomHeader-test.snap but not these; net diff = +6 `aria-label="Search"`,
-`Chat` +1/-1 re-serialised, nothing else). RoomSearch*/SearchSessionStore/RoomHeader-test 153/153. prettier ✓,
+`Chat` +1/-1 re-serialised, nothing else). RoomSearch\*/SearchSessionStore/RoomHeader-test 153/153. prettier ✓,
 eslint ✓, tsc apps/web ✓ (only the 4 pre-existing matrix-js-sdk 41.8.0 errors). Build log:
 scratchpad/build-macos-phase8d2.log.
 
 ## Verify on packaged build
+
 Reproduce the user's flow: search → click a result (jumps to it) → click the search box again → the conversation
 must STAY on that message (not jump to the latest message and not to the first result). Reinstall to
 /Applications and confirm the new webapp.asar md5 differs from `830de88f…` and contains `searchAnchorEventId`.

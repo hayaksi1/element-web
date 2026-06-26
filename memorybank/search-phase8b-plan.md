@@ -35,6 +35,7 @@ the durable target or it gets nulled right back inside the window.
 ## The fix — a durable navigation guard (`steppingTarget`) alongside the existing one-shot flag
 
 `SearchSessionStore.ts`:
+
 - New `private steppingTargetEventId: string | null` + getter `get steppingTarget()` + `clearSteppingTarget()`.
 - `beginSteppingJump(eventId: string | null)` now records the pinned event id (in addition to the boolean, which is
   KEPT, still consumed once, still used by the **edit gate** `isSteppingJump()` — unchanged behaviour).
@@ -42,6 +43,7 @@ the durable target or it gets nulled right back inside the window.
   (so it survives the return-to-results re-mount/re-fire).
 
 `RoomView.tsx`:
+
 - Clear gate now also requires `getInitialEventId() !== SearchSessionStore.instance.steppingTarget`. A focused event
   equal to the target is OUR navigation (the match we stepped to, or the event still pinned during the return window)
   → gate skips, immune to the flag being consumed early. `!wasSteppingJump` kept (belt-and-suspenders + still resets
@@ -51,14 +53,14 @@ the durable target or it gets nulled right back inside the window.
   re-click** of the previously-stepped/started event still ends the search (keeps the "re-click ends search" and
   "ends search when clicking the start event" tests green).
 - `onActivateSearchMatch` → `beginSteppingJump(match.eventId)`; `resetFocusedEvent` → `beginSteppingJump(<the event
-  being cleared from>)`.
+being cleared from>)`.
 
 `RoomSearchNavigationViewModel.activate` → `beginSteppingJump(this.store.matches[index].eventId)`.
 
 ## TDD / verification
 
-- New RED→GREEN test in RoomView-test "in-room search match stepping" describe: *keeps the search alive when a
-  RoomViewStore update races the return-to-results transition (dropdown reset bug)* — steps into a match, clicks Back
+- New RED→GREEN test in RoomView-test "in-room search match stepping" describe: _keeps the search alive when a
+  RoomViewStore update races the return-to-results transition (dropdown reset bug)_ — steps into a match, clicks Back
   to results (clearing ViewRoom held async via microtask-only flush), then models two interloping emissions
   (`consumeSteppingJump()` + `roomViewStore.emit(UPDATE_EVENT)`) and asserts the session survives. Confirmed RED on
   pre-fix code (`state.search` undefined), GREEN after. Drains the deferred timer at the end so it can't leak.
@@ -66,16 +68,16 @@ the durable target or it gets nulled right back inside the window.
   `consumeSteppingJump()`; **persists** across `updateResults`; resets on `start()`/`clear()`.
 - Updated all `beginSteppingJump()` callers (3 src + 2 test) to pass the event id.
 - Full search surface GREEN: **247 search-related jest** (143 across RoomView/SearchSessionStore/nav-VM/header/results
-  + 104 across the other 10 search suites). prettier ✓, eslint ✓ (changed files), tsc apps/web ✓ (only the 4
-  pre-existing matrix-js-sdk 41.8.0 errors), shared-components tsc ✓. No new i18n strings.
+    - 104 across the other 10 search suites). prettier ✓, eslint ✓ (changed files), tsc apps/web ✓ (only the 4
+      pre-existing matrix-js-sdk 41.8.0 errors), shared-components tsc ✓. No new i18n strings.
 - Diff: +219/-28 across RoomView.tsx, SearchSessionStore.ts, RoomSearchNavigationViewModel.ts + 2 tests (+ the 2
   tsconfig files below).
 - Build: `scratchpad/build-macos.sh` (local apps/web webpack → stage → asar → electron-builder, arm64 unsigned).
 
 ## Side task — IDE "Problems" (tsconfig TS5096)
 
-VSCode flagged `apps/web/tsconfig.json` and `packages/shared-components/tsconfig.json`: *"Option
-'allowImportingTsExtensions' can only be used when noEmit/emitDeclarationOnly is set."* Both packages set
+VSCode flagged `apps/web/tsconfig.json` and `packages/shared-components/tsconfig.json`: _"Option
+'allowImportingTsExtensions' can only be used when noEmit/emitDeclarationOnly is set."_ Both packages set
 `allowImportingTsExtensions: true` with `declaration: true` and no `noEmit`. They are type-checked only via
 `tsc --noEmit` (CLI passes the flag) and bundled by webpack/vite — `tsc` never emits — but the editor reads
 `tsconfig.json` directly without the CLI flag, hence the error. Reproduced TS5096 deterministically in scratchpad and
@@ -84,6 +86,7 @@ The remaining `node_modules/@vector-im/compound-web/tsconfig.json` errors are th
 extending an uninstalled `@tsconfig/vite-react`) — not fixable in-repo, harmless to our build.
 
 ## Follow-ups (defer)
+
 - The edit clear gate (RoomView.tsx ~1370) still uses the one-shot `isSteppingJump()` peek. It was left as-is (its
   test passes; no edit bug reported) — it has the same theoretical early-consume race but a far smaller window. If an
   edit-during-cross-room-step bug ever surfaces, migrate it to the same durable `steppingTarget` comparison.

@@ -4,7 +4,7 @@
 > Trigger: user reports on the packaged macOS build, after Phase 6/7 landed the Telegram-style dropdown:
 > (1) clicking a result row "didn't go properly which one i wanted to go to" and "doesn't show which one i clicked";
 > (2) "can't see the dropdown menu again after i click one of the result. When i click Enter again it goes to the next
->     search result. When i click the search box again it shows the dropdown again."
+> search result. When i click the search box again it shows the dropdown again."
 >
 > User decision (AskUserQuestion, session 30): **Option B — "Jump & step, easy return"** for the post-click behaviour
 > (clicking a row jumps into the conversation with a CORRECT "k of N" counter; clicking the search box — or the
@@ -69,6 +69,7 @@ Bug-2 tracer, and a Firecrawl Telegram-UX researcher. Bug 1 claim survived refut
 - Build: `scratchpad/build-macos.sh` (local apps/web webpack → stage → asar → electron-builder, arm64 unsigned).
 
 ## Follow-ups (defer)
+
 - Optional: highlight the last-opened row when the list is reopened (Option B leaves the counter as the indicator).
 - Telegram-faithful "persistent list" (Option A) remains a possible future redesign if the top-overlay layout is
   reworked into a side panel.

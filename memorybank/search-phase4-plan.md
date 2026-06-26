@@ -7,8 +7,8 @@
 
 ## 0. CRITICAL premise correction (verified by code, not assumption)
 
-`search-improvement-plan.md` §5 Phase 4 claims: *"today `isValidEvent` excludes media-only events, so
-filenames/captions aren't indexed → needs INDEX_VERSION bump + full local Seshat re-backfill."*
+`search-improvement-plan.md` §5 Phase 4 claims: _"today `isValidEvent` excludes media-only events, so
+filenames/captions aren't indexed → needs INDEX_VERSION bump + full local Seshat re-backfill."_
 
 **This is FALSE.** Verified:
 
@@ -24,7 +24,7 @@ filenames/captions aren't indexed → needs INDEX_VERSION bump + full local Sesh
 - Bumping `INDEX_VERSION` alone would do **nothing** anyway — there's no version-comparison code
   ([EventIndexPeg.ts:88-99](apps/web/src/indexing/EventIndexPeg.ts#L88-L99) only handles the `userVersion === 0`
   legacy case), so a forced re-backfill would itself need new migration code.
-- The one genuine gap (media *received* from clients using the filename/caption split, so `body`=caption and
+- The one genuine gap (media _received_ from clients using the filename/caption split, so `body`=caption and
   `filename`=realname → only the caption is indexed) can't be fixed cleanly: native Seshat indexes `body` only, so
   making the `filename` field searchable needs a **native Seshat (Rust/Hak) rebuild**, not a JS change.
 
@@ -40,6 +40,7 @@ Split the un-tabbed, un-searchable [FilePanel.tsx](apps/web/src/components/struc
 text-filterable tabs, reusing the existing TimelinePanel + EventIndex pagination/encryption machinery.
 
 **Tabs (v1):** `All · Media · Files · Music · Voice`. Classification (client-side, pure):
+
 - **Media** = `m.image` ∪ `m.video`
 - **Files** = `m.file`
 - **Music** = `m.audio` AND NOT `isVoiceMessage`
@@ -101,6 +102,7 @@ toward its start. Acceptable for v1; same shape as scrolling to find older media
    still pass).
 
 ## 4. Verification
+
 `pnpm -C apps/web test:unit` on the affected suites; `tsc --noEmit` (only the 4 pre-existing vendored matrix-js-sdk
 errors); eslint `--max-warnings 0`; prettier; `i18n:lint`. Then an adversarial-review workflow over the diff.
 
@@ -119,6 +121,7 @@ to the displayed list only — full window kept for pagination/scroll), `FilePan
 **Tabs:** All / Media / Files / Music / Voice. **Links deferred** (data source can't supply hyperlink-in-text events).
 
 **Review (5 lenses → 24 findings → adversarially verified):** 2 confirmed & fixed, 0 deferred, 20 refuted.
+
 - **FIXED (high/critical, 2 lenses):** TimelinePanel empty-state guard keyed off the UNFILTERED `this.state.events.length`,
   so a tab/search matching nothing rendered a blank panel instead of the "No files" empty state. Moved the filter
   computation above the guard; guard now checks the filtered list (regression test added: `eventFilter=()=>false` →
@@ -140,7 +143,8 @@ errors); eslint `--max-warnings 0` clean; prettier clean; i18n:lint clean. **Not
 round-trip / live media rendering in the tabs (unit tests use mocked timelines).
 
 ## 5. Deferred / follow-ups
+
 - **Links tab** (separate link-extraction data source).
 - **Native filename-field indexing** for split-format received media (needs Rust/Hak Seshat rebuild + re-backfill).
 - PostHog interaction metric for the media tabs (same upstream `@matrix-org/analytics-events` gap as stepper/jump/sender).
-- In-tab search currently filters only *loaded* events; a "search all media via Seshat" mode is a future enhancement.
+- In-tab search currently filters only _loaded_ events; a "search all media via Seshat" mode is a future enhancement.

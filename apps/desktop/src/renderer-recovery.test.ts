@@ -24,7 +24,7 @@ vi.mock("./language-helper.js", () => ({
 }));
 
 vi.mock("./config.js", () => ({
-    getBrand: (): string => "Element",
+    getConfig: (): { brand: string } => ({ brand: "Element" }),
 }));
 
 describe("decideRendererRecoveryAction", () => {

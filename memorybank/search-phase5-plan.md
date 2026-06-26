@@ -20,10 +20,11 @@
 3. **Corrupt-index health check (#32056)** + backfill completeness (#32266/#32168/#32307). → **Mostly already built
    in this fork** (the #33501 crawler circuit-breaker, the given-up-rooms set, `getIndexingStatus()` →
    `{indexing, indexed, errored}`, `EventIndexPanel` already surfaces `EventIndexPeg.error` + a reset path). The
-   narrow remaining gap = surfacing index *un-readiness* at **search time** (vs only in settings). Queued as a future
+   narrow remaining gap = surfacing index _un-readiness_ at **search time** (vs only in settings). Queued as a future
    slice rather than half-built.
 
 ### Decision: offline web search stays Desktop-only (documented)
+
 Element-web must run with **no public internet access and no remote scripts/assets** (CLAUDE.md §2). A portable
 encrypted-search engine for the web build would mean packaging a full SQLite-WASM / tantivy-WASM index + crawler
 locally, persisting an encrypted index in the browser (OPFS/IndexedDB), and re-implementing Seshat's crawl/backfill
@@ -37,20 +38,22 @@ encrypted search becomes a product requirement.
 ## 1. Slice 1 — relevance-vs-recency order toggle (design)
 
 ### What it is
+
 A small **Recent / Relevant** order control in the in-room search header (a Compound `Menu` of two `RadioMenuItem`s
 behind an `IconButton`), sitting beside the existing `from:`/sender filter and jump-to-date calendar. Default
 **Most recent** (preserves today's behaviour, offline-safe). Picking **Most relevant** re-runs the active search
 asking the backend to order by relevance.
 
 ### The correctness crux (verified by the Understand workflow)
+
 Result-list order is decided differently per search path:
 
-| Path | How order is set | Client re-sort? | Honours Rank? |
-|---|---|---|---|
-| **server-only** (no Seshat, or known-non-E2EE single room) | homeserver `order_by` in the request body | **No** — `processRoomEventsSearch` appends in array order | **YES** via `order_by: SearchOrderBy.Rank` |
-| **Seshat-only single room** (encrypted — the common case) | Seshat `ISearchArgs.order_by_recency` | **No** — pass-through | **YES** via `order_by_recency: false` (Seshat/tantivy then orders by its BM25 relevance score) |
-| **combined** (All-rooms) | both legs merged client-side | **YES** — `combineEventSources` sorts by `compareEvents` (recency); the sliding-window cache (`combineEvents`/`compareOldestEvents`) pages the next leg by *oldest timestamp* and is only valid for recency-sorted legs | **NO** — would silently corrupt cross-page order |
-| **chain** (upgraded-room predecessors) | k-way merge | **YES** — `mergeChainResults` re-sorts by `compareEvents` | **NO** — same invariant |
+| Path                                                       | How order is set                          | Client re-sort?                                                                                                                                                                                                         | Honours Rank?                                                                                  |
+| ---------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **server-only** (no Seshat, or known-non-E2EE single room) | homeserver `order_by` in the request body | **No** — `processRoomEventsSearch` appends in array order                                                                                                                                                               | **YES** via `order_by: SearchOrderBy.Rank`                                                     |
+| **Seshat-only single room** (encrypted — the common case)  | Seshat `ISearchArgs.order_by_recency`     | **No** — pass-through                                                                                                                                                                                                   | **YES** via `order_by_recency: false` (Seshat/tantivy then orders by its BM25 relevance score) |
+| **combined** (All-rooms)                                   | both legs merged client-side              | **YES** — `combineEventSources` sorts by `compareEvents` (recency); the sliding-window cache (`combineEvents`/`compareOldestEvents`) pages the next leg by _oldest timestamp_ and is only valid for recency-sorted legs | **NO** — would silently corrupt cross-page order                                               |
+| **chain** (upgraded-room predecessors)                     | k-way merge                               | **YES** — `mergeChainResults` re-sorts by `compareEvents`                                                                                                                                                               | **NO** — same invariant                                                                        |
 
 So the minimal **correct** scope: honour Rank **only on the two single-source pass-through paths**, and keep the
 merged paths (All-rooms + chain) on Recent. This is done **by construction**: `order` is threaded only into the
@@ -63,7 +66,9 @@ merge-by-rank / page-by-lowest-rank-frontier redesign of `combineEvents` + `merg
 of backend order, so **stepping stays chronological even under Rank** — by design; left unchanged.
 
 ### Backend threading (`Searching.ts`) — mirror of the `senders` param
+
 Add `order: SearchOrderBy = SearchOrderBy.Recent` to, and forward it down, only the single-source legs:
+
 - `eventSearch` (entry) → `serverSideSearchProcess` (no-index branch) **and** `eventIndexSearch`.
 - `eventIndexSearch` → `serverSideSearchProcess` (seshat=0 branch) **and** `localSearchProcess` (single Seshat room).
   **NOT** into `chainSearchProcess` / `combinedSearch`.
@@ -76,6 +81,7 @@ Add `order: SearchOrderBy = SearchOrderBy.Recent` to, and forward it down, only 
   on the merged paths pending a merge redesign.
 
 ### State threading (mirror of `senders`)
+
 - `SearchInfo.order?: SearchOrderBy` (`Searching.ts`, the per-room-view render mirror).
 - `SearchSessionParams.order?: SearchOrderBy` (`SearchSessionStore.ts`, session identity → survives remounts,
   preserved verbatim by `updateResults`).
@@ -83,6 +89,7 @@ Add `order: SearchOrderBy = SearchOrderBy.Recent` to, and forward it down, only 
   field omitted here is silently dropped on a cross-room stepping remount.
 
 ### Re-search seam + mount chain (mirror of `senders`)
+
 - `RoomView.onSearch(term, scope, senders, order = this.state.search?.order ?? SearchOrderBy.Recent)` → thread into
   `eventSearch`, `SearchSessionStore.start`, and `setState`. `onSearchScopeChange`/`onSearchSendersChange`/
   `onSearchChange` call `onSearch` positionally and so preserve `order` from the session automatically.
@@ -91,7 +98,9 @@ Add `order: SearchOrderBy = SearchOrderBy.Recent` to, and forward it down, only 
   (IProps) → the control, exactly as `onSearchSendersChange`/`searchSenders`.
 
 ### UI (MVVM v2, no VM needed — two static options)
+
 New dumb View `apps/web/src/components/views/right_panel/RoomSearchOrderToggle.tsx`:
+
 - Props `{ order: SearchOrderBy; onSearchOrderChange: (order) => void }` — fully controlled (order owned upstream).
 - Compound `Menu` (title = `room|search|order_toggle_label`) + two `RadioMenuItem`s (Most recent / Most relevant),
   `IconButton` trigger (`chevron-up-down` icon, `size="28px"`, 20px icon) with an `indicator` dot when
@@ -101,11 +110,13 @@ New dumb View `apps/web/src/components/views/right_panel/RoomSearchOrderToggle.t
   (unlike the sender filter's member list).
 
 ### i18n (new `room|search|*` keys)
+
 `order_toggle_button` ("Sort results"), `order_toggle_label` ("Sort search results"),
 `order_recent` ("Most recent"), `order_relevant` ("Most relevant"). Run `pnpm -C apps/web run i18n:sort`. No
 shared-components `dist` rebuild needed (apps/web-local keys; reads strings from `src`).
 
 ### Tests (TDD RED→GREEN)
+
 - `Searching-test.ts` (new describe): server body `order_by` = `Rank` when requested / `Recent` by default;
   `order_by_recency` = `false` under Rank on the Seshat single-room path / `true` by default; **guard** — an
   all-rooms search keeps `Recent` + `order_by_recency: true` even when `Rank` is requested (merged-path deferral).
@@ -116,12 +127,14 @@ shared-components `dist` rebuild needed (apps/web-local keys; reads strings from
   `order: Rank`, mirrored onto render state.
 
 ### Verification
+
 Jest via `scratchpad/webjest.sh`; `tsc --noEmit` (only the 4 pre-existing vendored matrix-js-sdk errors), eslint
 `--max-warnings 0`, prettier, `i18n:lint`. **Not verifiable here:** a real homeserver `order_by: rank` round-trip
 and a real Seshat `order_by_recency: false` relevance ordering on a live desktop build (unit tests assert the
 request params, not the backend's actual ordering).
 
 ### Risks / deferred (called out for the reviewer)
+
 - **All-rooms + chain stay recency** (documented limitation). Honouring Rank there needs a merge redesign — deferred.
 - **`RoomSearchView` render loop** reverses the array positionally to lay out a chronological timeline and merges
   adjacent contexts; a rank order is not a contiguous timeline, so grouping may look slightly off under Rank on the
@@ -132,6 +145,7 @@ request params, not the backend's actual ordering).
   meaning of the flag). Verified by API semantics + Seshat = BM25 full-text backend; not unit-testable here.
 
 ## 2. Next (future slices)
+
 - **5.2 — search-time index-health surfacing (#32056):** distinguish "index still building / disabled / corrupt"
   from "genuinely no matches" in the search results UI (today only settings shows `EventIndexPeg.error`).
 - **5.3 — Rank on merged paths:** merge-by-rank / page-by-lowest-rank-frontier redesign of `combineEvents` +

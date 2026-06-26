@@ -20,17 +20,19 @@ initial Search-mode view — complement, not replace.
 Jest (web) with the `transformIgnorePatterns` matrix-js-sdk workaround.
 
 ## Global Constraints
+
 - MVVM v2: ViewModel in `apps/web/src/viewmodels/`, dumb View in `packages/shared-components/`, `useViewModel`.
 - Offline-only; Compound design system; named exports; tests with every change.
 - Do NOT regress the existing Search-mode results list (`RoomSearchView`) or `onCancelSearchClick`.
 - Reuse the existing live-timeline jump path: `dispatch(Action.ViewRoom {room_id, event_id, highlighted:true,
-  scroll_into_view:true})`. Do not build new back-pagination.
+scroll_into_view:true})`. Do not build new back-pagination.
 
 ---
 
 ## Current reality (verified this session)
+
 - `SearchInfo` (Searching.ts:1065-1102): `searchId, roomId, term, scope, promise, abortController, inProgress,
-  count, error`. No cursor.
+count, error`. No cursor.
 - `RoomView.onSearch` (1797-1816) sets `timelineRenderingType=Search` + `search`. `onSearchUpdate` (1822-1831)
   merges `count`. `onCancelSearchClick` (1957-1967) clears both.
 - Header `RoomSearchAuxPanel` mounted when `timelineRenderingType===Search` (2437-2446); shows `searchInfo.count`.
@@ -50,17 +52,18 @@ prettier clean). **Documented limitations carried to slice 2** (deliberate, not 
 status-bar stay in search-mode chrome during stepping; a permalink click mid-stepping doesn't auto-exit search (use
 ✕); no `.stories.tsx` yet (storybook visual-regression baselines are CI-docker-only — add when touching CI).
 
-
-
 Delivers: counter + up/down arrows in the header; pressing an arrow jumps the live conversation to the
 next/prev match (highlighted), with the search header persisting so stepping continues. Results list kept.
 
 ### Task 1 — `SearchMatch` type + `extractSearchMatches` + `SearchInfo` cursor fields
+
 **Files:**
+
 - Modify: `apps/web/src/Searching.ts` (add type, helper, extend `SearchInfo`)
 - Test: `apps/web/test/unit-tests/Searching-test.ts` (add `describe("extractSearchMatches")`)
 
 **Produces:**
+
 - `export interface SearchMatch { roomId: string; eventId: string; }`
 - `export function extractSearchMatches(results: ISearchResults): SearchMatch[]` — iterates
   `results.results`, pushes `{roomId, eventId}` from `context.getEvent()`; skips events missing id/roomId;
@@ -73,40 +76,48 @@ next/prev match (highlighted), with the search header persisting so stepping con
 - [ ] Run → PASS. Commit folded into slice.
 
 ### Task 2 — `RoomSearchNavigationViewModel` (cursor + actions)
+
 **Files:**
+
 - Create: `apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.ts`
 - Test: `apps/web/test/unit-tests/viewmodels/search/RoomSearchNavigationViewModel-test.ts`
 
 **Interfaces — Produces:**
+
 ```ts
 export interface RoomSearchNavigationSnapshot {
-    current: number;      // 1-based position of focused match, 0 if none active
-    total: number;        // matches.length
+    current: number; // 1-based position of focused match, 0 if none active
+    total: number; // matches.length
     canPrevious: boolean; // index > 0
-    canNext: boolean;     // index < total-1
+    canNext: boolean; // index < total-1
 }
 export interface RoomSearchNavigationProps {
     onActivateMatch(match: SearchMatch, index: number): void;
 }
-export class RoomSearchNavigationViewModel
-    extends BaseViewModel<RoomSearchNavigationSnapshot, RoomSearchNavigationProps> {
+export class RoomSearchNavigationViewModel extends BaseViewModel<
+    RoomSearchNavigationSnapshot,
+    RoomSearchNavigationProps
+> {
     public constructor(props: RoomSearchNavigationProps);
     public setMatches(matches: SearchMatch[]): void; // resets index to -1, updates snapshot, no activation
-    public readonly next: () => void;       // clamp index+1, snapshot, onActivateMatch(match,index)
-    public readonly previous: () => void;   // clamp index-1, snapshot, onActivateMatch(match,index)
+    public readonly next: () => void; // clamp index+1, snapshot, onActivateMatch(match,index)
+    public readonly previous: () => void; // clamp index-1, snapshot, onActivateMatch(match,index)
 }
 ```
+
 Behaviour: `current = index < 0 ? 0 : index+1`. `next()` from index -1 → 0 (first activation). No-op (no
 activation) when clamped at an end. `setMatches([])` → total 0, both arrows disabled.
 
 - [ ] RED tests: initial snapshot (0/0, both false); setMatches(3) → 0/3, canNext true canPrevious false;
-  next from -1 activates index 0, snapshot 1/3; next×2 → 3/3 canNext false; next at end → no extra
-  onActivateMatch call; previous symmetric; setMatches resets index.
+      next from -1 activates index 0, snapshot 1/3; next×2 → 3/3 canNext false; next at end → no extra
+      onActivateMatch call; previous symmetric; setMatches resets index.
 - [ ] Implement extending BaseViewModel; arrow-fn actions; `this.snapshot.set(...)`; call `this.props.onActivateMatch`.
 - [ ] GREEN.
 
 ### Task 3 — `SearchMatchNavigation` dumb View
+
 **Files:**
+
 - Create: `packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.tsx`
 - Test: `packages/shared-components/src/room/search/SearchMatchNavigation/SearchMatchNavigation.test.tsx`
 - Modify: `packages/shared-components/src/index.ts` (export the View + its snapshot/actions/VM types)
@@ -119,50 +130,57 @@ disabled per `canPrevious`/`canNext`, `aria-label` "Previous match"/"Next match"
 `total === 0`.
 
 - [ ] RED test: render with MockViewModel snapshot {current:2,total:5,canPrevious:true,canNext:true} → shows
-  "2 / 5", both buttons enabled; click up → `previous` called; click down → `next` called; total 0 → renders nothing;
-  canNext false → next button disabled.
+      "2 / 5", both buttons enabled; click up → `previous` called; click down → `next` called; total 0 → renders nothing;
+      canNext false → next button disabled.
 - [ ] Implement using Compound `IconButton` + chevron icons; `useViewModel(vm)`.
 - [ ] GREEN.
 
 ### Task 4 — Wire into `RoomSearchAuxPanel` header
+
 **Files:**
+
 - Modify: `apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx` (accept + render `navigationVm`)
 - Test: `apps/web/test/unit-tests/components/views/rooms/RoomSearchAuxPanel-test.tsx` (extend/create)
 
 **Consumes:** the View from Task 3 + a `RoomSearchNavigationViewModel` instance via new optional prop
 `navigationVm?: ViewModel<RoomSearchNavigationSnapshot, …>`.
+
 - [ ] RED test: pass a mock nav VM with total>0 → counter + arrows render in the summary; no VM → unchanged.
 - [ ] Implement: render `<SearchMatchNavigation vm={navigationVm} />` beside the count when provided.
 - [ ] GREEN.
 
 ### Task 5 — `RoomView` integration (the decoupling + activation)
+
 **Files:**
+
 - Modify: `apps/web/src/components/structures/RoomView.tsx`
 - Test: extend `apps/web/test/unit-tests/components/structures/RoomView-test.tsx` where feasible.
 
 Changes:
+
 1. Construct `this.searchNavVm = new RoomSearchNavigationViewModel({ onActivateMatch: this.onActivateSearchMatch })`
    (lazily on first search; dispose in `componentWillUnmount`).
 2. `onSearchUpdate`: when `searchResults` present, `this.searchNavVm.setMatches(extractSearchMatches(searchResults))`
    and store `matches` on `state.search`.
 3. `onActivateSearchMatch = (match, index) => { setState({ timelineRenderingType: Room,
-   search: {...search, currentMatchIndex: index} }); dispatch(ViewRoom {room_id: match.roomId,
-   event_id: match.eventId, highlighted: true, scroll_into_view: true, metricsTrigger: undefined}); }`.
+search: {...search, currentMatchIndex: index} }); dispatch(ViewRoom {room_id: match.roomId,
+event_id: match.eventId, highlighted: true, scroll_into_view: true, metricsTrigger: undefined}); }`.
 4. Header: mount `RoomSearchAuxPanel` (with `navigationVm={this.searchNavVm}`) whenever `this.state.search`
    is defined — NOT only when `timelineRenderingType===Search`. Body still renders `RoomSearchView` only when
    `timelineRenderingType===Search`; once stepping starts it's Room mode → live timeline shows.
 5. `onCancelSearchClick`: also `this.searchNavVm.setMatches([])` (defensive) — keep clearing `search` + Room mode.
 
 - [ ] Add focused RoomView-test assertions where the suite allows (e.g. activating a match dispatches ViewRoom
-  with the right event_id + highlighted/scroll_into_view; header persists in Room mode while `search` set).
+      with the right event_id + highlighted/scroll_into_view; header persists in Room mode while `search` set).
 - [ ] Manually reason through the render glue (RoomView is large; glue convention mirrors electron-main).
 
 ### Task 6 — i18n + verify + adversarial review + commit
+
 - [ ] Add any new i18n keys (`room|search|previous_match`, `…|next_match`, counter aria) to `en_EN.json`;
-  run `matrix-gen-i18n` → no diff.
+      run `matrix-gen-i18n` → no diff.
 - [ ] `tsc`, `eslint --max-warnings 0`, `prettier --check` clean on all changed files.
 - [ ] Web Jest (via `scratchpad/webjest.sh`): Searching-test, RoomSearchNavigationViewModel-test,
-  RoomSearchAuxPanel-test, RoomView-test, SearchMatchNavigation.test (shared-components vitest) all green.
+      RoomSearchAuxPanel-test, RoomView-test, SearchMatchNavigation.test (shared-components vitest) all green.
 - [ ] Adversarial review (workflow) of the slice; apply real findings.
 - [ ] Commit: `feat(web): in-room search match stepping (k-of-N + live-timeline arrows) (search Phase 2 slice 1)`.
 
@@ -175,6 +193,7 @@ the **focused match's live tile** (the same `mx_EventTile_searchHighlight` span 
 existing `EventTile.highlights` → `HtmlHighlighter` path — no new render code.
 
 Files:
+
 - `Searching.ts`: new pure `extractSearchHighlights(results, term)` (enrich + longest-first sort, **non-mutating**,
   mirrors RoomSearchView) + `SearchInfo.highlights?: string[]`.
 - `MessagePanel.tsx`: new optional `searchHighlights` / `searchHighlightEventId` props; `getTilesForEvent` applies
@@ -188,7 +207,7 @@ Tests: `Searching-test` extractSearchHighlights (4, incl. non-mutation); `Messag
 no-leak (2). Full verify: tsc clean, 129 web Jest pass (Searching 34, MessagePanel 23, RoomView+TimelinePanel 72),
 eslint/prettier clean. No new i18n.
 
-**Documented limitation (deliberate, not a slice-2 regression):** a *malformed* edit (`m.replace` with missing/
+**Documented limitation (deliberate, not a slice-2 regression):** a _malformed_ edit (`m.replace` with missing/
 non-string `m.new_content.body`) that becomes a match is NOT re-keyed by `promoteReplacementContent` (its intentional
 #32356 blank-tile guard), so its match id is the edit id, which the live timeline never renders (SDK aggregates edits
 onto the original). Result: no live highlight for that match — **graceful** (no crash), and identical to slice 1's
@@ -234,8 +253,8 @@ nulls the mount when they run last — the leak itself is out of slice-3 scope.
 
 ## Slice 4 — Out-of-window / encrypted edge cases + predecessor-chain safety — ✅ DONE (session 21, TDD, adversarial-reviewed)
 
-**Scope decision (user, this session):** "Defer with design." The plan's one-liner *"All-rooms scope: arrows switch
-room before jumping"* turned out to be **architecturally infeasible as a slice**: RoomView is keyed by room id
+**Scope decision (user, this session):** "Defer with design." The plan's one-liner _"All-rooms scope: arrows switch
+room before jumping"_ turned out to be **architecturally infeasible as a slice**: RoomView is keyed by room id
 (`LoggedInView.tsx:737` → `<RoomView key={currentRoomId} />`), so any cross-room `ViewRoom` **unmounts/remounts**
 RoomView and destroys the in-instance search session (`searchNavVm` + `state.search`; there is no search store). The
 code even states the assumption: `RoomView.tsx:770-771` "the roomID will not change for the lifetime of the RoomView
@@ -248,7 +267,7 @@ instance." So slice 4 shipped the **safe, complete** edge-case half and re-scope
    upgraded predecessor rooms** (#32258, `getRoomSearchChain` → `eventIndexSearch`/server leg in `Searching.ts`), so
    its completed results can contain matches whose event lives in a **different (predecessor) room**. Slice-1's
    stepper assumed Room scope = current room only, so stepping into such a match would `dispatch(ViewRoom
-   {room_id: predecessorRoom})` → unmount the room-keyed RoomView → **lose the search session** (commonly an E2EE
+{room_id: predecessorRoom})` → unmount the room-keyed RoomView → **lose the search session** (commonly an E2EE
    upgraded room). **Fix:** `RoomView.onSearchUpdate` now filters the steppable match list to
    `m.roomId === this.getRoomId()`. Predecessor matches stay visible in the results list (`RoomSearchView`, which
    renders the full result set) but are excluded from the "k of N" **live** stepper. The common non-upgraded case
@@ -294,16 +313,16 @@ from the src change alone (no dist rebuild needed); and because apps/web jest re
 assertions were switched to `exact: false` (else they'd break in CI which rebuilds dist).
 
 **Review findings — applied (safe/valuable):** (a) CSS robustness — the original unscoped `$event-selected-color` bg was
-*identical to hover* (default group layout), *overridden by the mention yellow*, and *invisible in bubble*; fixed by
+_identical to hover_ (default group layout), _overridden by the mention yellow_, and _invisible in bubble_; fixed by
 reusing the proven `mx_EventTile_selected` treatment (bg + inset accent stroke) in the layout-scoped blocks. (b) test:
 pin the counter reset to "0 of N" after back-to-results; (c) test: active-tile test no longer passes `searchHighlights`
 (proves the tile mark depends solely on `searchHighlightEventId`); (d) accurate comment on the (belt-and-braces)
 `setMatches` in `onBackToSearchResults`.
 
-**Review finding — DEFERRED to Slice 6 (documented in code + here):** *stale `initialEventId` after back-to-results.*
+**Review finding — DEFERRED to Slice 6 (documented in code + here):** _stale `initialEventId` after back-to-results._
 After stepping then back-to-results, the RoomViewStore's initial event id still points at the last-stepped match and
 `getInitialEventId() ?? this.state.initialEventId` (onRoomViewStoreUpdate) keeps it sticky, so **re-clicking that exact
-same result is a no-op** (the result-click clear gate keys on an `initialEventId` *change*). The naive fix (clear
+same result is a no-op** (the result-click clear gate keys on an `initialEventId` _change_). The naive fix (clear
 `this.state.initialEventId`) is UNSAFE — the store still holds it, so the next store update would trip the gate and tear
 the search down. The correct fix is the result-click-gate rework Slice 6 performs when it lifts the search session out of
 RoomView. Workarounds today: step via arrows, click a different result, or ✕. (Medium-severity edge case; not a crash /
@@ -316,6 +335,7 @@ no data loss.)
 ### Original task plan (as executed)
 
 **User decisions (session 22, locked via AskUserQuestion):**
+
 - **Dual denominator → "Keep both, label stepper 'loaded'."** Show the results-list summary "N results found"
   (`searchInfo.count`, backend estimate) AND the stepper "k of N **loaded**" simultaneously — most honest. Stop
   hiding the summary while stepping.
@@ -329,6 +349,7 @@ no data loss.)
 on `!isSteppingSearchMatch`). The remaining list deliverable is the **"back to results" affordance**.
 
 ### Task A — Dual denominator: keep summary + label stepper "loaded"
+
 - Files: `apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx` (remove the `isSteppingMatch ? null :` branch so
   the `room|search|summary` text always renders when `count` defined; remove the now-unused `isSteppingMatch`);
   `packages/shared-components/src/i18n/strings/en_EN.json` key `room|search|match_position`
@@ -338,14 +359,16 @@ on `!isSteppingSearchMatch`). The remaining list deliverable is the **"back to r
   (`packages/shared-components`) "1 of N" → "1 of N loaded".
 
 ### Task B — "Back to results" affordance (return from live stepping to the results list)
+
 - New `RoomView.onBackToSearchResults` = setState `{ timelineRenderingType: Search, search:{...search,
-  currentMatchIndex: undefined} }` (keeps the session alive — distinct from `onCancelSearchClick` which clears it).
+currentMatchIndex: undefined} }` (keeps the session alive — distinct from `onCancelSearchClick` which clears it).
   Pass to `RoomSearchAuxPanel`; render a list `IconButton` (tooltip/aria `room|search|back_to_results`) only while
   `isSteppingMatch`. New app i18n key `room|search|back_to_results`.
 - TDD: RoomSearchAuxPanel test "shows back-to-results button while stepping, hidden otherwise; click fires callback";
   RoomView state-flip test where the suite allows (mirror slice-1/3 early-describe mount-guard convention).
 
 ### Task C — pcss for the active live tile (`mx_EventTile_searchHighlightActive`)
+
 - Thread "this tile is the focused search match" (`eventId === searchHighlightEventId`) from `MessagePanel.tsx`
   (getTilesForEvent, ~811) → `EventTile` → `EventTileDerivedState.ts` classnames (alongside `mx_EventTile_highlight`).
   pcss: `apps/web/res/css/views/rooms/_EventTile.pcss` new rule `mx_EventTile_searchHighlightActive` →
@@ -354,6 +377,7 @@ on `!isSteppingSearchMatch`). The remaining list deliverable is the **"back to r
   stepping. Add EventTileDerivedState assertion if the seam lands there.
 
 ### Wrap-up
+
 - i18n: `matrix-gen-i18n` no-diff (app + shared-components); tsc/eslint/prettier clean; full Jest via the
   `--transformIgnorePatterns` workaround; adversarial-review workflow; commit
   `feat(web): search stepping polish — back-to-results, dual-denominator, active-tile (Phase 2 slice 5)`.
@@ -363,9 +387,9 @@ on `!isSteppingSearchMatch`). The remaining list deliverable is the **"back to r
 
 ## Slice 6 — Cross-room / predecessor / all-rooms stepping via a `SearchSessionStore` — ✅ DONE (session 23, TDD, adversarial-reviewed)
 
-*(Largest, HIGH risk — the deferred half of slice 4. Defining blocker: RoomView is room-id-keyed
+_(Largest, HIGH risk — the deferred half of slice 4. Defining blocker: RoomView is room-id-keyed
 (`LoggedInView.tsx:737` `<RoomView key={currentRoomId} />`), so the search session dies on any cross-room jump while
-it lives on the component instance.)*
+it lives on the component instance.)_
 
 **Shipped:** new singleton `apps/web/src/stores/SearchSessionStore.ts` owns the cross-room session (matches/index/term/
 highlights/promise/abortController) + a transient `steppingJump` flag; `RoomSearchNavigationViewModel` reads/writes it
@@ -377,7 +401,7 @@ filter + `scope===Room` gate (predecessor + all-rooms now steppable), re-hydrate
 `timelineRenderingType===Search && !consumeSteppingJump() && roomViewStore.getInitialEventId()` — combined with a
 `resetFocusedEvent()` helper (a flag-guarded no-`event_id` ViewRoom) called from **both** `onSearch` and
 `onBackToSearchResults` so the live timeline is never pinned to an event while idle in the results list. This both
-fixes the deferred stale-`initialEventId` re-click no-op AND lets clicking the event the search was *started on* end
+fixes the deferred stale-`initialEventId` re-click no-op AND lets clicking the event the search was _started on_ end
 the search. (An earlier `searchStartEventId` baseline was replaced after the adversarial review found it left a
 same-event result-click as a no-op.) The `steppingJump` flag is consumed **once per `onRoomViewStoreUpdate`** (not
 only inside the gate), so it can't leak to a later genuine click; the `EditEvent` clear is guarded by `isSteppingJump()`.
@@ -406,6 +430,7 @@ early-describe test-isolation workaround + add `SearchSessionStore` resets (no r
 started mid-step **replaces & aborts** the previous session (single-session store).
 
 ### Architecture (verified against current source, session 23 mapping workflow)
+
 - **Source of truth split (lower-risk than a full rewrite):** a new singleton `SearchSessionStore` (plain
   `EventEmitter`, UIStore-style `static get instance`, self-registers `defaultDispatcher.register` for
   `Action.OnLoggedOut → clear({abort:true})`) is the **survives-remount source of truth** AND the VM's data source
@@ -413,8 +438,7 @@ started mid-step **replaces & aborts** the previous session (single-session stor
   mirror**, written in lockstep with the store in each handler and **re-seeded from the store in the constructor** on
   remount (avoids a results-list flash). No `RoomViewStore`/`RoomSearchView`/permalink/`SDKContext` changes.
 - **Store shape:** `{ searchId, term, scope, roomId?, promise, abortController?, matches: SearchMatch[] (cross-room,
-  UNFILTERED, newest-first), currentMatchIndex (-1 = none focused), highlights: string[], count?, inProgress, error? }`
-  + `steppingJump: boolean`. Events: `SearchSessionStoreEvent.Update`. API: `start(info)` (aborts+replaces previous),
+UNFILTERED, newest-first), currentMatchIndex (-1 = none focused), highlights: string[], count?, inProgress, error? }` - `steppingJump: boolean`. Events: `SearchSessionStoreEvent.Update`. API: `start(info)` (aborts+replaces previous),
   `updateResults({inProgress,matches?,highlights?,count?,error?})` (resets steppingJump), `setCurrentMatchIndex(i)`,
   `beginSteppingJump()`, `consumeSteppingJump()` (read+reset once), `isSteppingJump()` (read-only),
   `clear({abort?=true})`, `hasActiveSession()`, `getSnapshot()`, getters `matches`/`currentMatchIndex`.
@@ -425,13 +449,14 @@ started mid-step **replaces & aborts** the previous session (single-session stor
   ViewRoom dispatch). `setMatches()` removed (RoomView writes the store directly).
 
 ### Where it inserts in `RoomView.tsx` (current line numbers, session 23)
+
 - `searchNavVm` field (456-458): unchanged construction; the VM now reads the store.
 - `onSearch` (1821): `store.start({searchId,term,scope,roomId,promise,abortController})` **before** setState; keep the
   state.search mirror. (start aborts any previous session.)
 - `onSearchUpdate` (1849-1890): **remove** the `scope===SearchScope.Room` gate (1854) and the
   `.filter((m)=>m.roomId===currentRoomId)` slice-4 filter (1862-1865). `canStep = !inProgress && results!==null`.
   Push FULL cross-room `extractSearchMatches` into `store.updateResults({matches, highlights, count, inProgress,
-  error})`; mirror into state.search.
+error})`; mirror into state.search.
 - `onActivateSearchMatch` (1897-1913): `store.beginSteppingJump(); store.setCurrentMatchIndex(index);` keep the
   synchronous `timelineRenderingType=Room` flip (defense-in-depth) + state.search mirror; dispatch ViewRoom unchanged.
 - **Clear Gate 1** (797-804): add `&& !this.context-less store.consumeSteppingJump()` so a stepping jump never tears
@@ -439,7 +464,7 @@ started mid-step **replaces & aborts** the previous session (single-session stor
 - **Stale-initialEventId fix** in `onBackToSearchResults` (2052): after flipping to Search mode + index→-1, do a
   flag-guarded self-dispatch `ViewRoom {room_id: currentRoom}` (no `event_id`) with `store.beginSteppingJump()` set,
   so Clear Gate 1 consumes the flag (search NOT cleared) but `RoomViewStore.initialEventId` resets to null — then
-  re-clicking the *same* last-stepped result registers as an initialEventId change → Gate 1 clears + jumps (no-op gone).
+  re-clicking the _same_ last-stepped result registers as an initialEventId change → Gate 1 clears + jumps (no-op gone).
 - **Clear Gate 2** (EditEvent, 1296-1310): wrap `search: undefined` in `if (!store.isSteppingJump())`; real edits
   clear via `store.clear({abort:true})`.
 - `onCancelSearchClick` (2039): `store.clear({abort:true})` (the ONLY real abort path) + clear state.search mirror.
@@ -449,6 +474,7 @@ started mid-step **replaces & aborts** the previous session (single-session stor
 - `componentWillUnmount` (1076): unchanged — already does NOT abort; the store + session survive the remount.
 
 ### Risk register (from the mapping workflow; mitigations baked into the tasks)
+
 HIGH: remount race/flash (→ hydrate in constructor, not post-mount setState); abort-on-remount (→ abort ONLY in
 `store.clear({abort:true})`); Clear-Gate-1 misfire (→ `consumeSteppingJump()` + keep the sync Room-mode flip);
 cross-test singleton leak (→ `afterEach` store reset + early-describe placement). MEDIUM: Clear-Gate-2 misfire (→
@@ -457,6 +483,7 @@ the single `store.setCurrentMatchIndex`); stale-initialEventId (→ guarded self
 stays `extractSearchMatches`/`extractSearchHighlights`; webjest allowlist (store deps stay within it).
 
 ### Tasks (TDD RED→GREEN each)
+
 - **S6-1** `SearchSessionStore` (state, `Update` event, `start`/`updateResults`/`setCurrentMatchIndex`/`clear` +
   abort semantics + `hasActiveSession`/`getSnapshot`) — unit test, singleton reset in `beforeEach`.
 - **S6-2** `steppingJump` flag (`begin`/`consume`/`isSteppingJump`, auto-reset on `updateResults`) + `Action.OnLoggedOut`
@@ -474,4 +501,5 @@ stays `extractSearchMatches`/`extractSearchHighlights`; webjest allowlist (store
   workflow + commit `feat(web): cross-room/all-rooms search stepping via SearchSessionStore (search Phase 2 slice 6)`.
 
 ### PostHog — still DEFERRED (unchanged from slice 5): needs an upstream `Interaction` name in
+
 `@matrix-org/analytics-events` before `PosthogTrackers.trackInteraction(...)` from the VM step methods.

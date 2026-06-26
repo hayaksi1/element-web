@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
 import { type BrowserWindow, type RenderProcessGoneDetails, dialog } from "electron";
 
 import { _t } from "./language-helper.js";
-import { getBrand } from "./config.js";
+import { getConfig } from "./config.js";
 
 /**
  * Auto-recovery for a dead renderer ("white screen, no UI after switching back", element-web#32222).
@@ -210,7 +210,7 @@ export class RendererRecovery {
  * store.ts / electron-main.ts (`dialog.showMessageBox` + `_t`).
  */
 function showCrashLoopDialog(win: BrowserWindow): void {
-    const brand = getBrand();
+    const brand = getConfig().brand;
     void dialog.showMessageBox(win, {
         type: "error",
         title: _t("renderer_crash|title", { brand }),

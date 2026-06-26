@@ -14,15 +14,18 @@
 > Trigger: user reports on the packaged macOS build (verified to CONTAIN Phase 8c — installed
 > `/Applications/Element.app` webapp.asar has `steppingTarget` ×19, md5-identical to `apps/desktop/dist`, so this is
 > NOT the stale-app artifact that fooled us in 8c). Two asks:
+>
 > 1. **Bug:** after clicking a result (jumps to it), reopening the list, clicking another result, then clicking the
 >    search box again, the conversation JUMPS BACK TO THE FIRST result originally clicked. User-confirmed symptom
->    (AskUserQuestion): *"Box-click jumps to 1st result"*.
+>    (AskUserQuestion): _"Box-click jumps to 1st result"_.
 > 2. **Feature:** add a search (magnifier) button to the room header, **left of the call buttons** (Telegram-style),
 >    that **opens & focuses** the in-room search bar (⌘F equivalent). Rebuild & reinstall to /Applications after.
 
 ## Root cause (confirmed by code, Opus main-loop trace; the two Haiku workflow agents disagreed and were set aside)
+
 The in-room search pins/un-pins the LIVE timeline via async `ViewRoom` round-trips. Returning to the results list
 (`onBackToSearchResults` → `resetFocusedEvent`) dispatches a no-`event_id` `ViewRoom` to un-pin. BUT:
+
 - `onRoomViewStoreUpdate` keeps the LOCAL mirror via `const initialEventId = getInitialEventId() ?? this.state.initialEventId`
   ([RoomView.tsx:760](../apps/web/src/components/structures/RoomView.tsx#L760)). When the un-pin lands,
   `getInitialEventId()` is `null` but `?? this.state.initialEventId` resurrects the just-viewed event — so the local
@@ -39,19 +42,22 @@ fallback. Scoped fix below removes the stale-resurrection without re-introducing
 that fixes the "resets itself" bug.
 
 ## The fix (slice 8d.1 — bug)
+
 `RoomView.onRoomViewStoreUpdate` ([:760-794](../apps/web/src/components/structures/RoomView.tsx#L760)):
+
 - Compute `searchResultsListShown = this.state.search !== undefined && (this.state.search.currentMatchIndex ?? -1) < 0`
   (search active AND not stepping = the results list is showing; the inverse of `isSteppingSearchMatch`).
 - When `searchResultsListShown`, force the live timeline un-pinned: `newState.initialEventId = undefined;
-  newState.isInitialEventHighlighted = false;` INSTEAD of the `?? this.state.initialEventId` resurrection. So neither
+newState.isInitialEventHighlighted = false;` INSTEAD of the `?? this.state.initialEventId` resurrection. So neither
   a lagging store value nor a stale local mirror can re-pin the conversation while the user is browsing the list.
   Stepping (`currentMatchIndex >= 0`, Room mode) is unaffected — it still pins to the focused match. Search inactive
   is unaffected — permalinks/threads/scroll-restore behave exactly as before. The clear gate ([:877](../apps/web/src/components/structures/RoomView.tsx#L877))
   reads `getInitialEventId()` directly and is untouched; `steppingTarget` is untouched.
 - Defense-in-depth: `onBackToSearchResults` setState also clears `initialEventId: undefined, isInitialEventHighlighted:
-  false` so the un-pin is immediate/deterministic, not reliant on the async round-trip.
+false` so the un-pin is immediate/deterministic, not reliant on the async round-trip.
 
 ### TDD (RED → GREEN), RoomView-test "in-room search match stepping"
+
 - **Test A (deterministic):** click a result row, click "Back to results", flush → assert `ref.current.state.initialEventId`
   is `undefined` (RED pre-fix: it stays the clicked event via the `??` fallback).
 - **Test B (packaged-build race):** click a result (let its jump land → store + local = `$first`); click "Back to
@@ -62,6 +68,7 @@ that fixes the "resets itself" bug.
   assert STORE state / session liveness, not local `initialEventId` → unaffected.
 
 ## The feature (slice 8d.2 — header search button)
+
 `apps/web/src/components/views/rooms/RoomHeader/RoomHeader.tsx` (call buttons ~line 328). Add an `IconButton` with the
 Compound `search` icon (`@vector-im/compound-design-tokens/assets/web/icons/search`) **left of the video/voice call
 buttons** (Telegram desktop places the magnifier left of the call button — verified from tdesktop
@@ -69,9 +76,11 @@ buttons** (Telegram desktop places the magnifier left of the call button — ver
 ⌘F and Spotlight use → opens & focuses the search bar; `searchHeaderActive=true`). Tooltip + aria-label `_t("action|search")`
 (existing key). PostHog `trackInteraction` to match the other header buttons. Render under the same non-LocalRoom gate
 as the existing buttons.
+
 - TDD: RoomHeader-test — renders a "Search" button; clicking it fires `Action.FocusMessageSearch`.
 
 ## Verify / build
+
 - `scratchpad/webjest.sh` for RoomView-test + RoomHeader-test (+ full search suite). `pnpm lint` (tsc/eslint/prettier/i18n).
 - Rebuild unsigned arm64 macOS app (`scratchpad/build-macos.sh`), **replace /Applications/Element.app**, verify the new
   webapp.asar md5 differs from the current `1c778da2…` and still contains `steppingTarget`. (8c lesson: verify the

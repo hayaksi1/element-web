@@ -20,7 +20,7 @@
 > Authored: 2026-06-26 (session 29). Trigger: user reports on the macOS build —
 > (1) search runs automatically while typing (should wait for **Enter**);
 > (2) results cover the whole app (no conversation visible) — want a **Telegram bounded dropdown** with the
->     live timeline visible behind it;
+> live timeline visible behind it;
 > (3) "54 results found" but only the first **10** are reachable — want **infinite scroll** to load all.
 >
 > User decisions (AskUserQuestion, session 29): **Enter-to-search** (Enter again on the same text steps to the
@@ -33,7 +33,7 @@
   wraps it in `debounce(onSearch, 300)` ([RoomView.tsx:2161-2163](../apps/web/src/components/structures/RoomView.tsx#L2161-L2163)),
   so a search fires ~300 ms after typing. Enter is bound to `Action.SearchMatchStep` (step match), not search.
 - **Bug2:** `.mx_RoomSearchResults` is `position:absolute; inset:0` opaque overlay
-  ([_RoomSearchResults.pcss:20-27](../apps/web/res/css/views/rooms/_RoomSearchResults.pcss#L20-L27)) AND the live
+  ([\_RoomSearchResults.pcss:20-27](../apps/web/res/css/views/rooms/_RoomSearchResults.pcss#L20-L27)) AND the live
   timeline is `hidden` (`hideMessagePanel=true` → `display:none`, RoomView.tsx:2818 + 2849). Two mechanisms hide
   the conversation.
 - **Bug3:** `SEARCH_LIMIT=10` first page. Pagination exists (`searchPagination` → `onSearchResultsFillRequest`,
@@ -82,5 +82,6 @@
   hasMore + preserves previews during interim; `RoomSearchView` populates `loadMoreRef` → `searchPagination`.
 
 ## Verify / done
+
 - `scripts: scratchpad/webjest.sh` for the touched suites; `pnpm lint` (tsc/eslint/stylelint/prettier/i18n).
 - Then build the unsigned macOS desktop app for the user to test (see `element-desktop-build-recipe` memory).

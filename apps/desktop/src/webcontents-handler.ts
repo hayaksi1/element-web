@@ -25,6 +25,7 @@ import path from "node:path";
 import { _t } from "./language-helper.js";
 import { saveImageToFile } from "./save-image.js";
 import { resolveUserDownloadAction } from "./user-download.js";
+import { getConfig } from "./config.js";
 
 const MAILTO_PREFIX = "mailto:";
 
@@ -60,7 +61,7 @@ function onLinkContextMenu(ev: Event, params: ContextMenuParams, webContents: We
     if (url.startsWith("vector://vector/webapp")) {
         // Avoid showing a context menu for app icons
         if (params.hasImageContents) return;
-        const baseUrl = vectorConfig.web_base_url ?? "https://app.element.io/";
+        const baseUrl = getConfig().web_base_url;
         // Rewrite URL so that it can be used outside the app
         url = baseUrl + url.substring(23);
     }
