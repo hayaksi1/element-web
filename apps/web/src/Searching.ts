@@ -703,6 +703,33 @@ export enum SearchScope {
 }
 
 /**
+ * The location of a single search match, used for stepping through matches in the live timeline.
+ */
+export interface SearchMatch {
+    /**
+     * The room the matched event belongs to.
+     */
+    roomId: string;
+    /**
+     * The id of the matched event.
+     */
+    eventId: string;
+}
+
+/**
+ * A single search result enriched for the Telegram-style results dropdown: the jumpable location
+ * ({@link SearchMatch}) plus the data a compact row needs — sender MXID, the matched message body and timestamp.
+ */
+export interface SearchResultPreview extends SearchMatch {
+    /** The MXID of the matched event's sender. */
+    sender: string;
+    /** The matched message body (plain text) shown as the row preview. */
+    body: string;
+    /** The matched event's origin-server timestamp (ms), used to render the row date. */
+    ts: number;
+}
+
+/**
  * Information about a message search in progress.
  */
 export interface SearchInfo {

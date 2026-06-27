@@ -92,12 +92,9 @@ export default class RightPanelStore extends ReadyWatchingStore {
                 break;
             }
 
-            case Action.FocusMessageSearch: {
-                if (this.currentCard.phase !== RightPanelPhases.RoomSummary) {
-                    this.setCard({ phase: RightPanelPhases.RoomSummary, state: { focusRoomSearch: true } });
-                }
-                this.show(null);
-            }
+            // NB: Action.FocusMessageSearch used to open the RoomSummary card with the search box focused. As of
+            // search Phase 6 the in-room search lives in a Telegram-style top-of-chat bar owned by RoomView, so the
+            // right panel no longer reacts to it.
         }
     }
 
