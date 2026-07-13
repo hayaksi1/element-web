@@ -35,6 +35,7 @@ import "./settings.js";
 import "./badge.js";
 import * as tray from "./tray.js";
 import Store from "./store.js";
+import { AutoLaunch, shouldStartHidden } from "./auto-launch.js";
 import { buildMenuTemplate } from "./vectormenu.js";
 import webContentsHandler from "./webcontents-handler.js";
 import * as updater from "./updater.js";
@@ -170,6 +171,18 @@ app.on("ready", async () => {
         // with node printing all sorts of stuff about unhandled exceptions
         // when we want the actual error to be as obvious as possible).
         return;
+    }
+
+    // One-time migration off the legacy `auto-launch` package to the native loginItem API.
+    // Guarded so it runs once; we only record success if it completes without throwing, so a
+    // transient failure is retried on the next launch rather than leaving an orphaned artifact.
+    if (!store.get("autoLaunchMigrated")) {
+        try {
+            await AutoLaunch.instance.migrate();
+            store.set("autoLaunchMigrated", true);
+        } catch (e) {
+            console.warn("auto-launch migration failed; will retry on next launch", e);
+        }
     }
 
     if (args.devtools) {
@@ -325,7 +338,7 @@ app.on("ready", async () => {
         if (restoreState.isMaximized) global.mainWindow.maximize();
         windowState.monitor(global.mainWindow);
 
-        if (!args.hidden) {
+        if (!shouldStartHidden(args.hidden)) {
             global.mainWindow.show();
         } else {
             // hide here explicitly because maximize() above can show the window
