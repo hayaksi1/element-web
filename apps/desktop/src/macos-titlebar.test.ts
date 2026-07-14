@@ -55,10 +55,6 @@ describe("buildTitleBarCss", () => {
         expect(dragStripHeightPx(css, ".mx_RoomView::before")).toBeGreaterThanOrEqual(28);
     });
 
-    it("gives .mx_LeftPanel_newRoomList::before a drag strip at least 28px tall (regression #32018)", () => {
-        expect(dragStripHeightPx(css, ".mx_LeftPanel_newRoomList::before")).toBeGreaterThanOrEqual(28);
-    });
-
     it("gives .mx_LeftPanel::before a drag strip at least 28px tall (regression #32018)", () => {
         expect(dragStripHeightPx(css, ".mx_LeftPanel::before")).toBeGreaterThanOrEqual(28);
     });

@@ -13,22 +13,15 @@ import dispatcher from "../../../src/dispatcher/dispatcher";
 import { Action } from "../../../src/dispatcher/actions";
 import Modal from "../../../src/Modal";
 import { MatrixClientPeg } from "../../../src/MatrixClientPeg";
-import { SdkContextClass } from "../../../src/contexts/SDKContext";
+import { type RoomViewStore } from "../../../src/stores/RoomViewStore";
 import { jumpToDateInRoom } from "../../../src/utils/jumpToDate";
-
-jest.mock("../../../src/contexts/SDKContext", () => ({
-    SdkContextClass: {
-        instance: {
-            roomViewStore: {
-                getRoomId: jest.fn(),
-            },
-        },
-    },
-}));
 
 describe("jumpToDateInRoom", () => {
     const roomId = "!room:example.org";
     const mockTimestampToEvent = jest.fn();
+    const mockGetRoomId = jest.fn();
+    // The store is injected, so a stub exercises the real room-switch guards without mocking the module.
+    const roomViewStore = { getRoomId: mockGetRoomId } as unknown as RoomViewStore;
 
     const hasTestId = (node: React.ReactNode, testId: string): boolean => {
         if (!React.isValidElement<{ children?: React.ReactNode }>(node)) return false;
@@ -45,7 +38,8 @@ describe("jumpToDateInRoom", () => {
         } as any);
         jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
         jest.spyOn(Modal, "createDialog").mockImplementation(() => ({ close: jest.fn() }) as any);
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+        mockGetRoomId.mockReset();
+        mockGetRoomId.mockReturnValue(roomId);
     });
 
     afterEach(() => {
@@ -57,7 +51,7 @@ describe("jumpToDateInRoom", () => {
         const ts = 1_600_000_000_000;
         mockTimestampToEvent.mockResolvedValue({ event_id: eventId, origin_server_ts: ts });
 
-        await jumpToDateInRoom(roomId, ts);
+        await jumpToDateInRoom(roomId, ts, roomViewStore);
 
         expect(mockTimestampToEvent).toHaveBeenCalledWith(roomId, ts, Direction.Forward);
         expect(dispatcher.dispatch).toHaveBeenCalledWith({
@@ -72,16 +66,16 @@ describe("jumpToDateInRoom", () => {
     it("accepts a date string and resolves it to a unix timestamp", async () => {
         mockTimestampToEvent.mockResolvedValue({ event_id: "$e", origin_server_ts: 0 });
 
-        await jumpToDateInRoom(roomId, "2021-12-17");
+        await jumpToDateInRoom(roomId, "2021-12-17", roomViewStore);
 
         expect(mockTimestampToEvent).toHaveBeenCalledWith(roomId, new Date("2021-12-17").getTime(), Direction.Forward);
     });
 
     it("does not dispatch when the user switched rooms before it resolves", async () => {
         mockTimestampToEvent.mockResolvedValue({ event_id: "$e", origin_server_ts: 0 });
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue("!other:example.org");
+        mockGetRoomId.mockReturnValue("!other:example.org");
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(dispatcher.dispatch).not.toHaveBeenCalled();
     });
@@ -89,7 +83,7 @@ describe("jumpToDateInRoom", () => {
     it("shows an error dialog with submit-debug-logs for generic errors", async () => {
         mockTimestampToEvent.mockRejectedValue(new Error("Boom"));
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).toHaveBeenCalled();
         const [, params] = mocked(Modal.createDialog).mock.calls.at(-1)!;
@@ -99,7 +93,7 @@ describe("jumpToDateInRoom", () => {
     it("omits the submit-debug-logs option for connection errors", async () => {
         mockTimestampToEvent.mockRejectedValue(new ConnectionError("offline"));
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).toHaveBeenCalled();
         const [, params] = mocked(Modal.createDialog).mock.calls.at(-1)!;
@@ -109,7 +103,7 @@ describe("jumpToDateInRoom", () => {
     it("omits the submit-debug-logs option for a not-found MatrixError", async () => {
         mockTimestampToEvent.mockRejectedValue(new MatrixError({ errcode: "M_NOT_FOUND" }));
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).toHaveBeenCalled();
         const [, params] = mocked(Modal.createDialog).mock.calls.at(-1)!;
@@ -119,7 +113,7 @@ describe("jumpToDateInRoom", () => {
     it("omits the submit-debug-logs option for a non-not-found MatrixError", async () => {
         mockTimestampToEvent.mockRejectedValue(new MatrixError({ errcode: "M_FORBIDDEN" }, 403));
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).toHaveBeenCalled();
         const [, params] = mocked(Modal.createDialog).mock.calls.at(-1)!;
@@ -129,7 +123,7 @@ describe("jumpToDateInRoom", () => {
     it("omits the submit-debug-logs option for a plain HTTPError", async () => {
         mockTimestampToEvent.mockRejectedValue(new HTTPError("boom", 502));
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).toHaveBeenCalled();
         const [, params] = mocked(Modal.createDialog).mock.calls.at(-1)!;
@@ -138,9 +132,9 @@ describe("jumpToDateInRoom", () => {
 
     it("does not show an error dialog if the user switched rooms before it rejects", async () => {
         mockTimestampToEvent.mockRejectedValue(new Error("Boom"));
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue("!other:example.org");
+        mockGetRoomId.mockReturnValue("!other:example.org");
 
-        await jumpToDateInRoom(roomId, 123);
+        await jumpToDateInRoom(roomId, 123, roomViewStore);
 
         expect(Modal.createDialog).not.toHaveBeenCalled();
     });

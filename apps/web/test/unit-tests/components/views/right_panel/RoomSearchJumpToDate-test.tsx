@@ -17,22 +17,22 @@ import { UIFeature } from "../../../../../src/settings/UIFeature";
 import dispatcher from "../../../../../src/dispatcher/dispatcher";
 import { Action } from "../../../../../src/dispatcher/actions";
 import { MatrixClientPeg } from "../../../../../src/MatrixClientPeg";
-import { SdkContextClass } from "../../../../../src/contexts/SDKContext";
+import { SDKContext } from "../../../../../src/contexts/SDKContext";
+import { type SDKContextClass } from "../../../../../src/contexts/SDKContextClass";
 
 jest.mock("../../../../../src/settings/SettingsStore");
-jest.mock("../../../../../src/contexts/SDKContext", () => ({
-    SdkContextClass: {
-        instance: {
-            roomViewStore: {
-                getRoomId: jest.fn(),
-            },
-        },
-    },
-}));
 
 describe("RoomSearchJumpToDate", () => {
     const roomId = "!room:example.org";
     const mockTimestampToEvent = jest.fn();
+    const mockGetRoomId = jest.fn();
+    // The component reads the store off SDKContext, so provide a stub context rather than mocking the module.
+    const sdkContext = { roomViewStore: { getRoomId: mockGetRoomId } } as unknown as SDKContextClass;
+
+    const renderControl = (ui: React.ReactElement) =>
+        render(ui, {
+            wrapper: ({ children }) => <SDKContext.Provider value={sdkContext}>{children}</SDKContext.Provider>,
+        });
 
     const setFeatureEnabled = (enabled: boolean): void => {
         mocked(SettingsStore).getValue.mockImplementation((key): any => {
@@ -52,7 +52,8 @@ describe("RoomSearchJumpToDate", () => {
             timestampToEvent: mockTimestampToEvent,
         } as any);
         jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+        mockGetRoomId.mockReset();
+        mockGetRoomId.mockReturnValue(roomId);
     });
 
     afterEach(() => {
@@ -60,7 +61,7 @@ describe("RoomSearchJumpToDate", () => {
     });
 
     it("renders the calendar trigger when jump-to-date is enabled", () => {
-        render(<RoomSearchJumpToDate roomId={roomId} />);
+        renderControl(<RoomSearchJumpToDate roomId={roomId} />);
 
         expect(screen.getByTestId("search-jump-to-date-button")).toBeInTheDocument();
     });
@@ -68,7 +69,7 @@ describe("RoomSearchJumpToDate", () => {
     it("renders nothing when jump-to-date is disabled", () => {
         setFeatureEnabled(false);
 
-        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />);
+        const { container } = renderControl(<RoomSearchJumpToDate roomId={roomId} />);
 
         expect(container).toBeEmptyDOMElement();
     });
@@ -76,7 +77,7 @@ describe("RoomSearchJumpToDate", () => {
     it("jumps the current room to the picked date via a quick option", async () => {
         mockTimestampToEvent.mockResolvedValue({ event_id: "$event", origin_server_ts: 0 });
 
-        render(<RoomSearchJumpToDate roomId={roomId} />);
+        renderControl(<RoomSearchJumpToDate roomId={roomId} />);
         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
 
@@ -93,9 +94,9 @@ describe("RoomSearchJumpToDate", () => {
         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
         const roomB = "!roomB:example.org";
         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+        mockGetRoomId.mockReturnValue(roomB);
 
-        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+        const { rerender } = renderControl(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
         rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
 
         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));

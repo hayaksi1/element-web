@@ -24,6 +24,8 @@ import {
 } from "../../../../../src/components/viewmodels/right_panel/RoomSummaryCardViewModel";
 import DMRoomMap from "../../../../../src/utils/DMRoomMap";
 import SettingsStore from "../../../../../src/settings/SettingsStore";
+import { SDKContext } from "../../../../../src/contexts/SDKContext.ts";
+import { SDKContextClass } from "../../../../../src/contexts/SDKContextClass.ts";
 
 // Mock the viewmodel hooks
 jest.mock("../../../../../src/components/viewmodels/right_panel/RoomSummaryCardViewModel", () => ({
@@ -46,9 +48,11 @@ describe("<RoomSummaryCard />", () => {
 
         return render(<RoomSummaryCardView {...defaultProps} {...props} />, {
             wrapper: ({ children }) => (
-                <MatrixClientContext.Provider value={mockClient}>
-                    <LinkedTextContext.Provider value={{}}>{children}</LinkedTextContext.Provider>
-                </MatrixClientContext.Provider>
+                <SDKContext.Provider value={SDKContextClass.instance}>
+                    <MatrixClientContext.Provider value={mockClient}>
+                        <LinkedTextContext.Provider value={{}}>{children}</LinkedTextContext.Provider>
+                    </MatrixClientContext.Provider>
+                </SDKContext.Provider>
             ),
         });
     };
@@ -56,6 +60,7 @@ describe("<RoomSummaryCard />", () => {
     // Setup mock view models
     const vmDefaultValues: RoomSummaryCardState = {
         isDirectMessage: false,
+        userStatus: undefined,
         isRoomEncrypted: false,
         e2eStatus: undefined,
         isVideoRoom: false,
@@ -346,6 +351,33 @@ describe("<RoomSummaryCard />", () => {
             await flushPromises();
 
             expect(screen.queryByText("Public room")).toBeInTheDocument();
+        });
+    });
+
+    describe("user status", () => {
+        it("shows the other user's status when set", () => {
+            mocked(useRoomSummaryCardViewModel).mockReturnValue({
+                ...vmDefaultValues,
+                isDirectMessage: true,
+                userStatus: { emoji: "💬", text: "In a meeting" },
+            });
+
+            getComponent();
+
+            expect(screen.getByText("In a meeting")).toBeInTheDocument();
+            expect(screen.getByText("💬")).toBeInTheDocument();
+        });
+
+        it("does not show a status when there is none", () => {
+            mocked(useRoomSummaryCardViewModel).mockReturnValue({
+                ...vmDefaultValues,
+                isDirectMessage: true,
+                userStatus: undefined,
+            });
+
+            getComponent();
+
+            expect(screen.queryByText("In a meeting")).not.toBeInTheDocument();
         });
     });
 });

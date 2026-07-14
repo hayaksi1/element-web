@@ -19,7 +19,7 @@ import Modal from "../Modal";
 import ErrorDialog from "../components/views/dialogs/ErrorDialog";
 import BugReportDialog from "../components/views/dialogs/BugReportDialog";
 import AccessibleButton from "../components/views/elements/AccessibleButton";
-import { SdkContextClass } from "../contexts/SDKContext";
+import { type RoomViewStore } from "../stores/RoomViewStore";
 
 function onJumpToDateBugReport(err?: Error): void {
     Modal.createDialog(BugReportDialog, {
@@ -40,8 +40,15 @@ function onJumpToDateBugReport(err?: Error): void {
  *
  * @param roomId - The room whose timeline should jump.
  * @param inputTimestamp - A unix ms timestamp, date string, or Date to resolve.
+ * @param roomViewStore - The store used to read the currently-viewed room for the room-switch guards. Injected rather
+ * than read from a global singleton because embedded RoomViews resolve a per-room store via
+ * `multiRoomViewStore.getRoomViewStoreForRoom`, so the global instance would report the wrong room.
  */
-export async function jumpToDateInRoom(roomId: string, inputTimestamp: number | string | Date): Promise<void> {
+export async function jumpToDateInRoom(
+    roomId: string,
+    inputTimestamp: number | string | Date,
+    roomViewStore: RoomViewStore,
+): Promise<void> {
     const unixTimestamp = new Date(inputTimestamp).getTime();
     const roomIdForJumpRequest = roomId;
 
@@ -60,7 +67,7 @@ export async function jumpToDateInRoom(roomId: string, inputTimestamp: number | 
         // Only try to navigate to the room if the user is still viewing the same
         // room. We don't want to jump someone back to a room after a slow request
         // if they've already navigated away to another room.
-        const currentRoomId = SdkContextClass.instance.roomViewStore.getRoomId();
+        const currentRoomId = roomViewStore.getRoomId();
         if (currentRoomId === roomIdForJumpRequest) {
             dispatcher.dispatch<ViewRoomPayload>({
                 action: Action.ViewRoom,
@@ -85,7 +92,7 @@ export async function jumpToDateInRoom(roomId: string, inputTimestamp: number | 
         // don't want to worry someone about an error in a room they no longer care
         // about after a slow request if they've already navigated away to another
         // room.
-        const currentRoomId = SdkContextClass.instance.roomViewStore.getRoomId();
+        const currentRoomId = roomViewStore.getRoomId();
         if (currentRoomId === roomIdForJumpRequest) {
             let friendlyErrorMessage = "An error occured while trying to find and jump to the given date.";
             let submitDebugLogsContent: React.ReactElement = <></>;

@@ -18,6 +18,7 @@ import { getUserLanguage } from "../../../i18n/settings";
 import SettingsStore from "../../../settings/SettingsStore";
 import { UIFeature } from "../../../settings/UIFeature";
 import { jumpToDateInRoom } from "../../../utils/jumpToDate";
+import { type RoomViewStore } from "../../../stores/RoomViewStore.tsx";
 
 export interface DateSeparatorViewModelProps {
     /**
@@ -32,6 +33,10 @@ export interface DateSeparatorViewModelProps {
      * Export mode disables relative date labels and jump-to-date menu UI.
      */
     forExport?: boolean;
+    /**
+     * The room view store instance to use
+     */
+    roomViewStore: RoomViewStore;
 }
 
 /**
@@ -130,7 +135,7 @@ export class DateSeparatorViewModel
     }
 
     public pickDate = async (inputTimestamp: number | string | Date): Promise<void> => {
-        await jumpToDateInRoom(this.props.roomId, inputTimestamp);
+        await jumpToDateInRoom(this.props.roomId, inputTimestamp, this.props.roomViewStore);
     };
 
     public onLastWeekPicked = (): Promise<void> => {

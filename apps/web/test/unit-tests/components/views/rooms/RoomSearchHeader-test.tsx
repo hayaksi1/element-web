@@ -18,11 +18,14 @@ import { SearchSessionStore } from "../../../../../src/stores/SearchSessionStore
 import { Action } from "../../../../../src/dispatcher/actions";
 import defaultDispatcher from "../../../../../src/dispatcher/dispatcher";
 import { stubClient } from "../../../../test-utils";
+import { SDKContext } from "../../../../../src/contexts/SDKContext";
+import { TestSDKContext } from "../../../TestSDKContext";
 
 const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
 
 describe("RoomSearchHeader", () => {
     const vms: RoomSearchNavigationViewModel[] = [];
+    const sdkContext = new TestSDKContext();
 
     const buildRoom = (members: RoomMember[] = [member("@me:server", "Me")]): Room => {
         const client = mocked(stubClient());
@@ -65,6 +68,11 @@ describe("RoomSearchHeader", () => {
                 onSearchOrderChange={jest.fn()}
                 {...props}
             />,
+            {
+                // The header mounts RoomSearchJumpToDate, whose DateSeparatorViewModel reads roomViewStore off the
+                // SDK context (upstream #34053 made that prop required — see MessagePanel's DateSeparatorWrapper).
+                wrapper: ({ children }) => <SDKContext.Provider value={sdkContext}>{children}</SDKContext.Provider>,
+            },
         );
     };
 

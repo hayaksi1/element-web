@@ -73,7 +73,7 @@ import AccessibleButton, { type ButtonEvent } from "../views/elements/Accessible
 import { TimelineRenderingType, MainSplitContentType } from "../../contexts/RoomContext";
 import { E2EStatus, shieldStatusForRoom } from "../../utils/ShieldUtils";
 import { Action } from "../../dispatcher/actions";
-import { type IMatrixClientCreds } from "../../MatrixClientPeg";
+import { type IMatrixClientCreds } from "../../utils/createMatrixClient";
 import { useMatrixClientContext } from "../../contexts/MatrixClientContext";
 import ScrollPanel from "./ScrollPanel";
 import TimelinePanel from "./TimelinePanel";
@@ -91,7 +91,6 @@ import { containsEmoji } from "../../effects/utils";
 import { CHAT_EFFECTS } from "../../effects";
 import { CallView } from "../views/voip/CallView";
 import { UPDATE_EVENT } from "../../stores/AsyncStore";
-import Notifier from "../../Notifier";
 import { showToast as showNotificationsToast } from "../../toasts/DesktopNotificationsToast";
 import { WidgetLayoutStore } from "../../stores/widgets/WidgetLayoutStore";
 import { getKeyBindingsManager } from "../../KeyBindingsManager";
@@ -142,7 +141,6 @@ import { WaitingForThirdPartyRoomView } from "./WaitingForThirdPartyRoomView";
 import { isNotUndefined } from "../../Typeguards";
 import { type CancelAskToJoinPayload } from "../../dispatcher/payloads/CancelAskToJoinPayload";
 import { type SubmitAskToJoinPayload } from "../../dispatcher/payloads/SubmitAskToJoinPayload";
-import RightPanelStore from "../../stores/right-panel/RightPanelStore";
 import { onView3pidInvite } from "../../stores/right-panel/action-handlers";
 import { PinnedMessageBanner } from "../views/rooms/PinnedMessageBanner";
 import { ScopedRoomContextProvider, useScopedRoomContext } from "../../contexts/ScopedRoomContext";
@@ -219,8 +217,6 @@ interface IRoomProps extends RoomViewProps {
      */
     enableReadReceiptsAndMarkersOnActivity?: boolean;
 }
-
-export { MainSplitContentType };
 
 export interface IRoomState {
     room?: Room;
@@ -388,7 +384,7 @@ interface ILocalRoomCreateLoaderProps {
  * Room create loader view displaying a message and a spinner.
  *
  * @param {ILocalRoomCreateLoaderProps} props Room view props
- * @return {ReactElement}
+ * @returns {ReactElement}
  */
 function LocalRoomCreateLoader(props: ILocalRoomCreateLoaderProps): ReactElement {
     const text = _t("room|creating_room_text", { names: props.names });
@@ -1468,23 +1464,23 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             case Action.ViewUser:
                 if (payload.member) {
                     if (payload.push) {
-                        RightPanelStore.instance.pushCard({
+                        this.context.rightPanelStore.pushCard({
                             phase: RightPanelPhases.MemberInfo,
                             state: { member: payload.member },
                         });
                     } else {
-                        RightPanelStore.instance.setCards([
+                        this.context.rightPanelStore.setCards([
                             { phase: RightPanelPhases.RoomSummary },
                             { phase: RightPanelPhases.MemberList },
                             { phase: RightPanelPhases.MemberInfo, state: { member: payload.member } },
                         ]);
                     }
                 } else {
-                    RightPanelStore.instance.showOrHidePhase(RightPanelPhases.MemberList);
+                    this.context.rightPanelStore.showOrHidePhase(RightPanelPhases.MemberList);
                 }
                 break;
             case Action.View3pidInvite:
-                onView3pidInvite(payload, RightPanelStore.instance);
+                onView3pidInvite(payload, this.context.rightPanelStore);
                 break;
             case Action.FocusMessageSearch:
                 // Open the Telegram-style top-of-chat search bar (search Phase 6). The bar shows with an empty input
@@ -1836,8 +1832,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         if (!this.state.room) return;
         const memberCount = this.state.room.getJoinedMemberCount() + this.state.room.getInvitedMemberCount();
         // if they are not alone prompt the user about notifications so they don't miss replies
-        if (memberCount > 1 && Notifier.shouldShowPrompt()) {
-            showNotificationsToast(true);
+        if (memberCount > 1 && this.context.notifier.shouldShowPrompt()) {
+            showNotificationsToast(this.context.notifier, true);
         }
     }
 

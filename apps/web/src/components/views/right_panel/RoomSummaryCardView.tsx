@@ -39,7 +39,7 @@ import ErrorIcon from "@vector-im/compound-design-tokens/assets/web/icons/error"
 import ErrorSolidIcon from "@vector-im/compound-design-tokens/assets/web/icons/error-solid";
 import ChevronDownIcon from "@vector-im/compound-design-tokens/assets/web/icons/chevron-down";
 import { JoinRule, type Room, SearchOrderBy } from "matrix-js-sdk/src/matrix";
-import { Box, Flex, HistoryVisibilityBadge, LinkedText } from "@element-hq/web-shared-components";
+import { Box, Flex, HistoryVisibilityBadge, LinkedText, StatusTextView } from "@element-hq/web-shared-components";
 
 import BaseCard from "./BaseCard.tsx";
 import { _t } from "../../../languageHandler.tsx";
@@ -129,6 +129,9 @@ const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null
     );
 };
 
+// Stable reference so the default never changes identity between renders.
+const NO_SEARCH_SENDERS: string[] = [];
+
 const RoomSummaryCardView: React.FC<IProps> = ({
     room,
     permalinkCreator,
@@ -138,7 +141,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
     onSearchOrderChange,
     focusRoomSearch,
     searchTerm = "",
-    searchSenders = [],
+    searchSenders = NO_SEARCH_SENDERS,
     searchOrder = SearchOrderBy.Recent,
 }) => {
     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
@@ -164,6 +167,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
             >
                 {name}
             </Heading>
+            {vm.userStatus && <StatusTextView status={vm.userStatus} />}
             <Text
                 as="div"
                 size="sm"
