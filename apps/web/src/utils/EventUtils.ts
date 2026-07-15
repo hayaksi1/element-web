@@ -238,7 +238,14 @@ export async function fetchInitialEvent(
         const mapper = client.getEventMapper();
         const rootEvent = room?.findEventById(threadId) ?? mapper(await client.fetchRoomEvent(roomId, threadId));
         try {
-            room?.createThread(threadId, rootEvent, [initialEvent], true);
+            const thread = room?.createThread(threadId, rootEvent, [initialEvent], true);
+            // `createThread` returns an already-known thread as-is, without adopting the events passed to it, so on
+            // that path the reply never gets its thread back-reference. Callers rely on `getThread()` to route the
+            // event to the thread view; unset, the reply is routed to the room's main timeline instead, which cannot
+            // load a thread event and fails with "Failed to load timeline position".
+            if (thread && !initialEvent.getThread()) {
+                initialEvent.setThread(thread);
+            }
         } catch {
             logger.warn("Could not find root event: " + threadId);
         }

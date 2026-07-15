@@ -16,6 +16,7 @@ import {
     type IRoomEventFilter,
     EventType,
     type MatrixClient,
+    type MatrixEvent,
     type SearchResult,
     RelationType,
 } from "matrix-js-sdk/src/matrix";
@@ -1166,10 +1167,45 @@ export interface SearchMatch {
 }
 
 /**
- * Build a chronologically ordered list of match locations from a set of search results, for in-timeline
- * stepping.
+ * Resolve a matched event to the message the user means: its timeline location and the text to preview.
  *
- * Matches are ordered newest-first by event timestamp so that the up/down arrows mean a consistent
+ * A homeserver search matches an edit (`m.replace`) event in its own right, but an edit is only addressable in
+ * the timeline while the message it replaces is already loaded. `Room.eventShouldLiveIn` places a relation by
+ * resolving its target: with the target loaded the edit is filed alongside it, but when the target is absent —
+ * the norm for an old message surfaced by search — the edit is treated as an unknown relation and never added
+ * to a timeline, so loading it fails with "Failed to load timeline position". Jumping to a matched edit is
+ * therefore a coin toss on whether its target happens to be loaded. Resolve the match to the message it edits
+ * instead: always a real timeline entry, and the message the user is looking for. Preview the replacement text
+ * too, rather than the `* `-prefixed fallback body that rides on the wire.
+ *
+ * Applied at the extractor layer because the homeserver's results arrive unnormalised and its paginated pages
+ * come straight from the SDK's `backPaginateRoomEventsSearch`, so normalising the raw response would only fix
+ * the first page.
+ *
+ * Only the plaintext/homeserver leg relies on this. Seshat's events are re-keyed up front by
+ * {@link promoteReplacementContent} (#32356), and in any case {@link restoreEncryptionInfo} calls
+ * `makeEncrypted`, which replaces the wire content with `{algorithm}` — so `isRelation`, which reads the *wire*
+ * content, is always false for a Seshat-sourced event and this returns its id unchanged.
+ */
+function resolveMatchedEvent(event: MatrixEvent): { eventId?: string; body: string; isEdit: boolean } {
+    const content = event.getContent();
+    const relation = event.isRelation(RelationType.Replace) ? event.getRelation() : null;
+    if (relation?.event_id) {
+        const newContent = content["m.new_content"] as { body?: string } | undefined;
+        return { eventId: relation.event_id, body: newContent?.body ?? content.body ?? "", isEdit: true };
+    }
+    return { eventId: event.getId(), body: content.body ?? "", isEdit: false };
+}
+
+/**
+ * Resolve a set of search results into the ordered, deduplicated rows the search UI works with.
+ *
+ * The single source of truth behind {@link extractSearchMatches} and {@link extractSearchResultPreviews}: both
+ * derive from this, so preview row `i` always maps to match `i` by construction rather than by two functions
+ * happening to filter and sort alike. That parallelism is load-bearing — RoomView.onSearchResultClick looks a
+ * match up by the clicked row's index.
+ *
+ * Results are ordered newest-first by event timestamp so that the up/down arrows mean a consistent
  * "newer/older" independent of how the backend happened to order the raw results. (The backend order is recency
  * by default, but the search header's order toggle can request relevance ({@link SearchOrderBy.Rank}) on the
  * single-source paths (search Phase 5 slice 1); either way this explicit client-side sort guarantees a single
@@ -1177,21 +1213,47 @@ export interface SearchMatch {
  * `Array.prototype.sort` is stable, so matches sharing a timestamp keep their backend order; a match whose
  * event has no timestamp sinks to the end (treated as oldest). Results whose matched event is missing an event
  * id or room id are skipped — they cannot be jumped to in the timeline.
+ *
+ * Since an edit resolves to the message it edits, several results can collapse onto one id — a message and its
+ * edit both matching the term, or a bot editing one message repeatedly. They are one message and must render as
+ * one row: duplicates would otherwise collide on the React key and desync the "k of N" cursor, which re-finds
+ * itself by id and would always land on the first copy. The message itself wins over an edit of it where both
+ * matched, so the row keeps the message's own timestamp rather than the edit's.
  */
-export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
-    const matches: Array<SearchMatch & { ts: number }> = [];
+function resolveSearchResults(results: ISearchResults): SearchResultPreview[] {
+    const rows: Array<SearchResultPreview & { isEdit: boolean }> = [];
     for (const result of results.results ?? []) {
         const event = result.context.getEvent();
-        const eventId = event.getId();
+        const { eventId, body, isEdit } = resolveMatchedEvent(event);
         const roomId = event.getRoomId();
-        if (eventId && roomId) {
+        if (!eventId || !roomId) continue;
+        const row = {
+            roomId,
+            eventId,
+            sender: event.getSender() ?? "",
+            body,
             // getTs() is typed as number but masks a possibly-absent origin_server_ts with a non-null
             // assertion; default to 0 so an undated match can never produce a NaN comparison and corrupt order.
-            matches.push({ roomId, eventId, ts: event.getTs() ?? 0 });
+            ts: event.getTs() ?? 0,
+            isEdit,
+        };
+        const existing = rows.findIndex((r) => r.eventId === eventId);
+        if (existing === -1) {
+            rows.push(row);
+        } else if (rows[existing].isEdit && !isEdit) {
+            rows[existing] = row;
         }
     }
-    matches.sort((a, b) => b.ts - a.ts);
-    return matches.map(({ roomId, eventId }) => ({ roomId, eventId }));
+    rows.sort((a, b) => b.ts - a.ts);
+    return rows.map(({ roomId, eventId, sender, body, ts }) => ({ roomId, eventId, sender, body, ts }));
+}
+
+/**
+ * Build a chronologically ordered list of match locations from a set of search results, for in-timeline
+ * stepping. See {@link resolveSearchResults} for the ordering, deduplication and skip rules.
+ */
+export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
+    return resolveSearchResults(results).map(({ roomId, eventId }) => ({ roomId, eventId }));
 }
 
 /**
@@ -1210,29 +1272,12 @@ export interface SearchResultPreview extends SearchMatch {
 /**
  * Build the ordered list of result previews for the search results dropdown.
  *
- * Ordered identically to {@link extractSearchMatches} (newest-first by timestamp, stable, undated last, results
- * missing an event/room id skipped) so that preview row index `i` maps to match `i` — letting a row click reuse the
- * existing {@link SearchMatch}-based live-timeline stepping. Pure: the backend results are not mutated.
+ * Shares {@link resolveSearchResults} with {@link extractSearchMatches}, so preview row index `i` maps to match
+ * `i` — letting a row click reuse the existing {@link SearchMatch}-based live-timeline stepping. Pure: the
+ * backend results are not mutated.
  */
 export function extractSearchResultPreviews(results: ISearchResults): SearchResultPreview[] {
-    const previews: SearchResultPreview[] = [];
-    for (const result of results.results ?? []) {
-        const event = result.context.getEvent();
-        const eventId = event.getId();
-        const roomId = event.getRoomId();
-        if (eventId && roomId) {
-            previews.push({
-                roomId,
-                eventId,
-                sender: event.getSender() ?? "",
-                body: event.getContent().body ?? "",
-                // Default an absent timestamp to 0 so it sorts last and never produces a NaN comparison.
-                ts: event.getTs() ?? 0,
-            });
-        }
-    }
-    previews.sort((a, b) => b.ts - a.ts);
-    return previews;
+    return resolveSearchResults(results);
 }
 
 /**

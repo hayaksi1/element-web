@@ -437,6 +437,18 @@ describe("EventUtils", () => {
             await fetchInitialEvent(client, room.roomId, THREAD_REPLY);
             expect(room.getThread(THREAD_ROOT)).toBeInstanceOf(Thread);
         });
+
+        it("attaches the thread to the fetched reply when the thread already exists", async () => {
+            // Room.createThread early-returns an existing thread without adopting the events passed to it, so the
+            // reply only gets its back-reference if fetchInitialEvent attaches it. Without that, callers route the
+            // reply to the room's unfiltered timeline, which cannot load a thread event.
+            room.createThread(THREAD_ROOT, new MatrixEvent(events[THREAD_ROOT] as IEvent), [], false);
+
+            const initialEvent = await fetchInitialEvent(client, room.roomId, THREAD_REPLY);
+
+            expect(initialEvent!.getThread()).toBeInstanceOf(Thread);
+            expect(initialEvent!.getThread()!.id).toBe(THREAD_ROOT);
+        });
     });
 
     describe("findEditableEvent", () => {

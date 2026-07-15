@@ -15,6 +15,7 @@ import {
     type IResultRoomEvents,
     type ISearchResults,
     MatrixEvent,
+    RelationType,
     SearchOrderBy,
     SearchResult,
 } from "matrix-js-sdk/src/matrix";
@@ -832,6 +833,80 @@ describe("Searching", () => {
             ]);
         });
 
+        // A homeserver search matches the edit event itself, which is only loadable while the message it replaces
+        // happens to be in a loaded timeline; otherwise it is dropped as an unknown relation and the jump fails
+        // with "Failed to load timeline position". The match must address the edited message instead.
+        const makeEditResult = (roomId: string, editId: string, editsId: string, ts = 1): SearchResult =>
+            SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: roomId,
+                        event_id: editId,
+                        sender: "@user:example.org",
+                        origin_server_ts: ts,
+                        content: {
+                            "body": "* edited text",
+                            "msgtype": "m.text",
+                            "m.new_content": { body: "edited text", msgtype: "m.text" },
+                            "m.relates_to": { rel_type: RelationType.Replace, event_id: editsId },
+                        },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                },
+                eventMapper,
+            );
+
+        it("resolves an edit match to the message it edits", () => {
+            const results = {
+                results: [makeEditResult("!room:example.org", "$edit", "$original", 100)],
+                highlights: [],
+                count: 1,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([{ roomId: "!room:example.org", eventId: "$original" }]);
+        });
+
+        // A bot that edits one message repeatedly (and any message matching the term alongside its own edit)
+        // yields several results that all resolve to the same id. They are one message, so they must collapse to
+        // one match: duplicates collide on the results list's React key, and the "k of N" cursor re-finds itself
+        // by id and would always snap back to the first copy.
+        it("collapses repeated edits of one message into a single match", () => {
+            const results = {
+                results: [
+                    makeEditResult("!room:example.org", "$edit3", "$original", 300),
+                    makeEditResult("!room:example.org", "$edit2", "$original", 200),
+                    makeEditResult("!room:example.org", "$edit1", "$original", 100),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            expect(extractSearchMatches(results)).toEqual([{ roomId: "!room:example.org", eventId: "$original" }]);
+        });
+
+        // Both the message and an edit of it can match the term. The message is the one with the real timestamp,
+        // so it must win — otherwise the row is dated by the edit and sorts away from where the jump lands.
+        it("prefers the edited message itself over an edit of it, keeping its timestamp", () => {
+            const results = {
+                results: [
+                    makeEditResult("!room:example.org", "$edit", "$original", 900),
+                    makeResult("!room:example.org", "$original", 100),
+                    makeResult("!room:example.org", "$other", 500),
+                ],
+                highlights: [],
+                count: 3,
+            } as unknown as ISearchResults;
+
+            // $original keeps ts=100 (its own), so it sorts below $other at 500 rather than above it at the
+            // edit's 900.
+            expect(extractSearchMatches(results)).toEqual([
+                { roomId: "!room:example.org", eventId: "$other" },
+                { roomId: "!room:example.org", eventId: "$original" },
+            ]);
+        });
+
         it("keeps the backend order for matches sharing a timestamp (stable sort)", () => {
             const results = {
                 results: [makeResult("!room:example.org", "$a", 5), makeResult("!room:example.org", "$b", 5)],
@@ -970,6 +1045,43 @@ describe("Searching", () => {
                 { roomId: "!room:example.org", eventId: "$mid", sender: "@user:example.org", body: "middle", ts: 200 },
                 { roomId: "!room:example.org", eventId: "$old", sender: "@user:example.org", body: "older", ts: 100 },
             ]);
+        });
+
+        it("previews an edit match with its replacement text and targets the message it edits", () => {
+            const editResult = SearchResult.fromJson(
+                {
+                    rank: 1,
+                    result: {
+                        room_id: "!room:example.org",
+                        event_id: "$edit",
+                        sender: "@user:example.org",
+                        origin_server_ts: 400,
+                        content: {
+                            "body": "* edited text",
+                            "msgtype": "m.text",
+                            "m.new_content": { body: "edited text", msgtype: "m.text" },
+                            "m.relates_to": { rel_type: RelationType.Replace, event_id: "$original" },
+                        },
+                        type: EventType.RoomMessage,
+                    },
+                    context: { profile_info: {}, events_before: [], events_after: [] },
+                },
+                eventMapper,
+            );
+            const results = { results: [editResult], highlights: [], count: 1 } as unknown as ISearchResults;
+
+            // The row must address the same event as extractSearchMatches (they are index-parallel: a row click
+            // looks the match up by row index), and the `* ` wire-format body must never reach the user.
+            expect(extractSearchResultPreviews(results)).toEqual([
+                {
+                    roomId: "!room:example.org",
+                    eventId: "$original",
+                    sender: "@user:example.org",
+                    body: "edited text",
+                    ts: 400,
+                },
+            ]);
+            expect(extractSearchResultPreviews(results)[0].eventId).toBe(extractSearchMatches(results)[0].eventId);
         });
 
         it("skips results whose matched event lacks an id or room id", () => {
