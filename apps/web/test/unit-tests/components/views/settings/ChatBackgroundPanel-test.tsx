@@ -127,4 +127,54 @@ describe("<ChatBackgroundPanel />", () => {
             expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, null),
         );
     });
+
+    it("keeps the uploaded image in the rail after switching to a preset", async () => {
+        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+        renderPanel();
+        const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+        fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+
+        expect(await screen.findByRole("radio", { name: "Custom image" })).toBeInTheDocument();
+
+        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+        await waitFor(() =>
+            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, "dots"),
+        );
+
+        // Picking a preset must not strand the upload: its tile stays, and choosing it again writes the
+        // remembered mxc back rather than doing nothing.
+        expect(screen.getByRole("radio", { name: "Custom image" })).toBeInTheDocument();
+        act(() => screen.getByRole("radio", { name: "Custom image" }).click());
+        await waitFor(() =>
+            expect(setValueSpy).toHaveBeenCalledWith(
+                "RoomView.backgroundImage",
+                null,
+                SettingLevel.ACCOUNT,
+                "mxc://server/uploaded",
+            ),
+        );
+    });
+
+    it("shows the chosen tile before the account data echoes back", async () => {
+        renderPanel();
+        expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
+
+        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+
+        // The setting is account-level, so `useSettingValue` only reports the new value once the homeserver
+        // echoes it back -- which never happens here. The tile must show the click regardless, or the
+        // selection would snap back on every pick and never move at all while offline.
+        await waitFor(() => expect(screen.getByRole("radio", { name: "Dots" })).toBeChecked());
+        expect(screen.getByRole("radio", { name: "None" })).not.toBeChecked();
+    });
+
+    it("reverts the selection when the write fails", async () => {
+        setValueSpy.mockRejectedValueOnce(new Error("offline"));
+        renderPanel();
+
+        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+
+        await waitFor(() => expect(screen.getByRole("radio", { name: "None" })).toBeChecked());
+        expect(screen.getByRole("radio", { name: "Dots" })).not.toBeChecked();
+    });
 });
