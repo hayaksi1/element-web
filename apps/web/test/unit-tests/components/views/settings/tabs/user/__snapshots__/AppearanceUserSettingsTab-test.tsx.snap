@@ -504,6 +504,257 @@ exports[`AppearanceUserSettingsTab should render 1`] = `
             />
           </div>
           <div
+            class="mx_SettingsSubsection mx_SettingsSubsection_newUi"
+            data-testid="chatBackgroundPanel"
+          >
+            <div
+              class="mx_SettingsSubsectionHeading"
+            >
+              <h2
+                class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
+              >
+                Chat background
+              </h2>
+            </div>
+            <div
+              class="mx_SettingsSubsection_description"
+            >
+              <div
+                class="mx_SettingsSubsection_text"
+              >
+                Choose a wallpaper shown behind the message timeline.
+              </div>
+            </div>
+            <div
+              class="mx_SettingsSubsection_content mx_SettingsSubsection_content_newUi"
+            >
+              <form
+                class="_root_1o4d9_17 mx_ChatBackgroundPanel_presets"
+              >
+                <div
+                  class="_field_1o4d9_27 mx_ChatBackgroundPanel_swatch"
+                >
+                  <label
+                    aria-label="None"
+                    class="_label_1o4d9_60"
+                    for="radix-react-use-id-9"
+                  >
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_preview"
+                    />
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_row"
+                    >
+                      <div
+                        class="_container_1ug7n_10"
+                      >
+                        <input
+                          checked=""
+                          class="_input_1ug7n_18"
+                          id="radix-react-use-id-9"
+                          name="chatBackground"
+                          title=""
+                          type="radio"
+                          value="none"
+                        />
+                        <div
+                          class="_ui_1ug7n_19"
+                        />
+                      </div>
+                      <span>
+                        None
+                      </span>
+                    </div>
+                  </label>
+                </div>
+                <div
+                  class="_field_1o4d9_27 mx_ChatBackgroundPanel_swatch"
+                >
+                  <label
+                    aria-label="Dots"
+                    class="_label_1o4d9_60"
+                    for="radix-react-use-id-10"
+                  >
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_preview"
+                      style="background-repeat: repeat; background-size: auto;"
+                    />
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_row"
+                    >
+                      <div
+                        class="_container_1ug7n_10"
+                      >
+                        <input
+                          class="_input_1ug7n_18"
+                          id="radix-react-use-id-10"
+                          name="chatBackground"
+                          title=""
+                          type="radio"
+                          value="dots"
+                        />
+                        <div
+                          class="_ui_1ug7n_19"
+                        />
+                      </div>
+                      <span>
+                        Dots
+                      </span>
+                    </div>
+                  </label>
+                </div>
+                <div
+                  class="_field_1o4d9_27 mx_ChatBackgroundPanel_swatch"
+                >
+                  <label
+                    aria-label="Grid"
+                    class="_label_1o4d9_60"
+                    for="radix-react-use-id-11"
+                  >
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_preview"
+                      style="background-repeat: repeat; background-size: auto;"
+                    />
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_row"
+                    >
+                      <div
+                        class="_container_1ug7n_10"
+                      >
+                        <input
+                          class="_input_1ug7n_18"
+                          id="radix-react-use-id-11"
+                          name="chatBackground"
+                          title=""
+                          type="radio"
+                          value="grid"
+                        />
+                        <div
+                          class="_ui_1ug7n_19"
+                        />
+                      </div>
+                      <span>
+                        Grid
+                      </span>
+                    </div>
+                  </label>
+                </div>
+                <div
+                  class="_field_1o4d9_27 mx_ChatBackgroundPanel_swatch"
+                >
+                  <label
+                    aria-label="Diagonal"
+                    class="_label_1o4d9_60"
+                    for="radix-react-use-id-12"
+                  >
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_preview"
+                      style="background-repeat: repeat; background-size: auto;"
+                    />
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_row"
+                    >
+                      <div
+                        class="_container_1ug7n_10"
+                      >
+                        <input
+                          class="_input_1ug7n_18"
+                          id="radix-react-use-id-12"
+                          name="chatBackground"
+                          title=""
+                          type="radio"
+                          value="diagonal"
+                        />
+                        <div
+                          class="_ui_1ug7n_19"
+                        />
+                      </div>
+                      <span>
+                        Diagonal
+                      </span>
+                    </div>
+                  </label>
+                </div>
+                <div
+                  class="_field_1o4d9_27 mx_ChatBackgroundPanel_swatch"
+                >
+                  <label
+                    aria-label="Soft gradient"
+                    class="_label_1o4d9_60"
+                    for="radix-react-use-id-13"
+                  >
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_preview"
+                      style="background-image: linear-gradient(160deg, rgba(120,140,255,0.10), rgba(255,140,200,0.10)); background-repeat: no-repeat; background-size: cover;"
+                    />
+                    <div
+                      class="mx_ChatBackgroundPanel_swatch_row"
+                    >
+                      <div
+                        class="_container_1ug7n_10"
+                      >
+                        <input
+                          class="_input_1ug7n_18"
+                          id="radix-react-use-id-13"
+                          name="chatBackground"
+                          title=""
+                          type="radio"
+                          value="soft"
+                        />
+                        <div
+                          class="_ui_1ug7n_19"
+                        />
+                      </div>
+                      <span>
+                        Soft gradient
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </form>
+              <div
+                class="mx_ChatBackgroundPanel_actions"
+              >
+                <button
+                  class="_button_1nw83_8"
+                  data-kind="secondary"
+                  data-size="md"
+                  role="button"
+                  tabindex="0"
+                >
+                  Upload image
+                </button>
+                <input
+                  accept="image/*"
+                  data-testid="chatBackgroundUpload"
+                  hidden=""
+                  type="file"
+                />
+              </div>
+              <label
+                class="mx_ChatBackgroundPanel_opacity"
+              >
+                <span>
+                  Background opacity
+                </span>
+                <input
+                  disabled=""
+                  max="1"
+                  min="0.1"
+                  step="0.05"
+                  type="range"
+                  value="1"
+                />
+              </label>
+            </div>
+            <div
+              class="_separator_13qwf_8"
+              data-kind="primary"
+              data-orientation="horizontal"
+              role="separator"
+            />
+          </div>
+          <div
             class="mx_SettingsSubsection"
             data-testid="mx_FontScalingPanel"
           >
