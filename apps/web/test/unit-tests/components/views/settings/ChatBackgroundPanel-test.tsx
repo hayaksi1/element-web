@@ -50,7 +50,7 @@ describe("<ChatBackgroundPanel />", () => {
 
     it("renders the preset options", () => {
         renderPanel();
-        for (const name of ["None", "Dots", "Grid", "Diagonal", "Soft gradient"]) {
+        for (const name of ["None", "Doodles", "Paper", "Meadow", "Dusk glow", "Night sky", "Fern"]) {
             expect(screen.getByRole("radio", { name })).toBeInTheDocument();
         }
     });
@@ -60,16 +60,24 @@ describe("<ChatBackgroundPanel />", () => {
         expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
     });
 
+    it("shows a stored legacy preset id as its successor tile", () => {
+        // Account data written by the first-generation presets must keep selecting a tile
+        // rather than leaving the rail looking like nothing is chosen.
+        settings["RoomView.backgroundImage"] = "dots";
+        renderPanel();
+        expect(screen.getByRole("radio", { name: "Doodles" })).toBeChecked();
+    });
+
     it("writes the chosen preset at the account level", async () => {
         renderPanel();
-        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+        act(() => screen.getByRole("radio", { name: "Doodles" }).click());
         await waitFor(() =>
-            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, "dots"),
+            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, "doodle"),
         );
     });
 
     it("clears the background when None is chosen", async () => {
-        settings["RoomView.backgroundImage"] = "dots";
+        settings["RoomView.backgroundImage"] = "doodle";
         renderPanel();
         act(() => screen.getByRole("radio", { name: "None" }).click());
         await waitFor(() =>
@@ -77,18 +85,83 @@ describe("<ChatBackgroundPanel />", () => {
         );
     });
 
-    it("writes the opacity when the slider changes", async () => {
-        settings["RoomView.backgroundImage"] = "dots";
+    it("writes the opacity once the slider is released", async () => {
+        settings["RoomView.backgroundImage"] = "doodle";
         renderPanel();
-        fireEvent.change(screen.getByRole("slider"), { target: { value: "0.5" } });
+        const slider = screen.getByRole("slider");
+        fireEvent.change(slider, { target: { value: "0.5" } });
+        fireEvent.pointerUp(slider);
         await waitFor(() =>
             expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundOpacity", null, SettingLevel.ACCOUNT, 0.5),
+        );
+    });
+
+    it("does not write while the slider is still being dragged", async () => {
+        // Each write is an account-data round trip that rebuilds the whole settings event, so persisting per
+        // increment would both hammer the homeserver and let a slow echo clobber a newer choice.
+        settings["RoomView.backgroundImage"] = "doodle";
+        renderPanel();
+        const slider = screen.getByRole("slider");
+        for (const value of ["0.9", "0.8", "0.7", "0.6", "0.5"]) {
+            fireEvent.change(slider, { target: { value } });
+        }
+
+        expect(setValueSpy).not.toHaveBeenCalledWith(
+            "RoomView.backgroundOpacity",
+            null,
+            SettingLevel.ACCOUNT,
+            expect.anything(),
+        );
+        // The dial still tracks the drag, it just isn't persisted yet.
+        expect(slider).toHaveValue("0.5");
+
+        fireEvent.pointerUp(slider);
+        await waitFor(() =>
+            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundOpacity", null, SettingLevel.ACCOUNT, 0.5),
+        );
+        expect(setValueSpy.mock.calls.filter(([name]) => name === "RoomView.backgroundOpacity")).toHaveLength(1);
+    });
+
+    it("commits the opacity when the slider is adjusted with the keyboard", async () => {
+        settings["RoomView.backgroundImage"] = "doodle";
+        renderPanel();
+        const slider = screen.getByRole("slider");
+        fireEvent.change(slider, { target: { value: "0.75" } });
+        fireEvent.keyUp(slider, { key: "ArrowLeft" });
+        await waitFor(() =>
+            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundOpacity", null, SettingLevel.ACCOUNT, 0.75),
         );
     });
 
     it("disables the opacity slider when no background is set", () => {
         renderPanel();
         expect(screen.getByRole("slider")).toBeDisabled();
+    });
+
+    it("falls back to None for a preset id it does not know", () => {
+        // A preset added by a newer client paints nothing, so the rail has to agree rather than leave every
+        // tile unchecked with the opacity dial still live.
+        settings["RoomView.backgroundImage"] = "future-pattern";
+        renderPanel();
+        expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
+        expect(screen.getByRole("slider")).toBeDisabled();
+    });
+
+    it("clamps an out-of-range stored opacity for display", () => {
+        settings["RoomView.backgroundImage"] = "doodle";
+        settings["RoomView.backgroundOpacity"] = -5;
+        renderPanel();
+        expect(screen.getByRole("slider")).toHaveValue(String(0.1));
+    });
+
+    it("shows an error when the opacity write fails", async () => {
+        settings["RoomView.backgroundImage"] = "doodle";
+        setValueSpy.mockRejectedValue(new Error("nope"));
+        renderPanel();
+        const slider = screen.getByRole("slider");
+        fireEvent.change(slider, { target: { value: "0.5" } });
+        fireEvent.pointerUp(slider);
+        expect(await screen.findByText("Couldn't save your chat background. Please try again.")).toBeInTheDocument();
     });
 
     it("uploads a custom image and stores its mxc uri", async () => {
@@ -136,9 +209,9 @@ describe("<ChatBackgroundPanel />", () => {
 
         expect(await screen.findByRole("radio", { name: "Custom image" })).toBeInTheDocument();
 
-        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+        act(() => screen.getByRole("radio", { name: "Doodles" }).click());
         await waitFor(() =>
-            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, "dots"),
+            expect(setValueSpy).toHaveBeenCalledWith("RoomView.backgroundImage", null, SettingLevel.ACCOUNT, "doodle"),
         );
 
         // Picking a preset must not strand the upload: its tile stays, and choosing it again writes the
@@ -159,12 +232,12 @@ describe("<ChatBackgroundPanel />", () => {
         renderPanel();
         expect(screen.getByRole("radio", { name: "None" })).toBeChecked();
 
-        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+        act(() => screen.getByRole("radio", { name: "Doodles" }).click());
 
         // The setting is account-level, so `useSettingValue` only reports the new value once the homeserver
         // echoes it back -- which never happens here. The tile must show the click regardless, or the
         // selection would snap back on every pick and never move at all while offline.
-        await waitFor(() => expect(screen.getByRole("radio", { name: "Dots" })).toBeChecked());
+        await waitFor(() => expect(screen.getByRole("radio", { name: "Doodles" })).toBeChecked());
         expect(screen.getByRole("radio", { name: "None" })).not.toBeChecked();
     });
 
@@ -172,9 +245,9 @@ describe("<ChatBackgroundPanel />", () => {
         setValueSpy.mockRejectedValueOnce(new Error("offline"));
         renderPanel();
 
-        act(() => screen.getByRole("radio", { name: "Dots" }).click());
+        act(() => screen.getByRole("radio", { name: "Doodles" }).click());
 
         await waitFor(() => expect(screen.getByRole("radio", { name: "None" })).toBeChecked());
-        expect(screen.getByRole("radio", { name: "Dots" })).not.toBeChecked();
+        expect(screen.getByRole("radio", { name: "Doodles" })).not.toBeChecked();
     });
 });

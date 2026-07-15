@@ -5,16 +5,11 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import path from "node:path";
-
 import { type Page } from "@playwright/test";
 import { rejectToast } from "@element-hq/element-web-playwright-common";
 
 import { expect, test } from ".";
 import { SettingLevel } from "../../../../src/settings/SettingLevel";
-
-// Playwright runs from apps/web; drop the captures somewhere the user can actually open them.
-const SHOTS = path.resolve(process.cwd(), "../../screenshots");
 
 // A 2x2 magenta PNG: enough to prove the upload round-trip and give the custom tile something to show.
 const PNG = Buffer.from(
@@ -50,24 +45,22 @@ test.describe("Chat background panel", () => {
         // Nothing is chosen, so the opacity slider has nothing to act on.
         await expect(panel.getByRole("radio", { name: "None" })).toBeChecked();
         await expect(panel.getByRole("slider")).toBeDisabled();
-        await page.locator(".mx_SettingsTab").screenshot({ path: `${SHOTS}/chat-background-1-tab-light.png` });
-        await panel.screenshot({ path: `${SHOTS}/chat-background-2-rail-none-light.png` });
 
-        // The rail fits on one row -- the whole point of the redesign.
+        // The tiles stay on a single row, so the section never pushes the rest of the tab out of reach.
         const railBox = await panel.locator(".mx_ChatBackgroundPanel_rail").boundingBox();
         const tileBox = await panel.locator(".mx_ChatBackgroundPanel_tile").first().boundingBox();
+        expect(railBox).not.toBeNull();
+        expect(tileBox).not.toBeNull();
         expect(railBox!.height).toBeLessThan(tileBox!.height * 2);
 
-        await tile(page, "Dots").click();
-        await expect(panel.getByRole("radio", { name: "Dots" })).toBeChecked();
+        await tile(page, "Doodles").click();
+        await expect(panel.getByRole("radio", { name: "Doodles" })).toBeChecked();
         await expect(panel.getByRole("slider")).toBeEnabled();
-        await panel.screenshot({ path: `${SHOTS}/chat-background-3-rail-dots-light.png` });
 
         // The wallpaper reaches the timeline, not just the setting.
         await util.closeAppearanceTab();
         await util.createAndDisplayRoom();
         await expect(page.locator(".mx_RoomView_timeline")).toHaveCSS("--mx-chat-background-repeat", "repeat");
-        await page.screenshot({ path: `${SHOTS}/chat-background-4-timeline-dots.png` });
 
         await util.openAppearanceTab();
         await panel.locator('input[type="file"]').setInputFiles({
@@ -80,10 +73,9 @@ test.describe("Chat background panel", () => {
         // way back to it is to upload it again.
         const custom = panel.getByRole("radio", { name: "Custom image" });
         await expect(custom).toBeChecked();
-        await tile(page, "Grid").click();
-        await expect(panel.getByRole("radio", { name: "Grid" })).toBeChecked();
+        await tile(page, "Paper").click();
+        await expect(panel.getByRole("radio", { name: "Paper" })).toBeChecked();
         await expect(custom).toBeVisible();
-        await panel.screenshot({ path: `${SHOTS}/chat-background-5-custom-persists-light.png` });
 
         // Re-selecting it restores the uploaded image rather than doing nothing.
         await tile(page, "Custom image").click();
@@ -105,11 +97,8 @@ test.describe("Chat background panel", () => {
 
         const panel = chatBackgroundPanel(page);
         await expect(panel).toBeVisible();
-        await tile(page, "Diagonal").click();
-        await expect(panel.getByRole("radio", { name: "Diagonal" })).toBeChecked();
-
-        await panel.screenshot({ path: `${SHOTS}/chat-background-6-rail-dark.png` });
-        await page.locator(".mx_SettingsTab").screenshot({ path: `${SHOTS}/chat-background-7-tab-dark.png` });
+        await tile(page, "Dusk glow").click();
+        await expect(panel.getByRole("radio", { name: "Dusk glow" })).toBeChecked();
     });
 
     test("moves between tiles with the arrow keys", async ({ page, app, user, util }) => {
@@ -119,14 +108,13 @@ test.describe("Chat background panel", () => {
         const panel = chatBackgroundPanel(page);
         await panel.getByRole("radio", { name: "None" }).focus();
 
-        // A native radio group is one tab stop that arrow keys walk. This is why the form is no longer remounted
-        // on every pick: the remount destroyed focus and stopped the walk dead.
+        // The rail is a native radio group: one tab stop, walked with the arrow keys.
         await page.keyboard.press("ArrowRight");
-        await expect(panel.getByRole("radio", { name: "Dots" })).toBeChecked();
-        await expect(panel.getByRole("radio", { name: "Dots" })).toBeFocused();
+        await expect(panel.getByRole("radio", { name: "Doodles" })).toBeChecked();
+        await expect(panel.getByRole("radio", { name: "Doodles" })).toBeFocused();
 
         await page.keyboard.press("ArrowRight");
-        await expect(panel.getByRole("radio", { name: "Grid" })).toBeChecked();
-        await expect(panel.getByRole("radio", { name: "Grid" })).toBeFocused();
+        await expect(panel.getByRole("radio", { name: "Paper" })).toBeChecked();
+        await expect(panel.getByRole("radio", { name: "Paper" })).toBeFocused();
     });
 });

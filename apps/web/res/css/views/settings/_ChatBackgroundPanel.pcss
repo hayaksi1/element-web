@@ -7,10 +7,10 @@ Please see LICENSE files in the repository root for full details.
 
 /*
  * The options are a plain fieldset rather than Compound's form `Root`. `Root` is `display: flex;
- * flex-direction: column`, and its class lands on the same element as ours -- which is what made the
- * previous `flex-wrap: wrap` here inert and stretched every swatch into its own full-width row.
- * Owning the container outright means the row needs no `!important` to win, unlike
- * .mx_ThemeChoicePanel_ThemeSelectors, and nothing here depends on a Compound internal staying put.
+ * flex-direction: column` and its class lands on the same element as ours, so a row layout set here
+ * would lose to it and stretch every swatch into its own full-width row. Owning the container
+ * outright means the row needs no `!important` to win, unlike .mx_ThemeChoicePanel_ThemeSelectors,
+ * and nothing here depends on a Compound internal staying put.
  */
 .mx_ChatBackgroundPanel_rail {
     display: flex;
@@ -18,7 +18,9 @@ Please see LICENSE files in the repository root for full details.
     flex-wrap: wrap;
     /* Tiles size to their own content instead of stretching to the tallest in the row. */
     align-items: flex-start;
-    gap: var(--cpd-space-3x);
+    /* 2x, not 3x: with six presets the rail is eight tiles (None + presets + upload), and it must
+       still fit the ~648px settings-tab content width on one row -- see the tile size below. */
+    gap: var(--cpd-space-2x);
 
     /* Reset the UA fieldset chrome; `min-inline-size` stops it refusing to shrink below its content. */
     margin: 0;
@@ -60,16 +62,33 @@ Please see LICENSE files in the repository root for full details.
 .mx_ChatBackgroundPanel_tile_preview {
     position: relative;
     box-sizing: border-box;
-    width: 76px;
-    height: 52px;
+    /* 60x41 keeps all eight tiles + gaps (~544px with the current captions) inside even the most
+       conservative reading of the settings-tab content width (~568px), so the rail stays a single
+       row. Adding the Custom tile may wrap it -- that degradation is deliberate. */
+    width: 60px;
+    height: 41px;
     border-radius: 8px;
     /* Judge the pattern against the colour it will actually sit on. */
     background-color: var(--cpd-color-bg-canvas-default);
     background-position: center;
+    /* The tile sets both theme variants as custom properties; paint the one matching the active
+       theme so the preview shows exactly what the timeline would. */
+    background-image: var(--mx-chat-tile-image, none);
+    background-repeat: var(--mx-chat-tile-repeat, no-repeat);
+    background-size: var(--mx-chat-tile-size, cover);
     border: 1px solid var(--cpd-color-border-interactive-secondary);
     transition:
         border-color 0.1s ease-out,
         box-shadow 0.1s ease-out;
+}
+
+/* :not(_none) keeps the empty swatch's diagonal, which this higher-specificity rule would
+   otherwise blank out in dark theme. */
+.cpd-theme-dark .mx_ChatBackgroundPanel_tile_preview:not(.mx_ChatBackgroundPanel_tile_preview_none),
+.cpd-theme-dark-hc .mx_ChatBackgroundPanel_tile_preview:not(.mx_ChatBackgroundPanel_tile_preview_none) {
+    background-image: var(--mx-chat-tile-image-dark, none);
+    background-repeat: var(--mx-chat-tile-repeat-dark, no-repeat);
+    background-size: var(--mx-chat-tile-size-dark, cover);
 }
 
 @media (prefers-reduced-motion: reduce) {

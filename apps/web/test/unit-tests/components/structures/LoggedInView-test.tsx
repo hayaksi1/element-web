@@ -620,7 +620,7 @@ describe("<LoggedInView />", () => {
 
         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
             mockChatBackgroundSettings({
-                "RoomView.backgroundImage": "grid",
+                "RoomView.backgroundImage": "doodle",
                 "RoomView.backgroundOpacity": 0.5,
             });
 
@@ -629,7 +629,12 @@ describe("<LoggedInView />", () => {
 
             expect(style.getPropertyValue("--mx-chat-background-image")).toContain("data:image/svg+xml,");
             expect(style.getPropertyValue("--mx-chat-background-repeat")).toBe("repeat");
-            expect(style.getPropertyValue("--mx-chat-background-size")).toBe("auto");
+            expect(style.getPropertyValue("--mx-chat-background-size")).toBe("480px 480px");
+            // The dark variant rides along so the stylesheet can swap artwork on theme change.
+            expect(style.getPropertyValue("--mx-chat-background-image-dark")).toContain("data:image/svg+xml,");
+            expect(style.getPropertyValue("--mx-chat-background-image-dark")).not.toBe(
+                style.getPropertyValue("--mx-chat-background-image"),
+            );
             expect(style.getPropertyValue("--mx-chat-background-opacity")).toBe("0.5");
         });
 
