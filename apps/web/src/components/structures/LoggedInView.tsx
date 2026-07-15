@@ -66,7 +66,11 @@ import { Landmark, LandmarkNavigation } from "../../accessibility/LandmarkNaviga
 import { ModuleApi } from "../../modules/Api.ts";
 import { SDKContext } from "../../contexts/SDKContext.ts";
 import { ResizerViewModel } from "../../viewmodels/structures/ResizerViewModel.ts";
-import { resolveChatBackground, type ResolvedChatBackground } from "../../settings/ChatBackgrounds.ts";
+import {
+    clampChatBackgroundOpacity,
+    resolveChatBackground,
+    type ResolvedChatBackground,
+} from "../../settings/ChatBackgrounds.ts";
 
 // We need to fetch each pinned message individually (if we don't already have it)
 // so each pinned message may trigger a request. Limit the number per room for sanity.
@@ -288,7 +292,7 @@ class LoggedInView extends React.Component<IProps, IState> {
         return {
             chatBackground:
                 resolveChatBackground(SettingsStore.getValue("RoomView.backgroundImage"), client) ?? undefined,
-            chatBackgroundOpacity: SettingsStore.getValue("RoomView.backgroundOpacity"),
+            chatBackgroundOpacity: clampChatBackgroundOpacity(SettingsStore.getValue("RoomView.backgroundOpacity")),
         };
     }
 
@@ -299,15 +303,20 @@ class LoggedInView extends React.Component<IProps, IState> {
     /**
      * Build the inline style that exposes the chat wallpaper to the timeline. The CSS custom
      * properties inherit down the DOM to `.mx_RoomView_timeline::before`, which paints the layer.
+     * Both theme variants are exposed; the stylesheet picks the dark set via the `cpd-theme-*`
+     * class on the body, so a theme switch repaints without any JS involvement.
      * Returns `undefined` when no wallpaper is configured so the timeline stays fully transparent.
      */
     private getChatBackgroundStyle(): React.CSSProperties | undefined {
         const bg = this.state.chatBackground;
         if (!bg) return undefined;
         return {
-            "--mx-chat-background-image": bg.image,
-            "--mx-chat-background-repeat": bg.repeat,
-            "--mx-chat-background-size": bg.size,
+            "--mx-chat-background-image": bg.light.image,
+            "--mx-chat-background-repeat": bg.light.repeat,
+            "--mx-chat-background-size": bg.light.size,
+            "--mx-chat-background-image-dark": bg.dark.image,
+            "--mx-chat-background-repeat-dark": bg.dark.repeat,
+            "--mx-chat-background-size-dark": bg.dark.size,
             "--mx-chat-background-opacity": String(this.state.chatBackgroundOpacity),
         } as React.CSSProperties;
     }
