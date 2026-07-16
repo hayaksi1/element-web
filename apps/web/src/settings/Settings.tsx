@@ -828,7 +828,9 @@ export const SETTINGS: Settings = {
         controller: new IncompatibleController("layout", false, (v: Layout) => v !== Layout.Group),
     },
     "compactMessageActions": {
-        supportedLevels: LEVELS_ACCOUNT_SETTINGS,
+        // Device-based like the neighbouring `useCompactLayout` toggle; the Appearance toggle writes it per
+        // device. Config support lets a deployment set the default (also used by the Playwright baseline).
+        supportedLevels: LEVELS_DEVICE_ONLY_SETTINGS_WITH_CONFIG,
         displayName: _td("settings|appearance|compact_message_actions"),
         description: _td("settings|appearance|compact_message_actions_description"),
         // Off by default: the app starts with messages highlighted and their toolbar shown on hover. The

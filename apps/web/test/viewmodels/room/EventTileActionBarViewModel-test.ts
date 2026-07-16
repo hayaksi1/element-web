@@ -761,6 +761,18 @@ describe("EventTileActionBarViewModel", () => {
             expect(vm.getSnapshot().actions).not.toContain(ActionBarAction.Pin);
         });
 
+        it("keeps reply in thread on the bar for a deleted message with a thread", () => {
+            const mxEvent = createMessageEvent();
+            mocked(isContentActionable).mockReturnValue(false);
+            jest.spyOn(mxEvent, "getThread").mockReturnValue({ rootEvent } as never);
+
+            const vm = createVm({ mxEvent, timelineRenderingType: TimelineRenderingType.Room });
+
+            // A redacted event is not content-actionable, so the options menu cannot offer reply in thread;
+            // dropping it from the bar as well would lose the action entirely.
+            expect(vm.getSnapshot().actions).toContain(ActionBarAction.ReplyInThread);
+        });
+
         it("keeps download and hide on the bar, as the options menu has no equivalent", async () => {
             jest.spyOn(MediaEventHelper, "isEligible").mockReturnValue(true);
             jest.spyOn(MediaEventHelper, "canHide").mockReturnValue(true);

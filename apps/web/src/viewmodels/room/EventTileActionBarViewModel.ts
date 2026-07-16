@@ -148,8 +148,9 @@ export class EventTileActionBarViewModel
      * When `compactMessageActions` is set, the quick actions (react, reply, reply in thread, edit, pin)
      * are left out and reached through the options menu instead, which renders them via
      * `showQuickActions`. Hide, download and expand stay on the bar: the options menu has no equivalent
-     * for them, so collapsing them would remove them altogether. Failed events return early below and
-     * keep their resend/cancel buttons for the same reason.
+     * for them, so collapsing them would remove them altogether. Reply in thread on a deleted message
+     * stays for the same reason (the menu gates it on the event being content-actionable, which a redacted
+     * event is not). Failed events return early below and keep their resend/cancel buttons too.
      */
     private static resolveActions(
         eventState: DerivedEventState,
@@ -168,12 +169,15 @@ export class EventTileActionBarViewModel
         if (mediaState.showDownload) {
             actions.push(ActionBarAction.Download);
         }
+        // Reply in thread on a deleted message keeps its bar button even when the quick actions collapse:
+        // the options menu gates reply in thread on the event being content-actionable, which a redacted
+        // event is not, so this action has no menu equivalent to fall back on.
+        if (!eventState.showReply && eventState.showThreadForDeletedMessage) {
+            actions.push(ActionBarAction.ReplyInThread);
+        }
         if (!compactMessageActions) {
             if (eventState.showReact) {
                 actions.push(ActionBarAction.React);
-            }
-            if (!eventState.showReply && eventState.showThreadForDeletedMessage) {
-                actions.push(ActionBarAction.ReplyInThread);
             }
             if (eventState.showReply) {
                 actions.push(ActionBarAction.Reply);

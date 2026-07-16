@@ -77,6 +77,29 @@ test.describe("Compact message actions", () => {
         await expect(page.getByRole("textbox", { name: "Search" })).toBeVisible();
     });
 
+    test("removes an existing reaction from the menu rather than duplicating it", async ({ page, app, room }) => {
+        await app.settings.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
+        await page.goto(`#/room/${room.roomId}`);
+
+        const tile = await sendMessage(page, "Hello");
+        const reactViaMenu = async () => {
+            await tile.hover();
+            await tile.getByRole("button", { name: "Options" }).click();
+            await page.getByRole("menuitem", { name: "React", exact: true }).click();
+            await page.locator(".mx_EmojiPicker_body").getByText("😀").first().click();
+        };
+
+        // React once from the collapsed menu.
+        await reactViaMenu();
+        const reaction = tile.locator(".mx_ReactionsRow button").filter({ hasText: "😀" });
+        await expect(reaction).toBeVisible();
+
+        // React again with the same emoji. The options menu forwards `reactions` to the picker, so it sees the
+        // existing reaction and redacts it; without that prop it would send a duplicate and the pill would stay.
+        await reactViaMenu();
+        await expect(reaction).toHaveCount(0);
+    });
+
     // The options button is revealed by hover, so it would be trivial to make it mouse-only. axe cannot catch
     // that: it inspects a static page and never simulates hover. This asserts the keyboard path explicitly.
     test("reveals the options button to keyboard users without a mouse", async ({ page, app, room }) => {
