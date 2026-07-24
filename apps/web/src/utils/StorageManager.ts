@@ -22,8 +22,8 @@ function log(msg: string): void {
     logger.log(`StorageManager: ${msg}`);
 }
 
-function warn(msg: string): void {
-    logger.warn(`StorageManager: ${msg}`);
+function warn(msg: string, ...args: any[]): void {
+    logger.warn(`StorageManager: ${msg}`, ...args);
 }
 
 function error(msg: string, ...args: any[]): void {
@@ -61,7 +61,7 @@ function warnPersistenceDenied(): void {
  * Invoked on every login *and* session restore, so we first check whether storage is
  * already persistent and short-circuit to avoid re-requesting (some browsers re-prompt).
  *
- * Never rejects — the sole caller treats it as fire-and-forget.
+ * Never rejects, so it is safe to call fire-and-forget.
  *
  * @returns whether storage is persistent after the attempt.
  */
@@ -75,8 +75,8 @@ export async function tryPersistStorage(): Promise<boolean> {
                     log("Persistent storage already granted");
                     return true;
                 }
-            } catch {
-                warn("Could not query persisted-storage state; requesting persistence anyway");
+            } catch (e) {
+                warn("Could not query persisted-storage state; requesting persistence anyway", e);
             }
             const persistent = await navigator.storage.persist();
             log(`Persistent? ${persistent}`);
@@ -84,17 +84,6 @@ export async function tryPersistStorage(): Promise<boolean> {
                 warnPersistenceDenied();
             }
             return persistent;
-        } else if (document.requestStorageAccess) {
-            // Safari
-            try {
-                await document.requestStorageAccess();
-                log("Persistent? true");
-                return true;
-            } catch {
-                log("Persistent? false");
-                warnPersistenceDenied();
-                return false;
-            }
         } else {
             log("Persistence unsupported");
             return false;

@@ -23,7 +23,6 @@ declare module "matrix-seshat" {
         ngramMaxSize?: number;
     }
 
-    /* eslint-disable camelcase */
     interface IMatrixEvent {
         event_id: string;
         sender: string;
@@ -61,7 +60,6 @@ declare module "matrix-seshat" {
             context: ISearchContext;
         }>;
     }
-    /* eslint-enable camelcase */
 
     interface ICheckpoint {
         roomId: string;

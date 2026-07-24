@@ -90,6 +90,7 @@ export function RoomFilesView({ timelineSet, onPaginationRequest, empty }: Props
                 <Flex
                     as="div"
                     role="listbox"
+                    tabIndex={-1}
                     aria-label={_t("file_panel|tabs_label")}
                     align="center"
                     gap="var(--cpd-space-2x)"
@@ -103,6 +104,8 @@ export function RoomFilesView({ timelineSet, onPaginationRequest, empty }: Props
                                 tabRefs.current[index] = el;
                             }}
                             role="option"
+                            tabIndex={0}
+                            aria-selected={category === activeCategory}
                             selected={category === activeCategory}
                             onClick={() => vm.setCategory(category)}
                         >

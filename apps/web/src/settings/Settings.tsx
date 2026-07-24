@@ -240,8 +240,6 @@ export interface Settings {
     "RoomView.backgroundImage": IBaseSetting<string | null>;
     "RoomView.backgroundOpacity": IBaseSetting<number>;
     "sendReadReceipts": IBaseSetting<boolean>;
-    "baseFontSize": IBaseSetting<"" | number>;
-    "baseFontSizeV2": IBaseSetting<"" | number>;
     "fontSizeDelta": IBaseSetting<number>;
     "useCustomFontSize": IBaseSetting<boolean>;
     "MessageComposerInput.suggestEmoji": IBaseSetting<boolean>;
@@ -646,15 +644,6 @@ export const SETTINGS: Settings = {
         shouldWarn: true,
         default: false,
     },
-    /**
-     * @deprecated in favor of {@link fontSizeDelta}
-     */
-    "baseFontSize": {
-        displayName: _td("settings|appearance|font_size"),
-        supportedLevels: LEVELS_ACCOUNT_SETTINGS,
-        default: "",
-        controller: new FontSizeController(),
-    },
     "feature_render_reaction_images": {
         isFeature: true,
         labsGroup: LabGroup.Messaging,
@@ -682,20 +671,7 @@ export const SETTINGS: Settings = {
         default: false,
     },
     /**
-     * With the transition to Compound we are moving to a base font size
-     * of 16px. We're taking the opportunity to move away from the `baseFontSize`
-     * setting that had a 5px offset.
-     * @deprecated in favor {@link fontSizeDelta}
-     */
-    "baseFontSizeV2": {
-        displayName: _td("settings|appearance|font_size"),
-        supportedLevels: [SettingLevel.DEVICE],
-        default: "",
-        controller: new FontSizeController(),
-    },
-    /**
      * This delta is added to the browser default font size
-     * Moving from `baseFontSizeV2` to `fontSizeDelta` to replace the default 16px to --cpd-font-size-root (browser default font size) + fontSizeDelta
      */
     "fontSizeDelta": {
         displayName: _td("settings|appearance|font_size"),

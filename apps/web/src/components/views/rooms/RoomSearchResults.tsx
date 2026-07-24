@@ -85,6 +85,7 @@ const RoomSearchResults: React.FC<Props> = ({
                             key={preview.eventId}
                             className="mx_RoomSearchResults_row"
                             role="option"
+                            tabIndex={0}
                             aria-selected={false}
                             onClick={() => onResultClick(index)}
                         >

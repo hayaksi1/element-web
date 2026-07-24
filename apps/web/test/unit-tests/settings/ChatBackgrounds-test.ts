@@ -123,6 +123,7 @@ describe("ChatBackgrounds", () => {
                 light: uploaded,
                 dark: uploaded,
             });
+            // eslint-disable-next-line no-restricted-properties
             expect(client.mxcUrlToHttp).toHaveBeenCalled();
         });
 

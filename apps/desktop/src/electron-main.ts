@@ -24,7 +24,6 @@ import {
     nativeTheme,
     screen,
 } from "electron";
-// eslint-disable-next-line n/file-extension-in-import
 import * as Sentry from "@sentry/electron/main";
 import path, { dirname } from "node:path";
 import { URL, fileURLToPath } from "node:url";
