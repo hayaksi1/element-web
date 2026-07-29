@@ -1,5 +1,5 @@
 /*
-Copyright 2026 New Vector Ltd.
+Copyright 2026 hayaksi1
 
 SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE files in the repository root for full details.
@@ -8,6 +8,8 @@ Please see LICENSE files in the repository root for full details.
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { dialog, shell, type WebContents } from "electron";
 
+// The `userDownloadAction` listener is registered at import time, so capture the callbacks that
+// `ipcMain.on` receives in order to invoke the handler under test directly.
 const { ipcHandlers } = vi.hoisted(() => ({
     ipcHandlers: {} as Record<string, (...args: unknown[]) => unknown>,
 }));
@@ -25,6 +27,7 @@ vi.mock("electron", () => ({
     },
 }));
 vi.mock("./language-helper.js", () => ({ _t: (key: string): string => key }));
+vi.mock("./config.js", () => ({ getConfig: (): Record<string, never> => ({}) }));
 vi.mock("./save-image.js", () => ({ saveImageToFile: vi.fn() }));
 
 const registerWebContentsHandlers = (await import("./webcontents-handler.js")).default;
@@ -52,8 +55,10 @@ function makeWebContents(): MockWebContents {
     };
 }
 
-// Drives the real will-download → done("completed") flow to populate the private userDownloadMap,
-// returning the id assigned to the completed download.
+/**
+ * Drives the real will-download → done("completed") flow so the download is registered the way it is
+ * in production, and returns the id the handler assigned to it.
+ */
 function completeDownload(wc: MockWebContents, savePath: string): number {
     const doneHandlers: Record<string, (...args: unknown[]) => void> = {};
     const item = {
@@ -87,14 +92,16 @@ describe("userDownloadAction handler", () => {
         expect(dialog.showMessageBox).not.toHaveBeenCalled();
     });
 
-    it("surfaces an error dialog when the open fails (previously a silent no-op)", async () => {
+    it("shows the underlying error when the open fails, rather than failing silently", async () => {
         vi.mocked(shell.openPath).mockResolvedValue("LSOpenURLsWithRole failed");
         const id = completeDownload(wc, "/tmp/file.pdf");
 
         await ipcHandlers["userDownloadAction"]({}, { id, open: true });
 
         expect(shell.openPath).toHaveBeenCalledWith("/tmp/file.pdf");
-        expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
+        expect(dialog.showMessageBox).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "error", detail: "LSOpenURLsWithRole failed" }),
+        );
     });
 
     it("does not open anything on a plain dismiss", async () => {
