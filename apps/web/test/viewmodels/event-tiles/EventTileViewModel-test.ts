@@ -296,7 +296,10 @@ describe("EventTileViewModel", () => {
         );
 
         expect(fileSnapshot.event.isContinuation).toBe(false);
-        expect(bubbleSnapshot.event.isContinuation).toBe(true);
+        // The shared-media panel is a filtered list, not a conversation, so it never collapses rows into
+        // continuations — not even in bubble layout, which would otherwise let them through. Every file
+        // keeps its own avatar and sender. See getIsContinuation.
+        expect(bubbleSnapshot.event.isContinuation).toBe(false);
     });
 
     it("derives line classes from event type, message type, and media eligibility", () => {

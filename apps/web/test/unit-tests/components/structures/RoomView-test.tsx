@@ -40,6 +40,7 @@ import {
 import userEvent from "@testing-library/user-event";
 
 import {
+    clearAllModals,
     createTestClient,
     emitPromise,
     filterConsole,
@@ -2262,6 +2263,13 @@ describe("RoomView", () => {
                     },
                 }),
             );
+
+            // Earlier tests in this file leave a "Failed to load timeline position" ErrorDialog open — their
+            // mocked timelines have no getEvents — and its focus lock pulls the caret straight back out of
+            // whatever we focus. Close anything left over so this test observes only its own focus moves.
+            // This has to happen here, not in a shared hook: clearing in beforeEach re-renders RoomView
+            // before the client is re-stubbed, and clearing in afterEach breaks seven other search tests.
+            await clearAllModals();
 
             // Stands in for the room search box, which lives over in the right panel.
             const searchBox = document.createElement("input");

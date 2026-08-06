@@ -199,7 +199,7 @@ export function loadConfig(localConfigPath: string | undefined): Promise<ConfigO
                 }
             }
 
-            config = deepMergeConfig(config as unknown as JsonObject, localConfig) as unknown as ConfigOptions;
+            config = deepMergeConfig(config, localConfig) as unknown as ConfigOptions;
         } catch (e) {
             if (e instanceof SyntaxError) {
                 await app.whenReady();

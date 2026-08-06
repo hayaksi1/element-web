@@ -84,7 +84,7 @@ export async function jumpToDateInRoom(
         }
     } catch (err) {
         logger.error(
-            `Error occured while trying to find event in ${roomIdForJumpRequest} ` + `at timestamp=${unixTimestamp}:`,
+            `Error occured while trying to find event in ${roomIdForJumpRequest} at timestamp=${unixTimestamp}:`,
             err,
         );
 

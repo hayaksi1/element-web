@@ -128,6 +128,7 @@ export function RoomFilesView({
             <Flex
                 as="div"
                 role="listbox"
+                tabIndex={-1}
                 aria-label={_t("file_panel|filters_label")}
                 align="center"
                 gap="var(--cpd-space-2x)"
@@ -141,6 +142,8 @@ export function RoomFilesView({
                             filterRefs.current[index] = el;
                         }}
                         role="option"
+                        tabIndex={0}
+                        aria-selected={category === activeCategory}
                         selected={category === activeCategory}
                         onClick={() => vm.toggleCategory(category)}
                     >
