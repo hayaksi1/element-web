@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import path, { dirname, resolve } from "node:path";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fs as memfs, vol } from "memfs";
@@ -13,7 +13,7 @@ import { dialog } from "electron";
 
 import { type ConfigOptions, deepMergeConfig, getConfigCandidatePaths, loadMergedLocalConfig } from "./config.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 vi.mock("node:fs", () => ({ default: memfs }));
 vi.mock("node:fs/promises", () => ({ default: memfs.promises }));
@@ -270,7 +270,7 @@ describe("loadConfig", () => {
     });
 
     it("should ignore localConfigPath if does not exist", async () => {
-        const config = await loadConfig(resolve(__dirname, "../custom-config.json"));
+        const config = await loadConfig("/invalid-path/custom-config.json");
         expect(config.brand).toBe("Element");
         expect(config.web_base_url).toBe("https://chat.org.com");
         expect(config.default_hs_url).toBe("https://matrix.org.com");

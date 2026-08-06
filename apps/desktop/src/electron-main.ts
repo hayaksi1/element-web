@@ -25,7 +25,7 @@ import {
     screen,
 } from "electron";
 import * as Sentry from "@sentry/electron/main";
-import path, { dirname } from "node:path";
+import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
 
 import "./ipc.js";
@@ -55,7 +55,7 @@ import { getIconPath } from "./icon.js";
 import { getArgs } from "./args.js";
 import { type ConfigOptions, getConfig, loadConfig } from "./config.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const buildConfig = getBuildConfig();
 const protocolHandler = new ProtocolHandler(buildConfig.protocol);
@@ -283,7 +283,7 @@ app.on("ready", async () => {
         backgroundColor: resolveBackgroundColor(store.get("backgroundColor"), nativeTheme.shouldUseDarkColors),
 
         titleBarStyle: process.platform === "darwin" ? "hidden" : "default",
-        trafficLightPosition: { x: 9, y: 8 },
+        trafficLightPosition: { x: 12, y: 8 },
 
         icon: await getIconPath(),
         show: false,

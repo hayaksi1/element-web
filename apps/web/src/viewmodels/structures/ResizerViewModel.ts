@@ -19,6 +19,7 @@ import { debounce } from "lodash";
 import SettingsStore from "../../settings/SettingsStore";
 import { SettingLevel } from "../../settings/SettingLevel";
 import { AutoCollapse } from "./auto-collapse/AutoCollapse";
+import { type CallStore } from "../../stores/CallStore";
 
 function getInitialState(): ResizerViewSnapshot {
     const shouldStartCollapsed =
@@ -62,16 +63,20 @@ export class ResizerViewModel
      */
     private firstResizedEventSeen = false;
 
-    public constructor() {
+    public constructor(callStore: CallStore) {
         super(undefined, getInitialState());
 
         // Run onSeparatorClick when the separator is clicked.
         this.mouseClickHandler = new MouseClickHandler(this.onSeparatorClick);
         this.autoCollapse = this.disposables.track(
-            new AutoCollapse(this.onSeparatorClick, () => {
-                this.panelHandle?.collapse();
-                this.snapshot.merge({ isCollapsed: true });
-            }),
+            new AutoCollapse(
+                this.onSeparatorClick,
+                () => {
+                    this.panelHandle?.collapse();
+                    this.snapshot.merge({ isCollapsed: true });
+                },
+                callStore,
+            ),
         );
     }
 
@@ -93,12 +98,6 @@ export class ResizerViewModel
         if (this.autoCollapse.shouldIgnoreResize) return;
 
         this.autoCollapse.onLeftPanelResized();
-
-        // We don't want the panels to have fractional widths as that can cause blurry UI elements.
-        if (!Number.isInteger(newSize)) {
-            this.panelHandle?.resize(`${Math.round(newSize)}%`);
-            return;
-        }
 
         const isCollapsed = newSize === 0;
         // Store the size if the panel isn't collapsed.
