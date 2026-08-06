@@ -38,6 +38,12 @@ vi.mock("./language-helper.js", () => ({
     _t: (key: string): string => key,
 }));
 
+// The degraded-keyring consent dialog reads the brand out of the config, which is only populated by
+// loadConfig() during real startup.
+vi.mock("./config.js", () => ({
+    getConfig: (): { brand: string } => ({ brand: "Element" }),
+}));
+
 // A reversible "encryption" so we control exactly when decryption fails.
 const PREFIX = "enc:";
 vi.mock("electron", () => ({
