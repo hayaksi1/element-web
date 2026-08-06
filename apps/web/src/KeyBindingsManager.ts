@@ -43,7 +43,11 @@ export function isKeyComboMatch(ev: KeyboardEvent | React.KeyboardEvent, combo: 
     // comparison has to be case insensitive. This works for letter combos such as shift + U as well
     // as for none letter combos such as shift + Escape. No two entries of the `Key` map collide once
     // lower cased, so this cannot make two distinct shortcuts overlap.
-    if (combo.key !== undefined && ev.key.toLowerCase() !== combo.key.toLowerCase()) {
+    // Dropdown, the room context menus and EditableText all forward a mouse ButtonEvent to
+    // getAccessibilityAction cast as a KeyboardEvent, so `key` can genuinely be absent at runtime. Such
+    // an event must simply match no combo that names a key, as it did before the comparison became
+    // case insensitive.
+    if (combo.key !== undefined && ev.key?.toLowerCase() !== combo.key.toLowerCase()) {
         return false;
     }
 

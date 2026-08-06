@@ -186,4 +186,13 @@ describe("KeyBindingsManager", () => {
         const lowerCased = Object.values(Key).map((key) => key.toLowerCase());
         expect(new Set(lowerCased).size).toBe(lowerCased.length);
     });
+
+    it("should not match, rather than throw, when the event carries no key", () => {
+        // Dropdown, RoomGeneralContextMenu, RoomNotificationContextMenu and EditableText all hand
+        // getAccessibilityAction a ButtonEvent, which for a mouse activation has no `key` at all.
+        const combo: KeyCombo = { key: "k", ctrlOrCmdKey: true };
+        const clickEvent = { ctrlKey: true } as unknown as KeyboardEvent;
+        expect(isKeyComboMatch(clickEvent, combo, false)).toBe(false);
+        expect(isKeyComboMatch(clickEvent, combo, true)).toBe(false);
+    });
 });
