@@ -21,7 +21,9 @@ describe("feature_jump_to_date default", () => {
                 ...jest.requireActual("../../../src/Keyboard"),
                 IS_ELECTRON: isElectron,
             }));
-            // eslint-disable-next-line @typescript-eslint/no-require-imports -- isolateModules needs a sync re-import
+            // isolateModules needs a synchronous re-import here; a static import would be hoisted and evaluated
+            // before the IS_ELECTRON mock above is in place.
+            // eslint-disable-next-line typescript/no-require-imports,typescript/no-var-requires
             const { SETTINGS } = require("../../../src/settings/Settings");
             value = SETTINGS["feature_jump_to_date"].default;
         });

@@ -637,8 +637,7 @@ describe("<LoggedInView />", () => {
                           )) as typeof SettingsStore.getValue);
         };
 
-        const getChatBody = (container: HTMLElement): HTMLElement =>
-            container.querySelector(".mx_MatrixChat") as HTMLElement;
+        const getChatBody = (container: HTMLElement): HTMLElement => container.querySelector(".mx_MatrixChat")!;
 
         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
             mockChatBackgroundSettings({

@@ -602,13 +602,13 @@ describe("Searching", () => {
                 "!b": roomWith("!a"),
                 "!a": roomWith(null),
             };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             expect(getRoomSearchChain(mockClient, "!c")).toEqual(["!c", "!b", "!a"]);
         });
 
         it("guards against predecessor cycles", () => {
             const rooms: Record<string, any> = { "!x": roomWith("!y"), "!y": roomWith("!x") };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             expect(getRoomSearchChain(mockClient, "!x")).toEqual(["!x", "!y"]);
         });
 
@@ -619,7 +619,7 @@ describe("Searching", () => {
 
         it("caps traversal depth against a pathological chain", () => {
             vi.spyOn(mockClient, "getRoom").mockImplementation(
-                (id) => ({ findPredecessor: () => ({ roomId: (id as string) + "x" }) }) as any,
+                (id) => ({ findPredecessor: () => ({ roomId: id! + "x" }) }) as any,
             );
             expect(getRoomSearchChain(mockClient, "!a").length).toBe(20);
         });
@@ -656,7 +656,7 @@ describe("Searching", () => {
                 "!new:e.o": roomWith("!new:e.o", "!old:e.o"),
                 "!old:e.o": roomWith("!old:e.o", null),
             };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             mockEncryptedRoom();
 
             const mockEventIndex = {
@@ -709,7 +709,7 @@ describe("Searching", () => {
                 "!new:e.o": roomWith("!new:e.o", "!old:e.o"),
                 "!old:e.o": roomWith("!old:e.o", null),
             };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             vi.spyOn(mockClient, "getCrypto").mockReturnValue({
                 isEncryptionEnabledInRoom: vi.fn().mockResolvedValue(false),
             } as any);
@@ -730,7 +730,7 @@ describe("Searching", () => {
                 "!new:e.o": roomWith("!new:e.o", "!old:e.o"),
                 "!old:e.o": roomWith("!old:e.o", null),
             };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             // new room is encrypted, the (loaded) predecessor is not
             vi.spyOn(mockClient, "getCrypto").mockReturnValue({
                 isEncryptionEnabledInRoom: vi.fn().mockImplementation((id) => Promise.resolve(id === "!new:e.o")),
@@ -1452,7 +1452,7 @@ describe("Searching", () => {
                 "!new:e.o": roomWith("!old:e.o"),
                 "!old:e.o": roomWith(null),
             };
-            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id as string] ?? null);
+            vi.spyOn(mockClient, "getRoom").mockImplementation((id) => rooms[id!] ?? null);
             // The new room is encrypted (-> Seshat leg); its loaded predecessor is not (-> homeserver leg). A mixed
             // chain forces the multi-room chainSearchProcess branch.
             vi.spyOn(mockClient, "getCrypto").mockReturnValue({

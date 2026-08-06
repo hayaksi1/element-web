@@ -330,6 +330,10 @@ describe("RoomView", () => {
 
             // Once the promise settles, onSearchUpdate fills `previews` and the dropdown row appears.
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("gemini hit")).toBeInTheDocument();
                 return el;
@@ -379,6 +383,10 @@ describe("RoomView", () => {
             });
 
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("older hit")).toBeInTheDocument();
                 return el;
@@ -433,6 +441,10 @@ describe("RoomView", () => {
             });
 
             await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("gemini hit")).toBeInTheDocument();
             });
@@ -798,6 +810,10 @@ describe("RoomView", () => {
 
             // Wait for the Telegram-style results dropdown to render its rows.
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("newer match")).toBeInTheDocument();
                 return el;
@@ -887,6 +903,10 @@ describe("RoomView", () => {
             });
 
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("older match")).toBeInTheDocument();
                 return el;
@@ -949,6 +969,10 @@ describe("RoomView", () => {
             });
 
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("older match")).toBeInTheDocument();
                 return el;
@@ -1023,6 +1047,10 @@ describe("RoomView", () => {
             });
 
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("older match")).toBeInTheDocument();
                 return el;
@@ -1037,6 +1065,10 @@ describe("RoomView", () => {
             // Now view $newer, return to the list — the anchor must FOLLOW to $newer, not stick on the first-clicked
             // $older (the original "jumps to first result" bug).
             const dropdown2 = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("newer match")).toBeInTheDocument();
                 return el;
@@ -1100,6 +1132,10 @@ describe("RoomView", () => {
             });
 
             const dropdown = await waitFor(() => {
+                // querySelector() only knows the CSS-selector overloads, so it types this as `Element | null`, not
+                // `HTMLElement | null` — the cast narrows the type, it doesn't just strip null, so `!` alone would
+                // not satisfy within()'s HTMLElement | SVGElement | Document parameter type.
+                // eslint-disable-next-line typescript/non-nullable-type-assertion-style
                 const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
                 expect(within(el).getByText("older match")).toBeInTheDocument();
                 return el;
@@ -1365,6 +1401,9 @@ describe("RoomView", () => {
             // the message — it does NOT end the search. The clear gate excludes it because it equals the durable
             // stepping target. (Previously this ended the search; the racy guard-clearing that enabled it was the root
             // of the "resets itself" bug, so the behaviour was intentionally changed.)
+            // The cast narrows Element to HTMLElement (querySelector's untyped-selector overload returns
+            // `Element | null`), so `!` alone would not satisfy within()'s HTMLElement | SVGElement | Document param.
+            // eslint-disable-next-line typescript/non-nullable-type-assertion-style
             const dropdown = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
             await userEvent.click(within(dropdown).getByText("first"));
             await flushPromises();
@@ -2345,6 +2384,9 @@ describe("RoomView", () => {
             });
 
             // Scope to the results panel: the term now also appears in the top-of-chat search bar input (Phase 6).
+            // The cast narrows Element to HTMLElement (querySelector's untyped-selector overload returns
+            // `Element | null`), so `!` alone would not satisfy within()'s HTMLElement | SVGElement | Document param.
+            // eslint-disable-next-line typescript/non-nullable-type-assertion-style
             const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
             const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
@@ -2416,6 +2458,9 @@ describe("RoomView", () => {
             const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
 
             // Scope to the results panel: the term now also appears in the top-of-chat search bar input (Phase 6).
+            // The cast narrows Element to HTMLElement (querySelector's untyped-selector overload returns
+            // `Element | null`), so `!` alone would not satisfy within()'s HTMLElement | SVGElement | Document param.
+            // eslint-disable-next-line typescript/non-nullable-type-assertion-style
             const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
             const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
