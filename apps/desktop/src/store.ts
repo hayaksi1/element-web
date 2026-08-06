@@ -96,7 +96,8 @@ export interface PersistedWindowState {
 }
 
 interface StoreData {
-    warnBeforeExit: boolean;
+    /** whether to warn before quitting; unset until the user chooses, see Store.shouldWarnBeforeExit */
+    warnBeforeExit?: boolean;
     minimizeToTray: boolean;
     spellCheckerEnabled: boolean;
     autoHideMenuBar: boolean;
@@ -242,11 +243,12 @@ class Store extends ElectronStore<StoreData> {
             clearInvalidConfig: false,
             schema: {
                 warnBeforeExit: {
-                    type: "boolean",
-                    // macOS convention is that ⌘Q quits immediately, so the warning defaults OFF
-                    // there and ON on Windows/Linux. An explicit user choice always overrides this.
+                    // Deliberately no `default` here: conf writes schema defaults straight to
+                    // electron-config.json on first run, which would make the platform default
+                    // indistinguishable from a value the user chose. The default is resolved on read
+                    // instead, by shouldWarnBeforeExit().
                     // See https://github.com/element-hq/element-web/issues/32287.
-                    default: process.platform !== "darwin",
+                    type: "boolean",
                 },
                 minimizeToTray: {
                     type: "boolean",

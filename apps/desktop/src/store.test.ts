@@ -13,9 +13,12 @@ import Store, { SafeStorageDecryptionError } from "./store.js";
 
 // In-memory ElectronStore replacement so the tests don't touch the filesystem or real config.
 const backing = new Map<string, unknown>();
+let storeOptions: { schema: Record<string, Record<string, unknown>> } | undefined;
 vi.mock("electron-store", () => {
     class MockElectronStore {
-        public constructor(_opts: unknown) {}
+        public constructor(opts: unknown) {
+            storeOptions = opts as { schema: Record<string, Record<string, unknown>> };
+        }
         public get(key: string, defaultValue?: unknown): unknown {
             return backing.has(key) ? backing.get(key) : defaultValue;
         }
@@ -190,6 +193,14 @@ describe("Store secret encryption (safeStorage)", () => {
             expect(backing.has("safeStorageBackendMigrate")).toBe(false);
             expect(app.relaunch).toHaveBeenCalled();
         });
+    });
+
+    it("should not declare a schema default, which conf would write to disk on first run", () => {
+        // A schema default is persisted to electron-config.json when the store is first created,
+        // which would make the platform default indistinguishable from a user's explicit choice.
+        expect(storeOptions!.schema.warnBeforeExit).not.toHaveProperty("default");
+        // Sanity check that the assertion above can fail: other keys do declare defaults.
+        expect(storeOptions!.schema.minimizeToTray).toHaveProperty("default", true);
     });
 });
 
