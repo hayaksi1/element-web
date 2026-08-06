@@ -48,7 +48,7 @@ describe("buildMenuTemplate", () => {
         });
 
         it("should bind zooming in to the unshifted key as well as the shifted one", () => {
-            const menu = buildMenuTemplate();
+            const menu = buildMenuTemplate(vi.fn());
 
             const viewMenu = menu.items.find((item) => item.label === "view_menu|view")!;
             const viewSubmenu = viewMenu.submenu as unknown as MenuItemConstructorOptions[];
