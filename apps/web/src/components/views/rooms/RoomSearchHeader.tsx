@@ -197,7 +197,13 @@ const RoomSearchHeader: React.FC<Props> = ({
                     ) : searchInfo !== undefined ? (
                         <InlineSpinner />
                     ) : null}
-                    <SearchWarning kind={WarningKind.Search} isRoomEncrypted={isRoomEncrypted} showLogo={false} />
+                    <SearchWarning
+                        kind={WarningKind.Search}
+                        isRoomEncrypted={isRoomEncrypted}
+                        showLogo={false}
+                        scope={scope}
+                        roomId={room.roomId}
+                    />
                 </div>
                 <div className="mx_RoomSearchHeader_summary_actions">
                     {isSteppingMatch && onBackToResults && (

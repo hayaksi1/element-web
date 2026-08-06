@@ -1307,6 +1307,29 @@ export default class EventIndex extends EventEmitter {
     }
 
     /**
+     * The rooms with an outstanding crawler checkpoint: the one being crawled right now, and all
+     * those still queued behind it.
+     *
+     * Exposed because {@link currentRoom} answers only for the head of the queue and
+     * {@link getIndexingStatus} answers only in aggregate, so neither can say whether one
+     * particular room is still waiting on the crawler — which is what a room-scoped search needs
+     * to know before it claims its results are complete.
+     *
+     * Note that the absence of a checkpoint is not proof of completeness: a room also has no
+     * checkpoint if it never had a back-pagination token to crawl from, if its checkpoint was
+     * dropped because the server rejected the request, or before the initial checkpoints have been
+     * seeded. Fully-crawled sentinel checkpoints are not in this set, as they never enter the
+     * crawl queue.
+     *
+     * @returns The ids of the rooms with an outstanding checkpoint.
+     */
+    public checkpointedRooms(): Set<string> {
+        const checkpointed = new Set<string>(this.crawlerCheckpoints.map((c) => c.roomId));
+        if (this.currentCheckpoint) checkpointed.add(this.currentCheckpoint.roomId);
+        return checkpointed;
+    }
+
+    /**
      * Cheap, synchronous breakdown of the encrypted rooms we're a member of:
      *  - `indexing`: joined encrypted rooms that have a crawler checkpoint, i.e.
      *    are still being back-filled;
@@ -1328,8 +1351,7 @@ export default class EventIndex extends EventEmitter {
     public getIndexingStatus(): { indexing: number; indexed: number; errored: number } {
         const client = MatrixClientPeg.safeGet();
 
-        const checkpointed = new Set<string>(this.crawlerCheckpoints.map((c) => c.roomId));
-        if (this.currentCheckpoint) checkpointed.add(this.currentCheckpoint.roomId);
+        const checkpointed = this.checkpointedRooms();
 
         let indexing = 0;
         let indexed = 0;

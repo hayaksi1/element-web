@@ -743,6 +743,33 @@ describe("EventIndex", () => {
         });
     });
 
+    describe("checkpointedRooms", () => {
+        it("reports the rooms with an outstanding checkpoint and ignores fully-crawled markers", async () => {
+            const mockIndexingManager = {
+                loadCheckpoints: vi.fn().mockResolvedValue([
+                    { roomId: "!queued:id", token: "tok", fullCrawl: true, direction: Direction.Backward },
+                    // A fully-crawled sentinel: it is kept out of the crawl queue, so the room it
+                    // marks is not outstanding and must not be reported as such.
+                    { roomId: "!done:id", token: "fully_crawled", fullCrawl: true, direction: Direction.Backward },
+                ]),
+                isEventIndexEmpty: vi.fn().mockResolvedValue(false),
+            } as any as Mocked<BaseEventIndexManager>;
+            mockPlatformPeg({ getEventIndexingManager: () => mockIndexingManager });
+
+            getMockClientWithEventEmitter({
+                getEventMapper: () => (obj: Partial<IEvent>) => new MatrixEvent(obj),
+                createMessagesRequest: vi.fn(),
+                ...mockClientMethodsRooms([]),
+                isRoomEncrypted: vi.fn().mockReturnValue(true),
+            });
+
+            const indexer = new EventIndex();
+            await indexer.init();
+
+            expect(indexer.checkpointedRooms()).toEqual(new Set(["!queued:id"]));
+        });
+    });
+
     describe("onRoomStateEvent newly-encrypted seeding", () => {
         async function setUp(
             reconciled: boolean,
