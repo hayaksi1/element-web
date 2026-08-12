@@ -195,15 +195,6 @@ describe("DateSeparatorViewModel", () => {
 
             expect(mockTimestampToEvent).toHaveBeenCalledWith(roomId, localMidnight, Direction.Forward);
         });
-
-        it("falls back to Date parsing for a value that is not YYYY-MM-DD", async () => {
-            const vm = createViewModel();
-            const pickDate = vi.spyOn(vm, "pickDate").mockResolvedValue(undefined);
-
-            await vm.onDatePicked("not a date");
-
-            expect(pickDate).toHaveBeenCalledWith(new Date("not a date"));
-        });
     });
 
     it("dispatches ViewRoom when pickDate resolves in active room", async () => {

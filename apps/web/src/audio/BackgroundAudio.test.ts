@@ -5,45 +5,47 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { BackgroundAudio } from "../../../src/audio/BackgroundAudio";
-import { createAudioContext } from "../../../src/audio/compat";
+import { vi, describe, it, expect, beforeEach, type Mock } from "vitest";
+import fetchMock from "@fetch-mock/vitest";
 
-jest.mock("../../../src/audio/compat", () => ({
-    createAudioContext: jest.fn(),
+import { BackgroundAudio } from "./BackgroundAudio";
+import { createAudioContext } from "./compat";
+
+vi.mock("./compat", () => ({
+    createAudioContext: vi.fn(),
 }));
 
 describe("BackgroundAudio", () => {
     let audioContext: {
-        createBufferSource: jest.Mock;
-        decodeAudioData: jest.Mock;
-        resume: jest.Mock;
-        suspend: jest.Mock;
+        createBufferSource: Mock;
+        decodeAudioData: Mock;
+        resume: Mock;
+        suspend: Mock;
         destination: object;
     };
 
     /** The sources handed out by the mocked context, in the order they were created. */
-    let sources: Array<{ start: jest.Mock; disconnect: jest.Mock; onended?: () => void }>;
+    let sources: Array<{ start: Mock; disconnect: Mock; onended?: () => void }>;
 
     beforeEach(() => {
         sources = [];
         audioContext = {
-            createBufferSource: jest.fn().mockImplementation(() => {
-                const source = { start: jest.fn(), connect: jest.fn(), disconnect: jest.fn() };
+            createBufferSource: vi.fn().mockImplementation(() => {
+                const source = { start: vi.fn(), connect: vi.fn(), disconnect: vi.fn() };
                 sources.push(source);
                 return source;
             }),
-            decodeAudioData: jest.fn().mockResolvedValue({}),
-            resume: jest.fn().mockResolvedValue(undefined),
-            suspend: jest.fn().mockResolvedValue(undefined),
+            decodeAudioData: vi.fn().mockResolvedValue({}),
+            resume: vi.fn().mockResolvedValue(undefined),
+            suspend: vi.fn().mockResolvedValue(undefined),
             destination: {},
         };
-        jest.mocked(createAudioContext).mockReturnValue(audioContext as unknown as AudioContext);
+        vi.mocked(createAudioContext).mockReturnValue(audioContext as unknown as AudioContext);
 
-        // Every sound is fetched before it is decoded, and the decoding is mocked out above.
-        global.fetch = jest.fn().mockResolvedValue({
-            status: 200,
-            arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
-        }) as unknown as typeof global.fetch;
+        // Every sound is fetched before it is decoded, and the decoding is mocked out above, so the
+        // bytes that come back never matter.
+        fetchMock.mockReset();
+        fetchMock.get("*", 200);
     });
 
     it("suspends the context once the sound has finished", async () => {
