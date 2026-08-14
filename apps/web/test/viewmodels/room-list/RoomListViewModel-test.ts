@@ -828,16 +828,13 @@ describe("RoomListViewModel", () => {
                 unread: false,
             });
 
-            // Twice: the delta handler dispatches ViewRoom from within the first dispatch's
-            // callback, so a single flush leaves that follow-up dispatch queued.
-            await flushPromises();
-            await flushPromises();
-
-            expect(dispatchSpy).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    action: Action.ViewRoom,
-                    room_id: "!room1:server",
-                }),
+            await waitFor(() =>
+                expect(dispatchSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        action: Action.ViewRoom,
+                        room_id: "!room1:server",
+                    }),
+                ),
             );
         });
 
@@ -858,23 +855,18 @@ describe("RoomListViewModel", () => {
                 unread: false,
             });
 
-            // Twice: the delta handler dispatches ViewRoom from within the first dispatch's
-            // callback, so a single flush leaves that follow-up dispatch queued.
-            await flushPromises();
-            await flushPromises();
-
-            expect(dispatchSpy).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    action: Action.ViewRoom,
-                    room_id: "!room3:server",
-                }),
+            await waitFor(() =>
+                expect(dispatchSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        action: Action.ViewRoom,
+                        room_id: "!room3:server",
+                    }),
+                ),
             );
         });
 
         it("should navigate to the first unread room when no room is selected", async () => {
-            // This spec has no global mock restoration, so the notification state must be put back
-            // by hand or later specs see the stub.
-            const getRoomState = jest.spyOn(RoomNotificationStateStore.instance, "getRoomState").mockImplementation(
+            jest.spyOn(RoomNotificationStateStore.instance, "getRoomState").mockImplementation(
                 (room) =>
                     ({
                         isUnread: room.roomId === "!room2:server",
@@ -899,19 +891,14 @@ describe("RoomListViewModel", () => {
                 unread: true,
             });
 
-            // Twice: the delta handler dispatches ViewRoom from within the first dispatch's
-            // callback, so a single flush leaves that follow-up dispatch queued.
-            await flushPromises();
-            await flushPromises();
-
-            expect(dispatchSpy).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    action: Action.ViewRoom,
-                    room_id: "!room2:server",
-                }),
+            await waitFor(() =>
+                expect(dispatchSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        action: Action.ViewRoom,
+                        room_id: "!room2:server",
+                    }),
+                ),
             );
-
-            getRoomState.mockRestore();
         });
     });
 
