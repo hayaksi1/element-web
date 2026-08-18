@@ -67,6 +67,7 @@ import { checkBrowserSupport } from "./SupportedBrowser";
 import { type URLParams } from "./vector/url_utils.ts";
 import { type OnLoggedInPayload } from "./dispatcher/payloads/OnLoggedInPayload.ts";
 import { filterBoolean } from "./utils/arrays.ts";
+import { clearUploadedMedia } from "./utils/UploadedMediaCache";
 import { CallStatusListener } from "./CallStatusListener.ts";
 import { CallStore } from "./stores/CallStore.ts";
 
@@ -1106,6 +1107,7 @@ export async function onLoggedOut(): Promise<void> {
     dis.fire(Action.OnLoggedOut, true);
     stopMatrixClient();
     await clearStorage({ deleteEverything: true });
+    clearUploadedMedia();
     LifecycleCustomisations.onLoggedOutAndStorageCleared?.();
     await PlatformPeg.get()?.clearStorage();
     SettingsStore.reset();
