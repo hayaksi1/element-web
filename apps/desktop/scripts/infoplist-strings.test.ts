@@ -11,8 +11,6 @@ import { fileURLToPath } from "node:url";
 
 import { parseInfoPlistStrings, readBaseUsageDescriptions } from "./infoplist-strings.js";
 
-// readBaseUsageDescriptions defaults to the working directory, which is right for electron-builder but
-// not for a test run: the root `pnpm test:unit` runs from the repo root, not from apps/desktop.
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("parseInfoPlistStrings", () => {
