@@ -48,7 +48,7 @@ import { setupMediaAuth } from "./media-auth.js";
 import { setupMediaPermissions } from "./media-permissions.js";
 import { type RendererRecovery, setupRendererRecovery } from "./renderer-recovery.js";
 import { resolveBackgroundColor } from "./background-color.js";
-import { resolveWindowCloseBehavior } from "./window-close.js";
+import { handleWindowClose, revealMainWindow } from "./window-close.js";
 import { getBuildConfig } from "./build-config.js";
 import { getAsarPath } from "./asar.js";
 import { getIconPath } from "./icon.js";
@@ -371,38 +371,13 @@ app.on("ready", async () => {
     global.mainWindow.on("closed", () => {
         global.mainWindow = null;
     });
-    global.mainWindow.on("close", async (e) => {
+    global.mainWindow.on("close", (e) => {
         // Capture the final geometry synchronously while the window is still alive — this is the only
         // reliable flush on the macOS hide-on-close path (where `closed` never fires) and also picks up
         // any geometry change still sitting in the debounce when the user quits. See window-state.ts.
         windowState.persist(global.mainWindow!);
 
-        const behavior = resolveWindowCloseBehavior({
-            appQuitting: global.appQuitting,
-            hasTray: tray.hasTray(),
-            platform: process.platform,
-        });
-
-        // A real quit is in progress (or there is nothing to hide to): let the window actually close,
-        // which on this single-window app cascades into `window-all-closed` → `app.quit()`.
-        if (behavior === "quit") return;
-
-        // On macOS we hide the whole *app* (⌘W ≡ ⌘H, #32267) rather than just the window: hiding only
-        // the window leaves Element frontmost with an empty menu bar and no window (a "limbo state"),
-        // whereas hiding the app activates another app — you bring Element back via the dock icon.
-        // Elsewhere (with a tray) we hide the window to minimise to tray.
-        e.preventDefault();
-        const hide = behavior === "hide-app" ? (): void => app.hide() : (): void => global.mainWindow?.hide();
-
-        if (global.mainWindow?.isFullScreen()) {
-            global.mainWindow.once("leave-full-screen", hide);
-
-            global.mainWindow.setFullScreen(false);
-        } else {
-            hide();
-        }
-
-        return false;
+        handleWindowClose(e, global.mainWindow, { appQuitting: global.appQuitting, hasTray: tray.hasTray() });
     });
 
     if (process.platform === "win32") {
@@ -515,17 +490,11 @@ app.on("second-instance", (ev, commandLine, workingDirectory) => {
 
     // Someone tried to run a second instance, we should focus our window.
     if (global.mainWindow) {
-        // On macOS the window may have been hidden via app.hide() (the ⌘W/close path, #32267).
-        // app.hide() is an NSApplication-level hide that does NOT clear BrowserWindow.isVisible(),
-        // so the isVisible() guard below can't detect it — un-hide the app first (no-op if not hidden).
-        if (process.platform === "darwin") app.show();
         // If the renderer crashed (element-web#32222), reload before surfacing the window so the user is
         // brought to a working UI rather than a white screen. Routed through the capped recovery so a
         // relaunch can't re-arm a crash loop we've already given up on; a no-op for a healthy window.
         rendererRecovery?.recoverIfCrashed();
-        if (!global.mainWindow.isVisible()) global.mainWindow.show();
-        if (global.mainWindow.isMinimized()) global.mainWindow.restore();
-        global.mainWindow.focus();
+        revealMainWindow(global.mainWindow);
     }
 });
 
