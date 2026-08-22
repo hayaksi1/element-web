@@ -492,10 +492,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     private searchLoadMore: (() => Promise<boolean>) | null = null;
     private messagePanel: TimelinePanel | null = null;
     // Drives the in-timeline "k of N" search match stepper (header arrows). Always present; renders nothing
-    // until it has matches.
-    public readonly searchNavVm = new RoomSearchNavigationViewModel({
-        onActivateMatch: (match: SearchMatch, index: number): void => this.onActivateSearchMatch(match, index),
-    });
+    // until it has matches. Rebuilt on mount if it was disposed, because StrictMode's simulated remount
+    // reuses this instance and so never re-runs the initialiser.
+    public searchNavVm = this.createSearchNavigationViewModel();
     private roomViewBody = createRef<HTMLDivElement>();
 
     private roomViewStore: RoomViewStore;
@@ -1084,6 +1083,14 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
     public componentDidMount(): void {
         this.unmounted = false;
+
+        // React's development double-invoke unmounts and remounts the SAME class instance, so the view model
+        // disposed by componentWillUnmount is still the one this instance holds and its store listener is gone.
+        // Field initialisers do not run again, so rebuild it here or the stepper stays frozen at zero matches.
+        if (this.searchNavVm.isDisposed) {
+            this.searchNavVm = this.createSearchNavigationViewModel();
+            this.forceUpdate();
+        }
 
         this.dispatcherRef = defaultDispatcher.register(this.onAction);
         if (this.context.client) {
@@ -2058,6 +2065,12 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             },
         });
     };
+
+    private createSearchNavigationViewModel(): RoomSearchNavigationViewModel {
+        return new RoomSearchNavigationViewModel({
+            onActivateMatch: (match: SearchMatch, index: number): void => this.onActivateSearchMatch(match, index),
+        });
+    }
 
     /**
      * Step the live timeline to a search match. Switches back to the room (live) timeline so the match is

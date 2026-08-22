@@ -2287,6 +2287,28 @@ describe("RoomView", () => {
             expect(container.querySelector(".mx_RoomView_searchResultsPanel")).not.toBeInTheDocument();
         });
 
+        it("rebuilds the search stepper view model when the same instance is remounted", async () => {
+            room.getMyMembership = vi.fn().mockReturnValue(KnownMembership.Join);
+
+            const roomViewRef = createRef<RoomView>();
+            await mountRoomView(roomViewRef);
+            await waitFor(() => expect(roomViewRef.current).toBeTruthy());
+
+            const before = roomViewRef.current!.searchNavVm;
+            expect(before.isDisposed).toBe(false);
+
+            // React's development double-invoke unmounts and remounts the SAME instance, which no field
+            // initialiser survives.
+            act(() => {
+                roomViewRef.current!.componentWillUnmount();
+                roomViewRef.current!.componentDidMount();
+            });
+
+            expect(before.isDisposed).toBe(true);
+            expect(roomViewRef.current!.searchNavVm).not.toBe(before);
+            expect(roomViewRef.current!.searchNavVm.isDisposed).toBe(false);
+        });
+
         it("should leave the caret in the search box when it is emptied", async () => {
             room.getMyMembership = vi.fn().mockReturnValue(KnownMembership.Join);
 
