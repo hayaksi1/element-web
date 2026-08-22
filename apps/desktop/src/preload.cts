@@ -22,6 +22,8 @@ const CHANNELS = [
     "ipcCall",
     "ipcReply",
     "loudNotification",
+    "notification",
+    "notificationEvent",
     "preferences",
     "seshat",
     "seshatReply",
@@ -61,6 +63,11 @@ contextBridge.exposeInMainWorld("electron", {
          * Do we need to render badge overlays for new notifications?
          */
         supportsBadgeOverlay: boolean;
+        /**
+         * Should notifications be displayed by the main process, so that the operating system's own
+         * notification settings decide whether they are shown and whether they are audible?
+         */
+        supportsNativeNotifications: boolean;
     }> {
         ipcRenderer.emit("initialise");
         const [{ protocol, sessionId }, config, supportedSettings] = await Promise.all([
@@ -68,7 +75,14 @@ contextBridge.exposeInMainWorld("electron", {
             ipcRenderer.invoke("getConfig"),
             ipcRenderer.invoke("getSupportedSettings"),
         ]);
-        return { protocol, sessionId, config, supportedSettings, supportsBadgeOverlay: process.platform === "win32" };
+        return {
+            protocol,
+            sessionId,
+            config,
+            supportedSettings,
+            supportsBadgeOverlay: process.platform === "win32",
+            supportsNativeNotifications: process.platform === "darwin",
+        };
     },
 
     async setSettingValue(settingName: string, value: any): Promise<void> {

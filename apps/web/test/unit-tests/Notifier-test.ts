@@ -280,14 +280,28 @@ describe("Notifier", () => {
             mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
             emitLiveEvent(event);
 
-            expect(MockPlatform.displayNotification).toHaveBeenCalledWith(testRoom.name, "hey", null, testRoom, event);
+            expect(MockPlatform.displayNotification).toHaveBeenCalledWith(
+                testRoom.name,
+                "hey",
+                null,
+                testRoom,
+                event,
+                false,
+            );
         });
 
         it("closes a desktop notification when room is marked read", () => {
             mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
             emitLiveEvent(event);
 
-            expect(MockPlatform.displayNotification).toHaveBeenCalledWith(testRoom.name, "hey", null, testRoom, event);
+            expect(MockPlatform.displayNotification).toHaveBeenCalledWith(
+                testRoom.name,
+                "hey",
+                null,
+                testRoom,
+                event,
+                false,
+            );
             mockClient!.emit(RoomEvent.Receipt, event, testRoom);
             expect(
                 (
@@ -344,6 +358,7 @@ describe("Notifier", () => {
                 "data:image/png;base64,00",
                 testRoom,
                 audioEvent,
+                false,
             );
         });
 
@@ -368,6 +383,7 @@ describe("Notifier", () => {
                 expect.any(String),
                 testRoom,
                 reply,
+                false,
             );
         });
 
@@ -408,6 +424,7 @@ describe("Notifier", () => {
                 expect.any(String),
                 testRoom,
                 spoilerEvent,
+                false,
             );
         });
     });
@@ -538,6 +555,146 @@ describe("Notifier", () => {
             mockClient.setAccountData(accountDataEventKey, { is_silenced: false });
             await notifier.playAudioNotification(testEvent, testRoom);
             expect(playSpy).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("OS notification sound delegation", () => {
+        let playSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            jest.useFakeTimers();
+            jest.setSystemTime(0);
+
+            accountDataStore = {};
+            mockClient.setAccountData(accountDataEventKey, { is_silenced: false });
+
+            mockSettings = {
+                notificationsEnabled: true,
+                audioNotificationsEnabled: true,
+            };
+            jest.spyOn(SettingsStore, "getValue")
+                .mockReset()
+                .mockImplementation((settingName) => mockSettings[settingName] ?? false);
+
+            jest.spyOn(context.roomViewStore, "getRoomId").mockReturnValue("!elsewhere:server");
+            jest.spyOn(notifier, "isEnabled").mockReturnValue(true);
+            jest.spyOn(notifier, "getSoundForRoom").mockReturnValue(null);
+            jest.spyOn(MockPlatform, "supportsNotificationSound").mockReturnValue(true);
+
+            mockClient.getRoom.mockReturnValue(testRoom);
+            mockClient.getPushActionsForEvent.mockReturnValue({
+                notify: true,
+                tweaks: { sound: true },
+            });
+
+            // @ts-ignore - backgroundAudio is private
+            playSpy = jest.spyOn(notifier.backgroundAudio, "pickFormatAndPlay").mockResolvedValue({} as any);
+        });
+
+        afterEach(() => {
+            playSpy.mockRestore();
+            jest.useRealTimers();
+        });
+
+        it("hands the sound to the OS notification instead of playing it in the renderer", () => {
+            notifier.evaluateEvent(testEvent);
+
+            expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(1);
+            expect(MockPlatform.displayNotification.mock.calls[0][5]).toBe(true);
+            expect(playSpy).not.toHaveBeenCalled();
+            expect(MockPlatform.loudNotification).not.toHaveBeenCalled();
+        });
+
+        it("plays the sound in the renderer when the platform cannot sound it", () => {
+            jest.mocked(MockPlatform.supportsNotificationSound).mockReturnValue(false);
+
+            notifier.evaluateEvent(testEvent);
+
+            expect(MockPlatform.displayNotification.mock.calls[0][5]).toBe(false);
+            expect(playSpy).toHaveBeenCalledTimes(1);
+            expect(MockPlatform.loudNotification).toHaveBeenCalledWith(testEvent, testRoom);
+        });
+
+        it("keeps a custom room sound on the renderer audio path", () => {
+            const customSound = { url: "https://server/custom.mp3", name: "custom", type: "audio/mpeg", size: 1 };
+            jest.mocked(notifier.getSoundForRoom).mockReturnValue(customSound);
+            // @ts-ignore - backgroundAudio is private
+            const customPlaySpy = jest.spyOn(notifier.backgroundAudio, "play").mockResolvedValue({} as any);
+
+            notifier.evaluateEvent(testEvent);
+
+            expect(MockPlatform.displayNotification.mock.calls[0][5]).toBe(false);
+            expect(customPlaySpy).toHaveBeenCalledWith(customSound.url);
+
+            customPlaySpy.mockRestore();
+        });
+
+        it("does not consume the throttle when the notification ends up silent", async () => {
+            expect(notifier.displayPopupNotification(testEvent, testRoom, false)).toBe(false);
+
+            await notifier.playAudioNotification(testEvent, testRoom);
+
+            expect(playSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("consumes the throttle when the notification carries the sound", async () => {
+            expect(notifier.displayPopupNotification(testEvent, testRoom, true)).toBe(true);
+
+            await notifier.playAudioNotification(testEvent, testRoom);
+
+            expect(playSpy).not.toHaveBeenCalled();
+        });
+
+        it("makes at most one sound for a backlog delivered inside the throttle window", () => {
+            notifier.evaluateEvent(testEvent);
+            notifier.evaluateEvent(testEvent);
+            notifier.evaluateEvent(testEvent);
+
+            expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(3);
+            expect(MockPlatform.displayNotification.mock.calls.map((call) => call[5])).toEqual([true, false, false]);
+            expect(playSpy).not.toHaveBeenCalled();
+        });
+
+        it("delegates again once the throttle window has elapsed", () => {
+            notifier.evaluateEvent(testEvent);
+            jest.setSystemTime(NOTIFICATION_SOUND_THROTTLE_MS + 1);
+            notifier.evaluateEvent(testEvent);
+
+            expect(MockPlatform.displayNotification.mock.calls.map((call) => call[5])).toEqual([true, true]);
+            expect(playSpy).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("isAudioEnabled", () => {
+        beforeEach(() => {
+            jest.spyOn(SettingsStore, "getValue")
+                .mockReset()
+                .mockImplementation((settingName) => mockSettings[settingName] ?? false);
+        });
+
+        it("is silent when the master notification switch is off", () => {
+            mockSettings = { notificationsEnabled: false, audioNotificationsEnabled: true };
+
+            expect(notifier.isAudioEnabled()).toBe(false);
+        });
+
+        it("is audible when both switches are on", () => {
+            mockSettings = { notificationsEnabled: true, audioNotificationsEnabled: true };
+
+            expect(notifier.isAudioEnabled()).toBe(true);
+        });
+
+        it("honours the audio switch when the master switch is on", () => {
+            mockSettings = { notificationsEnabled: true, audioNotificationsEnabled: false };
+
+            expect(notifier.isAudioEnabled()).toBe(false);
+        });
+
+        it("stays audible where notifications are not possible at all", () => {
+            mockSettings = { notificationsEnabled: false, audioNotificationsEnabled: true };
+            jest.mocked(MockPlatform.maySendNotifications).mockReturnValue(false);
+
+            expect(notifier.isAudioEnabled()).toBe(true);
         });
     });
 

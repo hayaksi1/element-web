@@ -14,13 +14,14 @@ import {
     type MatrixClient,
     type Room,
     type MatrixEvent,
+    MatrixEventEvent,
     type OAuthRegistrationRequest,
 } from "matrix-js-sdk/src/matrix";
 import React from "react";
 import { logger } from "matrix-js-sdk/src/logger";
 import { uniqueId } from "lodash";
 
-import BasePlatform, { UpdateCheckStatus, type UpdateStatus } from "../../BasePlatform";
+import BasePlatform, { type DisplayedNotification, UpdateCheckStatus, type UpdateStatus } from "../../BasePlatform";
 import type BaseEventIndexManager from "../../indexing/BaseEventIndexManager";
 import dis from "../../dispatcher/dispatcher";
 import SdkConfig from "../../SdkConfig";
@@ -54,6 +55,11 @@ interface SquirrelUpdate {
 }
 
 const SSO_ID_KEY = "element-desktop-ssoid";
+
+interface NativeNotificationEvent {
+    id: number;
+    action: "click" | "close";
+}
 
 function platformFriendlyName(): string {
     // used to use window.process but the same info is available here
@@ -98,6 +104,9 @@ export default class ElectronPlatform extends BasePlatform {
     private config!: IConfigOptions;
     private supportedSettings?: Record<string, boolean>;
     private clientStartedPromiseWithResolvers = Promise.withResolvers<void>();
+    private supportsNativeNotifications = false;
+    private nextNotificationId = 0;
+    private readonly nativeNotifications = new Map<number, { onClick(): void; onClose(): void }>();
 
     public constructor() {
         super();
@@ -142,6 +151,17 @@ export default class ElectronPlatform extends BasePlatform {
         this.electron.on("before-quit", function () {
             logger.log("element-desktop closing");
             rageshake.flush();
+        });
+
+        this.electron.on("notificationEvent", (event, { id, action }: NativeNotificationEvent) => {
+            const handlers = this.nativeNotifications.get(id);
+            if (!handlers) return;
+            if (action === "click") {
+                handlers.onClick();
+                return;
+            }
+            this.nativeNotifications.delete(id);
+            handlers.onClose();
         });
 
         this.electron.on("update-downloaded", this.onUpdateDownloaded);
@@ -224,12 +244,13 @@ export default class ElectronPlatform extends BasePlatform {
     }
 
     private async initialise(): Promise<void> {
-        const { protocol, sessionId, config, supportedSettings, supportsBadgeOverlay } =
+        const { protocol, sessionId, config, supportedSettings, supportsBadgeOverlay, supportsNativeNotifications } =
             await this.electron.initialise();
         this.protocol = protocol;
         this.sessionId = sessionId;
         this.config = config;
         this.supportedSettings = supportedSettings;
+        this.supportsNativeNotifications = supportsNativeNotifications;
         if (supportsBadgeOverlay) {
             this.badgeOverlayRenderer = new BadgeOverlayRenderer();
         }
@@ -329,13 +350,57 @@ export default class ElectronPlatform extends BasePlatform {
         return true;
     }
 
+    public supportsNotificationSound(): boolean {
+        return this.supportsNativeNotifications;
+    }
+
+    protected onNotificationClick(room: Room, ev?: MatrixEvent): void {
+        super.onNotificationClick(room, ev);
+        void this.ipc.call("focusWindow");
+    }
+
+    private displayNativeNotification(
+        title: string,
+        msg: string,
+        avatarUrl: string,
+        room: Room,
+        ev: MatrixEvent | undefined,
+        sound: boolean,
+    ): DisplayedNotification {
+        const id = ++this.nextNotificationId;
+
+        const notification: DisplayedNotification = {
+            close: (): void => {
+                if (!this.nativeNotifications.delete(id)) return;
+                this.electron.send("notification", { action: "close", id });
+            },
+        };
+
+        const closeHandler = (): void => notification.close();
+
+        this.nativeNotifications.set(id, {
+            onClick: () => this.onNotificationClick(room, ev),
+            onClose: () => ev?.off(MatrixEventEvent.BeforeRedaction, closeHandler),
+        });
+
+        ev?.once(MatrixEventEvent.BeforeRedaction, closeHandler);
+
+        this.electron.send("notification", {
+            action: "show",
+            request: { id, title, body: msg, avatarUrl: avatarUrl || null, audible: sound },
+        });
+
+        return notification;
+    }
+
     public displayNotification(
         title: string,
         msg: string,
         avatarUrl: string,
         room: Room,
         ev?: MatrixEvent,
-    ): Notification {
+        sound = false,
+    ): DisplayedNotification {
         // GNOME notification spec parses HTML tags for styling...
         // Electron Docs state all supported linux notification systems follow this markup spec
         // https://github.com/electron/electron/blob/master/docs/tutorial/desktop-environment-integration.md#linux
@@ -346,15 +411,11 @@ export default class ElectronPlatform extends BasePlatform {
             msg = msg.replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
-        const notification = super.displayNotification(title, msg, avatarUrl, room, ev);
+        if (this.supportsNativeNotifications) {
+            return this.displayNativeNotification(title, msg, avatarUrl, room, ev, sound);
+        }
 
-        const handler = notification.onclick as () => void;
-        notification.onclick = (): void => {
-            handler?.();
-            void this.ipc.call("focusWindow");
-        };
-
-        return notification;
+        return super.displayNotification(title, msg, avatarUrl, room, ev, sound);
     }
 
     public loudNotification(ev: MatrixEvent, room: Room): void {

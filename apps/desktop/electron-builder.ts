@@ -128,7 +128,7 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
         },
         "lib/**",
     ],
-    extraResources: ["build/icon.*", "webapp.asar"],
+    extraResources: ["build/icon.*", "webapp.asar", { from: "build/Element.aiff", to: "Element.aiff" }],
     extraMetadata: {
         name: variant.name,
         productName: variant.productName,

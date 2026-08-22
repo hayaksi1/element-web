@@ -278,6 +278,168 @@ describe("ElectronPlatform", () => {
         });
     });
 
+    describe("native notifications", () => {
+        let notificationSpy: ReturnType<typeof vi.fn>;
+        let originalNotification: typeof window.Notification;
+
+        const windowsUserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36";
+        const linuxUserAgent =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36";
+
+        const createPlatform = async (supportsNativeNotifications: boolean): Promise<ElectronPlatform> => {
+            initialiseValues.mockReturnValueOnce({
+                protocol: "io.element.desktop",
+                sessionId: "session-id",
+                config: { _config: true },
+                supportedSettings: { setting1: false, setting2: true },
+                supportsBadgeOverlay: false,
+                supportsNativeNotifications,
+            });
+            const platform = new ElectronPlatform();
+            await platform.initialised;
+            return platform;
+        };
+
+        const makeRoom = (): Room => new Room("!room:server", {} as any, userId);
+
+        const showCommand = (): any =>
+            mockElectron.send.mock.calls.find(
+                ([channel, payload]) => channel === "notification" && payload.action === "show",
+            )?.[1];
+
+        beforeEach(() => {
+            notificationSpy = vi.fn();
+            originalNotification = window.Notification;
+            Object.defineProperty(window, "Notification", {
+                value: class {
+                    public onclick: (() => void) | null = null;
+                    public onclose: (() => void) | null = null;
+                    public close = vi.fn();
+
+                    public constructor(title: string, options: NotificationOptions) {
+                        notificationSpy(title, options);
+                    }
+                },
+                writable: true,
+                configurable: true,
+            });
+        });
+
+        afterEach(() => {
+            Object.defineProperty(window, "Notification", {
+                value: originalNotification,
+                writable: true,
+                configurable: true,
+            });
+        });
+
+        it("hands an audible notification to the main process rather than the renderer", async () => {
+            const platform = await createPlatform(true);
+
+            platform.displayNotification("title", "body", "", makeRoom(), undefined, true);
+
+            expect(notificationSpy).not.toHaveBeenCalled();
+            expect(showCommand().request).toEqual(
+                expect.objectContaining({ title: "title", body: "body", audible: true }),
+            );
+        });
+
+        it("keeps the main process notification silent when the renderer sounds it", async () => {
+            const platform = await createPlatform(true);
+
+            platform.displayNotification("title", "body", "", makeRoom(), undefined, false);
+
+            expect(notificationSpy).not.toHaveBeenCalled();
+            expect(showCommand().request).toEqual(expect.objectContaining({ audible: false }));
+        });
+
+        it("reports that it sounds notifications itself only once initialised", async () => {
+            initialiseValues.mockReturnValueOnce({
+                protocol: "io.element.desktop",
+                sessionId: "session-id",
+                config: { _config: true },
+                supportedSettings: {},
+                supportsBadgeOverlay: false,
+                supportsNativeNotifications: true,
+            });
+            const platform = new ElectronPlatform();
+
+            expect(platform.supportsNotificationSound()).toBe(false);
+
+            await platform.initialised;
+
+            expect(platform.supportsNotificationSound()).toBe(true);
+        });
+
+        it("closes the main process notification over the same channel, once", async () => {
+            const platform = await createPlatform(true);
+            const notification = platform.displayNotification("title", "body", "", makeRoom(), undefined, true);
+            const { request } = showCommand();
+
+            notification.close();
+            expect(mockElectron.send).toHaveBeenLastCalledWith("notification", {
+                action: "close",
+                id: request.id,
+            });
+
+            const sendCount = mockElectron.send.mock.calls.length;
+            notification.close();
+            expect(mockElectron.send).toHaveBeenCalledTimes(sendCount);
+        });
+
+        it("views the room when the main process reports a click", async () => {
+            vi.spyOn(window, "focus").mockImplementation(() => {});
+            const platform = await createPlatform(true);
+            const room = makeRoom();
+
+            platform.displayNotification("title", "body", "", room, undefined, true);
+            const { request } = showCommand();
+            const [, handler] = getElectronEventHandlerCall("notificationEvent")!;
+
+            handler({}, { id: request.id, action: "click" });
+
+            expect(dispatchSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ action: Action.ViewRoom, room_id: room.roomId }),
+            );
+        });
+
+        it("ignores a notification event for an unknown id", async () => {
+            const platform = await createPlatform(true);
+            platform.displayNotification("title", "body", "", makeRoom(), undefined, true);
+            const [, handler] = getElectronEventHandlerCall("notificationEvent")!;
+
+            expect(() => handler({}, { id: 9999, action: "click" })).not.toThrow();
+        });
+
+        it("builds a silent renderer notification on Windows", async () => {
+            Object.defineProperty(window, "navigator", { value: { userAgent: windowsUserAgent }, writable: true });
+            const platform = await createPlatform(false);
+
+            platform.displayNotification("title", "a <b> c", "", makeRoom());
+
+            expect(showCommand()).toBeUndefined();
+            expect(notificationSpy).toHaveBeenCalledWith(
+                "title",
+                expect.objectContaining({ body: "a <b> c", silent: true }),
+            );
+        });
+
+        it("builds a silent renderer notification on Linux, escaping markup in the body", async () => {
+            Object.defineProperty(window, "navigator", { value: { userAgent: linuxUserAgent }, writable: true });
+            const platform = await createPlatform(false);
+
+            platform.displayNotification("title", "a <b> c", "", makeRoom());
+
+            expect(showCommand()).toBeUndefined();
+            expect(notificationSpy).toHaveBeenCalledWith(
+                "title",
+                expect.objectContaining({ body: "a &lt;b&gt; c", silent: true }),
+            );
+        });
+    });
+
     describe("spellcheck", () => {
         it("indicates support for spellcheck settings", () => {
             const platform = new ElectronPlatform();
