@@ -9,9 +9,10 @@ import { expect, describe, it, vi, beforeEach, afterEach } from "vitest";
 import { ipcMain, nativeImage, Notification } from "electron";
 
 import { access, copyFile } from "node:fs/promises";
-import { join } from "node:path";
+import path from "node:path";
 
 import { closeNotification, showNotification, type ShowNotificationRequest } from "./notifications.js";
+import type * as Notifications from "./notifications.js";
 
 const listeners = new Map<string, (...args: any[]) => void>();
 const showMock = vi.fn();
@@ -35,11 +36,16 @@ vi.mock("electron", () => ({
 
 vi.mock("node:fs/promises", () => ({ mkdir: vi.fn(), copyFile: vi.fn(), access: vi.fn() }));
 
-// electron sets this at runtime; join() would throw on undefined before reaching copyFile.
+// electron sets this at runtime; path.join() would throw on undefined before reaching copyFile.
 Object.defineProperty(process, "resourcesPath", { value: "/Applications/Element.app/Contents/Resources" });
 
+const originalPlatform = process.platform;
+function setPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
+
 /** Re-imports the module so its once-per-run sound install runs again against the current mocks. */
-const freshModule = async (): Promise<typeof import("./notifications.js")> => {
+const freshModule = async (): Promise<typeof Notifications> => {
     vi.resetModules();
     return import("./notifications.js");
 };
@@ -74,6 +80,7 @@ describe("notifications", () => {
 
     afterEach(() => {
         global.mainWindow = null;
+        setPlatform(originalPlatform);
     });
 
     it("registers a handler on the notification channel", () => {
@@ -81,6 +88,7 @@ describe("notifications", () => {
     });
 
     it("installs the sound in ~/Library/Sounds and names it on an audible notification", async () => {
+        setPlatform("darwin");
         vi.mocked(access).mockRejectedValueOnce(new Error("not installed"));
         const { showNotification: freshShow } = await freshModule();
 
@@ -88,7 +96,7 @@ describe("notifications", () => {
 
         expect(copyFile).toHaveBeenCalledWith(
             expect.stringContaining("Element.aiff"),
-            expect.stringContaining(join("Library", "Sounds", "Element.aiff")),
+            expect.stringContaining(path.join("Library", "Sounds", "Element.aiff")),
         );
         expect(constructedOptions()).toEqual(
             expect.objectContaining({ title: "title", body: "body", silent: false, sound: "Element" }),
@@ -97,12 +105,25 @@ describe("notifications", () => {
     });
 
     it("leaves the sound to the OS when it cannot be installed", async () => {
+        setPlatform("darwin");
         vi.mocked(access).mockRejectedValueOnce(new Error("not installed"));
         vi.mocked(copyFile).mockRejectedValueOnce(new Error("read-only"));
         const { showNotification: freshShow } = await freshModule();
 
         await freshShow(makeRequest({ audible: true }));
 
+        expect(constructedOptions()).toEqual(expect.objectContaining({ silent: false }));
+        expect(constructedOptions().sound).toBeUndefined();
+    });
+
+    it("names no sound away from macOS, where ~/Library/Sounds means nothing", async () => {
+        setPlatform("linux");
+        vi.mocked(access).mockRejectedValueOnce(new Error("not installed"));
+        const { showNotification: freshShow } = await freshModule();
+
+        await freshShow(makeRequest({ audible: true }));
+
+        expect(copyFile).not.toHaveBeenCalled();
         expect(constructedOptions()).toEqual(expect.objectContaining({ silent: false }));
         expect(constructedOptions().sound).toBeUndefined();
     });

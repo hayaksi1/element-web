@@ -587,6 +587,7 @@ describe("Notifier", () => {
                     expect.any(String),
                     testRoom,
                     knockEvent,
+                    false,
                 );
             });
 
@@ -599,6 +600,7 @@ describe("Notifier", () => {
                     expect.any(String),
                     testRoom,
                     knockEvent,
+                    false,
                 );
             });
 

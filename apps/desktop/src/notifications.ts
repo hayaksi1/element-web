@@ -7,7 +7,7 @@ Please see LICENSE files in the repository root for full details.
 
 import { access, copyFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 
 import {
     ipcMain,
@@ -23,7 +23,7 @@ import {
 // there before it can be asked for. The name is the file's, without its extension.
 const SOUND_NAME = "Element";
 const SOUND_FILE = `${SOUND_NAME}.aiff`;
-const SOUND_DIR = join(homedir(), "Library", "Sounds");
+const SOUND_DIR = path.join(homedir(), "Library", "Sounds");
 
 /**
  * Copies the bundled sound into ~/Library/Sounds so macOS can find it, unless it is already
@@ -35,7 +35,7 @@ const SOUND_DIR = join(homedir(), "Library", "Sounds");
  * a running app has to be repaired rather than assumed.
  */
 async function installSound(): Promise<boolean> {
-    const installed = join(SOUND_DIR, SOUND_FILE);
+    const installed = path.join(SOUND_DIR, SOUND_FILE);
     try {
         await access(installed);
         return true;
@@ -44,7 +44,7 @@ async function installSound(): Promise<boolean> {
     }
     try {
         await mkdir(SOUND_DIR, { recursive: true });
-        await copyFile(join(process.resourcesPath, SOUND_FILE), installed);
+        await copyFile(path.join(process.resourcesPath, SOUND_FILE), installed);
         return true;
     } catch (e) {
         console.error("Failed to install the notification sound", e);

@@ -97,6 +97,7 @@ describe("<TextualBody />", () => {
                 return null;
             },
             getRooms: () => [defaultRoom, otherRoom],
+            getVisibleRooms: () => [defaultRoom, otherRoom],
             getAccountData: (): MatrixEvent | undefined => undefined,
             isGuest: () => false,
             mxcUrlToHttp: (s: string) => s,

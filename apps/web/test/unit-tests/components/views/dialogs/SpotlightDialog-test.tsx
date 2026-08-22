@@ -168,6 +168,11 @@ describe("Spotlight Dialog", () => {
         testDM = mkRoom(mockedClient, testDMRoomId);
         testDM.name = "Chat with Alice";
         mocked(testDM.getMyMembership).mockReturnValue(KnownMembership.Join);
+        // The DM's context detail is its partner's user ID, which is only shown while that partner is
+        // still in the room, so the stub has to say they are.
+        mocked(testDM.getMember).mockImplementation((userId) =>
+            userId === testDMUserId ? ({ userId, membership: KnownMembership.Join } as unknown as RoomMember) : null,
+        );
 
         mocked(DMRoomMap.shared().getUserIdForRoomId).mockImplementation((roomId: string) => {
             if (roomId === testDMRoomId) {
