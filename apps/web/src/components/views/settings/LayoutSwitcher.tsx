@@ -126,7 +126,7 @@ function useEventTileInfo(): EventTileInfo {
             });
         };
 
-        run();
+        void run();
     }, [userId, matrixClient, setEventTileInfo]);
     return eventTileInfo;
 }

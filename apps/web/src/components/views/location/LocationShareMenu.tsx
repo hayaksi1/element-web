@@ -82,7 +82,7 @@ const LocationShareMenu: React.FC<Props> = ({
               );
 
     const onLiveShareEnableSubmit = (): void => {
-        SettingsStore.setValue("feature_location_share_live", null, SettingLevel.DEVICE, true);
+        void SettingsStore.setValue("feature_location_share_live", null, SettingLevel.DEVICE, true);
     };
 
     const shouldAdvertiseLiveLabsFlag = shareType === LocationShareType.Live && !isLiveShareEnabled;

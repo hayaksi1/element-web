@@ -138,7 +138,7 @@ class EditMessageComposer extends React.Component<IEditMessageComposerProps, ISt
         const action = getKeyBindingsManager().getMessageComposerAction(event);
         switch (action) {
             case KeyBindingAction.SendMessage:
-                this.sendEdit();
+                void this.sendEdit();
                 event.stopPropagation();
                 event.preventDefault();
                 break;
@@ -351,7 +351,7 @@ class EditMessageComposer extends React.Component<IEditMessageComposerProps, ISt
                 const event = this.props.editState.getEvent();
                 const threadId = event.threadRootId || null;
 
-                this.props.mxClient.sendMessage(roomId, threadId, editContent);
+                void this.props.mxClient.sendMessage(roomId, threadId, editContent);
                 dis.dispatch({ action: "message_sent" });
             }
         }

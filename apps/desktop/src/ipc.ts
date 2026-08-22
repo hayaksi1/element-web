@@ -170,18 +170,11 @@ ipcMain.on("ipcCall", async function (_ev: IpcMainEvent, payload) {
                     thumbnailURL: source.thumbnail.toDataURL(),
                 }));
             } catch (e) {
-                // A native getSources() failure must not reject this handler: doing so would skip the
-                // terminal ipcReply below and leave the renderer's screen-share picker awaiting forever.
-                // Reply with an empty list so the picker shows no sources and can be cancelled cleanly.
-                // See element-web#32398.
                 console.error("Failed to get desktop capturer sources", e);
                 ret = [];
             }
             break;
         case "callDisplayMediaCallback":
-            // Consume-once: a duplicate or stale IPC (e.g. left over from the macOS 15+ native picker
-            // path, which never consumes the callback via the renderer) becomes a safe no-op rather
-            // than invoking a stale callback twice.
             consumeDisplayMediaCallback()?.({ video: args[0] });
             ret = null;
             break;

@@ -42,8 +42,8 @@ vi.mock("./language-helper.js", () => ({
     _t: (key: string): string => key,
 }));
 
-// The degraded-keyring consent dialog reads the brand out of the config, which is only populated by
-// loadConfig() during real startup.
+// store.ts reads getConfig().brand for the degraded-mode dialogs. The real config module only
+// populates itself in loadConfig(), which these tests never run, so stub it out.
 vi.mock("./config.js", () => ({
     getConfig: (): { brand: string } => ({ brand: "Element" }),
 }));
@@ -81,7 +81,8 @@ describe("Store secret encryption (safeStorage)", () => {
 
     beforeAll(async () => {
         store = Store.initialize(undefined);
-        // process.platform is darwin in CI/dev on this repo, exercising the "system" backend path.
+        // getSelectedStorageBackend is mocked to "basic_text", so this walks the degraded-mode
+        // path and takes the mocked dialog's "use basic_text" answer.
         await store.prepareSafeStorage({} as unknown as Electron.Session);
     });
 

@@ -494,7 +494,7 @@ export default class EventIndex extends EventEmitter {
         try {
             if (!(await this.isRoomIndexed(state.roomId))) {
                 this.logger.debug("Adding a checkpoint for a newly encrypted room", state.roomId);
-                this.addRoomCheckpoint(state.roomId, true);
+                await this.addRoomCheckpoint(state.roomId, true);
             }
         } catch (e) {
             this.logger.warn("Error checking/seeding newly encrypted room", state.roomId, e);
@@ -540,7 +540,7 @@ export default class EventIndex extends EventEmitter {
 
         this.logger.debug("Adding a checkpoint because of a limited timeline", room.roomId);
 
-        this.addRoomCheckpoint(room.roomId, false);
+        await this.addRoomCheckpoint(room.roomId, false);
     };
 
     /**

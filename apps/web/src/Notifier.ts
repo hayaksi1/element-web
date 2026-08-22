@@ -406,10 +406,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
         // make sure that we persist the current setting audio_enabled setting
         // before changing anything
         if (SettingsStore.isLevelSupported(SettingLevel.DEVICE)) {
-            // The stored preference, not isAudioEnabled(): that reports whether a sound would be
-            // heard right now, which is false while notifications are off, and persisting it here
-            // would turn the user's audio preference off as a side effect of enabling notifications.
-            SettingsStore.setValue(
+            void SettingsStore.setValue(
                 "audioNotificationsEnabled",
                 null,
                 SettingLevel.DEVICE,
@@ -419,7 +416,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
 
         if (enable) {
             // Attempt to get permission from user
-            plaf.requestNotificationPermission().then((result) => {
+            void plaf.requestNotificationPermission().then((result) => {
                 if (result !== "granted") {
                     // The permission request was dismissed or denied
                     // TODO: Support alternative branding in messaging
@@ -536,7 +533,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
 
         // wait for first non-cached sync to complete
         if (![SyncState.Stopped, SyncState.Error].includes(state) && !data?.fromCache) {
-            createLocalNotificationSettingsIfNeeded(this.sdkContext.client);
+            void createLocalNotificationSettingsIfNeeded(this.sdkContext.client);
         }
     };
 
@@ -560,7 +557,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
         // or not the event highlights, and in an encrypted room it is the only one there is.
         if (timelineSet === this.sdkContext.client.getNotifTimelineSet()) return;
 
-        this.sdkContext.client.decryptEventIfNeeded(ev);
+        void this.sdkContext.client.decryptEventIfNeeded(ev);
 
         // If it's an encrypted event and the type is still 'm.room.encrypted',
         // it hasn't yet been decrypted, so wait until it is.
@@ -679,7 +676,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
             }
             if (wantsSound && !soundDelegatedToOs) {
                 PlatformPeg.get()?.loudNotification(ev, room);
-                this.playAudioNotification(ev, room);
+                void this.playAudioNotification(ev, room);
             }
         }
     }

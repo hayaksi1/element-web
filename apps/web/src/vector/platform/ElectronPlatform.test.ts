@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeAll, beforeEach, afterEach, type MockedObject } from "vitest";
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach, type MockedObject, type Mock } from "vitest";
 import { logger } from "matrix-js-sdk/src/logger";
 import { MatrixEvent, Room } from "matrix-js-sdk/src/matrix";
 import { waitFor } from "test-utils-rtl";
@@ -279,7 +279,7 @@ describe("ElectronPlatform", () => {
     });
 
     describe("native notifications", () => {
-        let notificationSpy: ReturnType<typeof vi.fn>;
+        let notificationSpy: Mock<(title: string, options: NotificationOptions) => void>;
         let originalNotification: typeof window.Notification;
 
         const windowsUserAgent =

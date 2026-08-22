@@ -112,7 +112,12 @@ export const HomeButtonContextMenu: React.FC<ComponentProps<typeof SpaceContextM
                     active={allRoomsInHome}
                     onClick={() => {
                         onFinished();
-                        SettingsStore.setValue("Spaces.allRoomsInHome", null, SettingLevel.ACCOUNT, !allRoomsInHome);
+                        void SettingsStore.setValue(
+                            "Spaces.allRoomsInHome",
+                            null,
+                            SettingLevel.ACCOUNT,
+                            !allRoomsInHome,
+                        );
                     }}
                 />
             </IconizedContextMenuOptionList>
@@ -371,7 +376,7 @@ const SpacePanel: React.FC = () => {
         (collapsed: SetStateAction<boolean>): void => {
             const next = typeof collapsed === "function" ? collapsed(isPanelCollapsed) : collapsed;
             setPanelCollapsedState(next);
-            SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, next);
+            void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, next);
         },
         [isPanelCollapsed],
     );
