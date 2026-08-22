@@ -48,6 +48,7 @@ import ToastStore from "./stores/ToastStore";
 import { stripPlainReply } from "./utils/Reply";
 import { BackgroundAudio } from "./audio/BackgroundAudio";
 import { type MatrixDispatcher } from "./dispatcher/dispatcher.ts";
+import type { DisplayedNotification } from "./BasePlatform";
 
 /*
  * Dispatches:
@@ -75,12 +76,15 @@ const MAX_PENDING_ENCRYPTED = 20;
  * window is intentional: merging a burst of the same sound is preferable to a
  * wall of overlapping audio.
  *
- * NOTE: This only cures the sounds-enabled renderer Web-Audio path (the default
- * config). It does NOT fix the variant where macOS Sequoia ignores the OS
- * banner's `silent: true` and plays its own coalesced banner sound on wake;
- * that is purely OS/Electron behaviour with no in-repo lever.
+ * It covers both routes a sound can take: the renderer Web-Audio play in
+ * {@link Notifier#playAudioNotification}, and the audible OS notification used
+ * where the platform's {@link BasePlatform#supportsNotificationSound} is true.
+ * Both claim the same slot through {@link Notifier#claimNotificationSound}, so a
+ * backlog mixing the two still yields at most one sound per window.
  */
 export const NOTIFICATION_SOUND_THROTTLE_MS = 1000;
+
+const DEFAULT_NOTIFICATION_SOUND_KEY = "default";
 
 /**
  * Extracts plain text from a message body, replacing any spoilered content
@@ -154,7 +158,7 @@ export type NotificationSound = {
 };
 
 export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, EmittedEvents> {
-    private notifsByRoom: Record<string, Notification[]> = {};
+    private notifsByRoom: Record<string, DisplayedNotification[]> = {};
 
     // A list of event IDs that we've received but need to wait until
     // they're decrypted until we decide whether to notify for them
@@ -172,9 +176,9 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
 
     /**
      * Per-sound timestamp (ms, from {@link Date.now}) of the last *audible* notification, keyed by the
-     * resolved sound (custom sound url, or `"default"`). Used to throttle a burst of backlogged
-     * notifications of the *same* sound into a single play while letting distinct sounds through -
-     * see {@link NOTIFICATION_SOUND_THROTTLE_MS}.
+     * resolved sound (custom sound url, or {@link DEFAULT_NOTIFICATION_SOUND_KEY}). Used to throttle a
+     * burst of backlogged notifications of the *same* sound into a single sound while letting distinct
+     * sounds through - see {@link NOTIFICATION_SOUND_THROTTLE_MS}.
      */
     private readonly lastAudioNotificationMs = new Map<string, number>();
 
@@ -218,22 +222,29 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
     }
 
     // XXX: exported for tests
-    public displayPopupNotification(ev: MatrixEvent, room: Room): void {
+    /**
+     * Displays the OS notification for an event, if the platform and the user's settings allow one.
+     *
+     * @param sound - whether this event should make a notification sound.
+     * @returns true if a notification was displayed and it carries the sound itself, in which case the
+     *     caller must not play one as well.
+     */
+    public displayPopupNotification(ev: MatrixEvent, room: Room, sound = false): boolean {
         const plaf = PlatformPeg.get();
         const cli = this.sdkContext.client;
         if (!plaf || !cli) {
-            return;
+            return false;
         }
         if (!plaf.supportsNotifications() || !plaf.maySendNotifications()) {
-            return;
+            return false;
         }
 
         if (localNotificationsAreSilenced(cli)) {
-            return;
+            return false;
         }
 
         let msg = this.notificationMessageForEvent(ev);
-        if (!msg) return;
+        if (!msg) return false;
 
         let title: string | undefined;
         if (!ev.sender || room.name === ev.sender.name) {
@@ -256,7 +267,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
             }
         }
 
-        if (!title) return;
+        if (!title) return false;
 
         if (!this.isBodyEnabled()) {
             msg = "";
@@ -267,7 +278,13 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
             avatarUrl = Avatar.avatarUrlForMember(ev.sender, 40, 40, "crop");
         }
 
-        const notif = plaf.displayNotification(title, msg, avatarUrl, room, ev);
+        const delegateSound =
+            sound &&
+            plaf.supportsNotificationSound() &&
+            !this.getSoundForRoom(room.roomId) &&
+            this.claimNotificationSound(DEFAULT_NOTIFICATION_SOUND_KEY);
+
+        const notif = plaf.displayNotification(title, msg, avatarUrl, room, ev, delegateSound);
 
         // if displayNotification returns non-null,  the platform supports
         // clearing notifications later, so keep track of this.
@@ -275,6 +292,8 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
             if (this.notifsByRoom[ev.getRoomId()!] === undefined) this.notifsByRoom[ev.getRoomId()!] = [];
             this.notifsByRoom[ev.getRoomId()!].push(notif);
         }
+
+        return delegateSound;
     }
 
     public getSoundForRoom(roomId: string): NotificationSound | null {
@@ -318,29 +337,38 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
             return;
         }
 
-        // Play notification sound here
         const sound = this.getSoundForRoom(room.roomId);
         logger.log(`Got sound ${sound?.name || "default"} for ${room.roomId}`);
 
-        // Throttle audible plays so a burst of backlogged notifications - e.g. the whole sync backlog
-        // delivered at once when macOS wakes from sleep - produces at most one sound per distinct sound
-        // within NOTIFICATION_SOUND_THROTTLE_MS, instead of many identical buffers superimposing into one
-        // loud "stacked" sound (#31996). Keyed on the resolved sound so two *different* sounds within the
-        // window both still play. Runs only after the silencing gate above, so it suppresses redundant
-        // *audible* plays, never the gating logic. We bail cleanly (no throw).
-        const soundKey = sound?.url ?? "default";
-        const now = Date.now();
-        const lastPlayed = this.lastAudioNotificationMs.get(soundKey);
-        if (lastPlayed !== undefined && now - lastPlayed < NOTIFICATION_SOUND_THROTTLE_MS) {
+        if (!this.claimNotificationSound(sound?.url ?? DEFAULT_NOTIFICATION_SOUND_KEY)) {
             return;
         }
-        this.lastAudioNotificationMs.set(soundKey, now);
 
         if (sound) {
             await this.backgroundAudio.play(sound.url);
         } else {
             await this.backgroundAudio.pickFormatAndPlay("media/message", ["mp3", "ogg"]);
         }
+    }
+
+    /**
+     * Reserves the right to make one notification sound for the given sound, enforcing a gap of
+     * {@link NOTIFICATION_SOUND_THROTTLE_MS} between two audible plays of the same sound.
+     *
+     * Callers must invoke this only once they have decided to make the sound, so that a throttled slot
+     * is never consumed by a notification which was going to be silent anyway.
+     *
+     * @param soundKey - the resolved custom sound url, or {@link DEFAULT_NOTIFICATION_SOUND_KEY}.
+     * @returns true if the caller may make the sound, false if it was throttled.
+     */
+    private claimNotificationSound(soundKey: string): boolean {
+        const now = Date.now();
+        const lastPlayed = this.lastAudioNotificationMs.get(soundKey);
+        if (lastPlayed !== undefined && now - lastPlayed < NOTIFICATION_SOUND_THROTTLE_MS) {
+            return false;
+        }
+        this.lastAudioNotificationMs.set(soundKey, now);
+        return true;
     }
 
     public start(): void {
@@ -378,7 +406,15 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
         // make sure that we persist the current setting audio_enabled setting
         // before changing anything
         if (SettingsStore.isLevelSupported(SettingLevel.DEVICE)) {
-            SettingsStore.setValue("audioNotificationsEnabled", null, SettingLevel.DEVICE, this.isAudioEnabled());
+            // The stored preference, not isAudioEnabled(): that reports whether a sound would be
+            // heard right now, which is false while notifications are off, and persisting it here
+            // would turn the user's audio preference off as a side effect of enabling notifications.
+            SettingsStore.setValue(
+                "audioNotificationsEnabled",
+                null,
+                SettingLevel.DEVICE,
+                SettingsStore.getValue("audioNotificationsEnabled"),
+            );
         }
 
         if (enable) {
@@ -447,7 +483,7 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
     }
 
     public isAudioEnabled(): boolean {
-        // We don't route Audio via the HTML Notifications API so it is possible regardless of other things
+        if (this.isPossible() && !SettingsStore.getValue("notificationsEnabled")) return false;
         return SettingsStore.getValue("audioNotificationsEnabled");
     }
 
@@ -636,10 +672,12 @@ export default class Notifier extends TypedEventEmitter<keyof EmittedEvents, Emi
                 return;
             }
 
+            const wantsSound = !!actions.tweaks.sound && this.isAudioEnabled();
+            let soundDelegatedToOs = false;
             if (this.isEnabled()) {
-                this.displayPopupNotification(ev, room);
+                soundDelegatedToOs = this.displayPopupNotification(ev, room, wantsSound);
             }
-            if (actions.tweaks.sound && this.isAudioEnabled()) {
+            if (wantsSound && !soundDelegatedToOs) {
                 PlatformPeg.get()?.loudNotification(ev, room);
                 this.playAudioNotification(ev, room);
             }

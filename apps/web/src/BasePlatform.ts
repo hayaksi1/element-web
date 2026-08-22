@@ -47,6 +47,17 @@ export enum UpdateCheckStatus {
     Ready = "READY",
 }
 
+/**
+ * A notification which has been displayed to the user and can later be dismissed.
+ *
+ * A DOM {@link Notification} structurally satisfies this, so a platform which displays notifications
+ * through the Notifications API can return one directly, while a platform which displays them outside
+ * the renderer can return a handle of its own.
+ */
+export interface DisplayedNotification {
+    close(): void;
+}
+
 export interface UpdateStatus {
     /**
      * The current phase of the manual update check.
@@ -193,6 +204,17 @@ export default abstract class BasePlatform {
     }
 
     /**
+     * Returns true if the platform sounds the notification itself as part of displaying it, rather than
+     * the caller having to play a sound separately. Platforms which return true honour the `sound`
+     * argument to {@link BasePlatform#displayNotification}, and leave it to the operating system to
+     * decide whether the notification is actually audible.
+     * @returns {boolean} whether the platform sounds the notification itself
+     */
+    public supportsNotificationSound(): boolean {
+        return false;
+    }
+
+    /**
      * Requests permission to send notifications. Returns
      * a promise that is resolved when the user has responded
      * to the request. The promise has a single string argument
@@ -201,34 +223,44 @@ export default abstract class BasePlatform {
      */
     public abstract requestNotificationPermission(): Promise<string>;
 
+    protected onNotificationClick(room: Room, ev?: MatrixEvent): void {
+        const payload: ViewRoomPayload = {
+            action: Action.ViewRoom,
+            room_id: room.roomId,
+            metricsTrigger: "Notification",
+        };
+
+        if (ev?.getThread()) {
+            payload.event_id = ev.getId();
+        }
+
+        dis.dispatch(payload);
+        window.focus();
+    }
+
+    /**
+     * Displays a notification for an event.
+     *
+     * @param sound - whether the notification should be audible. Only honoured where
+     *     {@link BasePlatform#supportsNotificationSound} is true; elsewhere the notification is always
+     *     silent and the caller plays the sound itself.
+     */
     public displayNotification(
         title: string,
         msg: string,
         avatarUrl: string | null,
         room: Room,
         ev?: MatrixEvent,
-    ): Notification {
+        sound = false,
+    ): DisplayedNotification {
         const notifBody: NotificationOptions = {
             body: msg,
-            silent: true, // we play our own sounds
+            silent: !sound,
         };
         if (avatarUrl) notifBody["icon"] = avatarUrl;
         const notification = new window.Notification(title, notifBody);
 
-        notification.onclick = () => {
-            const payload: ViewRoomPayload = {
-                action: Action.ViewRoom,
-                room_id: room.roomId,
-                metricsTrigger: "Notification",
-            };
-
-            if (ev?.getThread()) {
-                payload.event_id = ev.getId();
-            }
-
-            dis.dispatch(payload);
-            window.focus();
-        };
+        notification.onclick = () => this.onNotificationClick(room, ev);
 
         const closeHandler = (): void => notification.close();
 

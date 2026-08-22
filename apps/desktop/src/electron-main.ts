@@ -32,6 +32,7 @@ import "./ipc.js";
 import "./seshat.js";
 import "./settings.js";
 import "./badge.js";
+import "./notifications.js";
 import * as tray from "./tray.js";
 import Store from "./store.js";
 import { AutoLaunch, shouldStartHidden } from "./auto-launch.js";

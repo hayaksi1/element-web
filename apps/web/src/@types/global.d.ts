@@ -47,6 +47,8 @@ type ElectronChannel =
     | "ipcCall"
     | "ipcReply"
     | "loudNotification"
+    | "notification"
+    | "notificationEvent"
     | "preferences"
     | "seshat"
     | "seshatReply"
@@ -126,6 +128,7 @@ declare global {
             protocol: string;
             sessionId: string;
             supportsBadgeOverlay: boolean;
+            supportsNativeNotifications: boolean;
             config: IConfigOptions;
             supportedSettings: Record<string, boolean>;
         }>;
