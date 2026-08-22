@@ -498,6 +498,7 @@ describe("Notifier", () => {
                 expect.any(String),
                 testRoom,
                 reaction,
+                false,
             );
         });
 
