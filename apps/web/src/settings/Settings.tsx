@@ -348,6 +348,7 @@ export interface Settings {
     "layout": IBaseSetting<Layout>;
     "Images.size": IBaseSetting<ImageSize>;
     "showChatEffects": IBaseSetting<boolean>;
+    "Threads.fullSizeView": IBaseSetting<boolean>;
     "Accessibility.disableSmoothScrolling": IBaseSetting<boolean>;
     "Performance.addSendMessageTimingMetadata": IBaseSetting<boolean>;
     "Widgets.pinned": IBaseSetting<{ [widgetId: string]: boolean }>;
@@ -1337,6 +1338,12 @@ export const SETTINGS: Settings = {
         displayName: _td("settings|show_chat_effects"),
         default: true,
         controller: new ReducedMotionController(),
+    },
+    "Threads.fullSizeView": {
+        supportedLevels: LEVELS_ACCOUNT_SETTINGS,
+        displayName: _td("settings|preferences|threads_full_size_view"),
+        description: _td("settings|preferences|threads_full_size_view_description"),
+        default: true,
     },
     "Accessibility.disableSmoothScrolling": {
         supportedLevels: LEVELS_ACCOUNT_SETTINGS,

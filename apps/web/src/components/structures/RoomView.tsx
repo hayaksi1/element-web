@@ -84,6 +84,9 @@ import RoomUpgradeWarningBar from "../views/rooms/RoomUpgradeWarningBar";
 import AuxPanel from "../views/rooms/AuxPanel";
 import RoomHeader from "../views/rooms/RoomHeader/RoomHeader";
 import RoomSearchHeader from "../views/rooms/RoomSearchHeader";
+import { ThreadHeader } from "../views/rooms/ThreadHeader";
+import ThreadView from "./ThreadView";
+import { type IRightPanelCard } from "../../stores/right-panel/RightPanelStoreIPanelState";
 import RoomSearchResults from "../views/rooms/RoomSearchResults";
 import { type IOOBData, type IThreepidInvite } from "../../stores/ThreepidInviteStore";
 import EffectsOverlay from "../views/elements/EffectsOverlay";
@@ -248,6 +251,13 @@ export interface IRoomState {
      * on cancel. Distinct from {@link search}, which only exists once a term has actually been searched.
      */
     searchHeaderActive: boolean;
+    /** Whether opening a thread replaces the room timeline instead of opening the right-hand panel. */
+    fullSizeThreadViewEnabled: boolean;
+    /**
+     * The thread replacing the room timeline in the main split. Mirrored from RightPanelStore's
+     * per-room slot because {@link RoomView.shouldComponentUpdate} compares state by reference.
+     */
+    fullSizeThread?: IRightPanelCard;
     callState?: CallState;
     canPeek: boolean;
     canSelfRedact: boolean;
@@ -536,6 +546,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             isPeeking: false,
             showRightPanel: false,
             searchHeaderActive: false,
+            fullSizeThreadViewEnabled: SettingsStore.getValue("Threads.fullSizeView"),
             joining: false,
             showTopUnreadMessagesBar: false,
             statusBarVisible: false,
@@ -731,6 +742,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             mainSplitContentType: room ? this.getMainSplitContentType(room) : undefined,
             initialEventId: undefined, // default to clearing this, will get set later in the method if needed
             showRightPanel: roomId ? this.context.rightPanelStore.isOpenForRoom(roomId) : false,
+            fullSizeThread: roomId ? this.context.rightPanelStore.getFullSizeThreadForRoom(roomId) : undefined,
             promptAskToJoin: promptAskToJoin,
             viewRoomOpts: viewRoomOpts,
         };
@@ -1118,6 +1130,9 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
         this.settingWatchers = [
             SettingsStore.watchSetting("layout", null, (...[, , , value]) => this.setState({ layout: value! })),
+            SettingsStore.watchSetting("Threads.fullSizeView", null, (...[, , , value]) =>
+                this.setState({ fullSizeThreadViewEnabled: value! }),
+            ),
             SettingsStore.watchSetting("lowBandwidth", null, (...[, , , value]) =>
                 this.setState({ lowBandwidth: value! }),
             ),
@@ -1196,7 +1211,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         this.context.legacyCallHandler.removeListener(LegacyCallHandlerEvent.CallState, this.onCallState);
 
         // update the scroll map before we get unmounted
-        if (this.state.roomId) {
+        if (this.state.roomId && this.messagePanel) {
             RoomScrollStateStore.setScrollState(this.state.roomId, this.getScrollState());
         }
 
@@ -1258,9 +1273,32 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
     private onRightPanelStoreUpdate = (): void => {
         const { roomId } = this.state;
+        const fullSizeThread = roomId ? this.context.rightPanelStore.getFullSizeThreadForRoom(roomId) : undefined;
+
+        if (roomId && fullSizeThread && !this.state.fullSizeThread) {
+            RoomScrollStateStore.setScrollState(roomId, this.getScrollState());
+            this.messagePanel?.sendReadReceipts().catch((err) => {
+                logger.error("Failed to flush read receipts before showing a full-size thread", err);
+            });
+        }
+
+        const restoring = Boolean(roomId && !fullSizeThread && this.state.fullSizeThread);
+        const restored = restoring ? RoomScrollStateStore.getScrollState(roomId!) : undefined;
+
         this.setState({
             showRightPanel: roomId ? this.context.rightPanelStore.isOpenForRoom(roomId) : false,
+            fullSizeThread,
+            ...(restoring && {
+                initialEventId: restored?.focussedEvent,
+                initialEventPixelOffset: restored?.pixelOffset,
+                isInitialEventHighlighted: false,
+                initialEventScrollIntoView: undefined,
+            }),
         });
+    };
+
+    private onCloseFullSizeThread = (): void => {
+        if (this.state.roomId) this.context.rightPanelStore.clearFullSizeThread(this.state.roomId);
     };
 
     private onPageUnload = (event: BeforeUnloadEvent): string | undefined => {
@@ -3032,6 +3070,15 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             mainSplitContentType = MainSplitContentType.Timeline;
         }
 
+        const fullSizeThreadState =
+            this.state.fullSizeThreadViewEnabled &&
+            mainSplitContentType === MainSplitContentType.Timeline &&
+            !this.state.search &&
+            !this.state.searchHeaderActive
+                ? this.state.fullSizeThread?.state
+                : undefined;
+        const fullSizeThreadRoot = fullSizeThreadState?.threadHeadEvent;
+
         const mainClasses = classNames("mx_RoomView", {
             mx_RoomView_inCall: Boolean(activeCall),
             mx_RoomView_immersive: mainSplitContentType !== MainSplitContentType.Timeline,
@@ -3045,7 +3092,28 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         switch (mainSplitContentType) {
             case MainSplitContentType.Timeline:
                 mainSplitContentClassName = "mx_MainSplit_timeline";
-                mainSplitBody = (
+                mainSplitBody = fullSizeThreadRoot ? (
+                    <>
+                        <Measured sensor={this.roomViewBody} onMeasurement={this.onMeasurement} />
+                        <ThreadView
+                            fullSize
+                            room={this.state.room}
+                            mxEvent={fullSizeThreadRoot}
+                            initialEvent={fullSizeThreadState?.initialEvent}
+                            isInitialEventHighlighted={fullSizeThreadState?.isInitialEventHighlighted}
+                            resizeNotifier={this.context.resizeNotifier}
+                            permalinkCreator={this.permalinkCreator}
+                            e2eStatus={this.state.e2eStatus}
+                            onClose={this.onCloseFullSizeThread}
+                            aboveComposer={
+                                <>
+                                    {statusBarArea}
+                                    {previewBar}
+                                </>
+                            }
+                        />
+                    </>
+                ) : (
                     <RoomUploadContextProvider>
                         <Measured sensor={this.roomViewBody} onMeasurement={this.onMeasurement} />
                         {auxPanel}
@@ -3155,6 +3223,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                                             onBackToResults={this.onBackToSearchResults}
                                             autoFocus={true}
                                         />
+                                    ) : fullSizeThreadRoot ? (
+                                        <ThreadHeader room={this.state.room} onBack={this.onCloseFullSizeThread} />
                                     ) : (
                                         <RoomHeader
                                             room={this.state.room}
