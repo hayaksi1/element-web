@@ -3224,7 +3224,11 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
                                             autoFocus={true}
                                         />
                                     ) : fullSizeThreadRoot ? (
-                                        <ThreadHeader room={this.state.room} onBack={this.onCloseFullSizeThread} />
+                                        <ThreadHeader
+                                            room={this.state.room}
+                                            threadRoot={fullSizeThreadRoot}
+                                            onBack={this.onCloseFullSizeThread}
+                                        />
                                     ) : (
                                         <RoomHeader
                                             room={this.state.room}
