@@ -828,8 +828,6 @@ export const SETTINGS: Settings = {
         supportedLevels: LEVELS_DEVICE_ONLY_SETTINGS_WITH_CONFIG,
         displayName: _td("settings|appearance|compact_message_actions"),
         description: _td("settings|appearance|compact_message_actions_description"),
-        // Off by default: the app starts with messages highlighted and their toolbar shown on hover. The
-        // Appearance toggle "Highlight messages on hover" is the positive inverse — off enables this compact mode.
         default: false,
     },
     "showRedactions": {

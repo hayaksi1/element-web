@@ -78,10 +78,6 @@ Please see LICENSE files in the repository root for full details.
         border-radius: 4px;
     }
 
-    /* Selected (permalinked event) and the tile whose action menu is open always keep the band: it is the
-       only cue saying which event the menu acts on, and with the hover band gated off below there is
-       otherwise nothing. The group layout marks `actionBarFocused` for the same reason (_EventTile.pcss).
-       Kept in its own block so that gating :hover below cannot take it with it. */
     &.mx_EventTile_selected,
     &.mx_EventTile_actionBarFocused {
         &::before {
@@ -89,22 +85,6 @@ Please see LICENSE files in the repository root for full details.
         }
 
         .mx_EventTile_avatar {
-            img {
-                box-shadow: 0 0 0 3px $eventbubble-bg-hover;
-            }
-        }
-    }
-
-    /* The hover band is suppressed under `compactMessageActions` (see LoggedInView): hovering a message
-       then reveals the options button alone, with no full-width highlight. */
-    .mx_MatrixChat_wrapper:not(.mx_MatrixChat_compactMessageActions) &:hover {
-        &::before {
-            background: $eventbubble-bg-hover;
-        }
-
-        .mx_EventTile_avatar {
-            border-color: $eventbubble-bg-hover;
-
             img {
                 box-shadow: 0 0 0 3px $eventbubble-bg-hover;
             }

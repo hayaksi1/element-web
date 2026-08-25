@@ -378,10 +378,9 @@ exports[`<LayoutSwitcher /> should render 1`] = `
             >
               <input
                 aria-describedby="radix-react-use-id-6"
-                checked=""
                 class="_input_udcm8_24"
                 id="radix-react-use-id-7"
-                name="hoverHighlight"
+                name="compactMessageActions"
                 role="switch"
                 title=""
                 type="checkbox"
@@ -398,13 +397,13 @@ exports[`<LayoutSwitcher /> should render 1`] = `
               class="_label_1o4d9_60"
               for="radix-react-use-id-7"
             >
-              Highlight messages on hover
+              Show message actions in a menu
             </label>
             <span
               class="_message_1o4d9_86 _help-message_1o4d9_92"
               id="radix-react-use-id-6"
             >
-              Highlight the message and show its toolbar when you hover it. Turn this off to reveal a single options button instead.
+              Reveal a single options button when hovering a message, instead of a row of buttons. All actions stay available in the menu.
             </span>
           </div>
         </div>

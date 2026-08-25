@@ -26,7 +26,7 @@ export function LayoutSwitcher(): JSX.Element {
         <SettingsSubsection heading={_t("common|message_layout")} legacy={false} data-testid="layoutPanel">
             <LayoutSelector />
             <ToggleCompactLayout />
-            <ToggleHoverHighlight />
+            <ToggleCompactMessageActions />
         </SettingsSubsection>
     );
 }
@@ -163,27 +163,26 @@ function ToggleCompactLayout(): JSX.Element {
 }
 
 /**
- * A toggleable setting for whether hovering a message highlights it and reveals the full toolbar (on) or
- * collapses it into a single options button (off). It is the positive inverse of the `compactMessageActions`
- * setting: enabled here means the compact behaviour is off. Applies to every layout, so unlike the compact
- * layout toggle it is never layout-gated.
+ * A toggleable setting for whether hovering a message reveals its actions as a row of buttons (off) or
+ * collapses them into a single options button (on). Applies to every layout, so unlike the compact layout
+ * toggle it is never layout-gated.
  */
-function ToggleHoverHighlight(): JSX.Element {
-    const hoverHighlightEnabled = !useSettingValue("compactMessageActions");
+function ToggleCompactMessageActions(): JSX.Element {
+    const compactMessageActions = useSettingValue("compactMessageActions");
 
     return (
         <Root
             onChange={async (evt) => {
-                const checked = new FormData(evt.currentTarget).get("hoverHighlight") === "on";
-                await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, !checked);
+                const checked = new FormData(evt.currentTarget).get("compactMessageActions") === "on";
+                await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, checked);
             }}
         >
             <InlineField
-                name="hoverHighlight"
-                control={<ToggleControl name="hoverHighlight" defaultChecked={hoverHighlightEnabled} />}
+                name="compactMessageActions"
+                control={<ToggleControl name="compactMessageActions" defaultChecked={compactMessageActions} />}
             >
-                <Label>{_t("settings|appearance|hover_highlight")}</Label>
-                <HelpMessage>{_t("settings|appearance|hover_highlight_description")}</HelpMessage>
+                <Label>{_t("settings|appearance|compact_message_actions")}</Label>
+                <HelpMessage>{_t("settings|appearance|compact_message_actions_description")}</HelpMessage>
             </InlineField>
         </Root>
     );

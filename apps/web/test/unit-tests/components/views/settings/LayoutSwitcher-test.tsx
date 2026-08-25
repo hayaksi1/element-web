@@ -87,30 +87,27 @@ describe("<LayoutSwitcher />", () => {
         });
     });
 
-    describe("hover highlight", () => {
-        // The toggle is the positive inverse of `compactMessageActions`: on = highlight + full toolbar on
-        // hover (compact off), off = single options button (compact on).
+    describe("compact message actions", () => {
         beforeEach(async () => {
             await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
         });
 
-        it("should be on when the compact behaviour is off", async () => {
-            await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
+        it("should be off when the compact behaviour is off", async () => {
             await renderLayoutSwitcher();
 
-            expect(screen.getByRole("switch", { name: "Highlight messages on hover" })).toBeChecked();
+            expect(screen.getByRole("switch", { name: "Show message actions in a menu" })).not.toBeChecked();
         });
 
-        it("should be off when the compact behaviour is on", async () => {
+        it("should be on when the compact behaviour is on", async () => {
             await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
             await renderLayoutSwitcher();
 
-            expect(screen.getByRole("switch", { name: "Highlight messages on hover" })).not.toBeChecked();
+            expect(screen.getByRole("switch", { name: "Show message actions in a menu" })).toBeChecked();
         });
 
-        it("should enable the compact behaviour when toggled off", async () => {
+        it("should enable the compact behaviour when toggled on", async () => {
             await renderLayoutSwitcher();
-            act(() => screen.getByRole("switch", { name: "Highlight messages on hover" }).click());
+            act(() => screen.getByRole("switch", { name: "Show message actions in a menu" }).click());
 
             await waitFor(() => expect(SettingsStore.getValue("compactMessageActions")).toBe(true));
         });
@@ -118,7 +115,7 @@ describe("<LayoutSwitcher />", () => {
         it("should stay enabled regardless of the selected layout", async () => {
             await SettingsStore.setValue("layout", null, SettingLevel.DEVICE, Layout.Bubble);
             await renderLayoutSwitcher();
-            expect(screen.getByRole("switch", { name: "Highlight messages on hover" })).not.toBeDisabled();
+            expect(screen.getByRole("switch", { name: "Show message actions in a menu" })).not.toBeDisabled();
         });
     });
 });

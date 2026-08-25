@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 
 import { test, expect } from "../../element-web-test";
 import { SettingLevel } from "../../../src/settings/SettingLevel";
@@ -13,7 +13,8 @@ import { Layout } from "../../../src/settings/enums/Layout";
 
 /**
  * Covers `compactMessageActions`: hovering a message reveals a single options button rather than a row of
- * buttons over a highlighted row, and the actions it collapses stay reachable through the menu.
+ * buttons, and the actions it collapses stay reachable through the menu. Also pins that hovering never paints
+ * a highlight band behind the message, in any layout and whatever the setting.
  *
  * The suite-wide default is off (see packages/playwright-common CONFIG_JSON), so each test turns it on.
  */
@@ -126,9 +127,7 @@ test.describe("Compact message actions", () => {
 
     // The band is painted either on the tile's ::before (bubble) or on the line (group/irc). Read whichever
     // this layout uses.
-    const readHoverBackground = async (page: Page, layout: Layout) => {
-        const tile = await sendMessage(page, "Hello");
-        await tile.hover();
+    const readBandBackground = (tile: Locator, layout: Layout) => {
         const target = layout === Layout.Bubble ? tile : tile.locator(".mx_EventTile_line").first();
         return target.evaluate((element, isBubble) => {
             const node = isBubble ? window.getComputedStyle(element, "::before") : window.getComputedStyle(element);
@@ -140,25 +139,27 @@ test.describe("Compact message actions", () => {
 
     for (const layout of [Layout.Group, Layout.Bubble, Layout.IRC]) {
         test(`paints no hover highlight behind the message in ${layout} layout`, async ({ page, app, room }) => {
-            await app.settings.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
             await app.settings.setValue("layout", null, SettingLevel.DEVICE, layout);
             await page.goto(`#/room/${room.roomId}`);
 
-            expect(await readHoverBackground(page, layout)).toMatch(TRANSPARENT);
+            const tile = await sendMessage(page, "Hello");
+            await tile.hover();
+
+            expect(await readBandBackground(tile, layout)).toMatch(TRANSPARENT);
         });
 
-        // Positive control: with the setting off the band must come back. Without this, the assertion above
-        // would pass just as happily against a selector that never matches anything.
-        test(`still paints the hover highlight in ${layout} layout when the setting is off`, async ({
-            page,
-            app,
-            room,
-        }) => {
-            await app.settings.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
+        // Positive control: the band still lands on the tile whose menu is open, which is the only cue saying
+        // which message the menu acts on. Without this, the assertion above would pass just as happily against
+        // a selector that never matches anything.
+        test(`still highlights the ${layout} layout message whose menu is open`, async ({ page, app, room }) => {
             await app.settings.setValue("layout", null, SettingLevel.DEVICE, layout);
             await page.goto(`#/room/${room.roomId}`);
 
-            expect(await readHoverBackground(page, layout)).not.toMatch(TRANSPARENT);
+            const tile = await sendMessage(page, "Hello");
+            await tile.hover();
+            await tile.getByRole("button", { name: "Options" }).click();
+
+            expect(await readBandBackground(tile, layout)).not.toMatch(TRANSPARENT);
         });
     }
 
@@ -178,21 +179,5 @@ test.describe("Compact message actions", () => {
         await expect(page.getByRole("menuitem", { name: "Reply", exact: true })).not.toBeVisible();
         await expect(page.getByRole("menuitem", { name: "React", exact: true })).not.toBeVisible();
         await expect(page.getByRole("menuitem", { name: "Edit", exact: true })).not.toBeVisible();
-    });
-
-    // Selection must survive the band removal: it shares the rule that :hover was split out of.
-    test("still highlights the selected event while its menu is open", async ({ page, app, room }) => {
-        await app.settings.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
-        await app.settings.setValue("layout", null, SettingLevel.DEVICE, Layout.Bubble);
-        await page.goto(`#/room/${room.roomId}`);
-
-        const tile = await sendMessage(page, "Hello");
-        await tile.hover();
-        await tile.getByRole("button", { name: "Options" }).click();
-
-        const background = await tile.evaluate(
-            (element) => window.getComputedStyle(element, "::before").backgroundColor,
-        );
-        expect(background).not.toMatch(TRANSPARENT);
     });
 });
