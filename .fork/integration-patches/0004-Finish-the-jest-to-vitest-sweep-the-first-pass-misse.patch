@@ -1,0 +1,764 @@
+From 2d16e38768bd297f816e4eeafac62d4d2bcabc6b Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:03:29 +0300
+Subject: [PATCH 4/5] Finish the jest-to-vitest sweep the first pass missed
+
+The first sweep matched \bjest\.(fn|spyOn|...) on a single line, but the
+formatter had broken several call sites across two - `getValueSpy = jest`
+then `.spyOn(...)` on the next line - so those survived untouched while the
+type annotation beside them was rewritten to MockInstance. The two then
+disagreed and tsc reported it; four files were affected.
+
+Also imports vi, describe, it and expect where they were still being used
+as globals. apps/web sets globals: false, so a test relying on them does
+not fail an assertion - it fails to load.
+
+Fork-Feature: fork-tooling
+---
+ apps/web/src/ContentMessages.test.ts          |  8 +++---
+ .../structures/LoggedInView.test.tsx          |  2 +-
+ .../context_menus/MessageContextMenu.test.tsx |  6 ++---
+ .../views/right_panel/RoomFilesView.test.tsx  | 13 +++++-----
+ .../right_panel/RoomSearchJumpToDate.test.tsx | 25 ++++++++++---------
+ .../RoomSearchOrderToggle.test.tsx            | 13 +++++-----
+ .../RoomSearchSenderFilter.test.tsx           | 19 +++++++-------
+ .../views/room_settings/AliasSettings.test.ts |  1 +
+ .../views/rooms/ReadReceiptGroup.test.tsx     | 12 ++++-----
+ .../views/spaces/SpacePanel.test.tsx          |  2 +-
+ apps/web/src/settings/ChatBackgrounds.test.ts |  3 ++-
+ apps/web/src/slash-commands/query.test.ts     |  7 +++---
+ apps/web/src/slash-commands/spoiler.test.ts   |  1 +
+ apps/web/src/stores/MemberListStore.test.ts   |  2 +-
+ apps/web/src/stores/RoomViewStore.test.ts     |  2 +-
+ .../web/src/stores/SearchSessionStore.test.ts |  9 ++++---
+ .../previews/MessageEventPreview.test.ts      |  4 +--
+ .../src/toasts/InRoomSearchNudgeToast.test.ts | 13 +++++-----
+ apps/web/src/utils/StorageManager.test.ts     |  2 +-
+ apps/web/src/utils/i18n-helpers.test.ts       |  8 +++---
+ apps/web/src/utils/notifications.test.ts      |  4 +--
+ .../room-list/RoomListViewModel.test.ts       |  8 +++---
+ 22 files changed, 87 insertions(+), 77 deletions(-)
+
+diff --git a/apps/web/src/ContentMessages.test.ts b/apps/web/src/ContentMessages.test.ts
+index 4ccf0887fb..4a3ade1fd9 100644
+--- a/apps/web/src/ContentMessages.test.ts
++++ b/apps/web/src/ContentMessages.test.ts
+@@ -441,7 +441,7 @@ describe("uploadFile", () => {
+ 
+     it("should keep the uploaded file so it does not have to be downloaded again", async () => {
+         clearUploadedMedia();
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
+         const file = new Blob(["hello"]);
+ 
+         await uploadFile(client, "!roomId:server", file);
+@@ -451,9 +451,9 @@ describe("uploadFile", () => {
+ 
+     it("should keep the plaintext of an encrypted upload rather than the ciphertext", async () => {
+         clearUploadedMedia();
+-        jest.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
+-        mocked(encrypt.encryptAttachment).mockResolvedValue({
++        vi.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
++        vi.mocked(encrypt.encryptAttachment).mockResolvedValue({
+             data: new ArrayBuffer(123),
+             info: {} as IEncryptedFile,
+         });
+diff --git a/apps/web/src/components/structures/LoggedInView.test.tsx b/apps/web/src/components/structures/LoggedInView.test.tsx
+index 6d68759d6e..469ff37da7 100644
+--- a/apps/web/src/components/structures/LoggedInView.test.tsx
++++ b/apps/web/src/components/structures/LoggedInView.test.tsx
+@@ -579,7 +579,7 @@ describe("<LoggedInView />", () => {
+         });
+ 
+         const mockChatBackgroundSettings = (values: Record<string, unknown>): void => {
+-            getValueSpy = jest
++            getValueSpy = vi
+                 .spyOn(SettingsStore, "getValue")
+                 .mockImplementation(((name: string, ...rest: unknown[]) =>
+                     name in values
+diff --git a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx b/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
+index 65d0ede0c0..f19695657a 100644
+--- a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
++++ b/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
+@@ -727,7 +727,7 @@ describe("MessageContextMenu quick actions", () => {
+         ["React", "React"],
+         ["Edit", "Edit"],
+     ])("shows the %s option when showQuickActions is set", (_name, label) => {
+-        mocked(canEditContent).mockReturnValue(true);
++        vi.mocked(canEditContent).mockReturnValue(true);
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true, canReact: true });
+@@ -736,7 +736,7 @@ describe("MessageContextMenu quick actions", () => {
+     });
+ 
+     it("does not show the quick actions without showQuickActions or a right click", () => {
+-        mocked(canEditContent).mockReturnValue(true);
++        vi.mocked(canEditContent).mockReturnValue(true);
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, {}, { canSendMessages: true, canReact: true });
+@@ -749,7 +749,7 @@ describe("MessageContextMenu quick actions", () => {
+     // Copy and quote act on a text selection the user made before right clicking, so they must stay behind
+     // `rightClick` rather than riding along with the collapsed quick actions.
+     it("does not show copy or quote when only showQuickActions is set", () => {
+-        mocked(getSelectedText).mockReturnValue("hello");
++        vi.mocked(getSelectedText).mockReturnValue("hello");
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true });
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+index 096ccc45c0..6dc9fcbef4 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, beforeEach } from "vitest";
+ import React from "react";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+ import { render, screen, fireEvent } from "jest-matrix-react";
+@@ -16,7 +17,7 @@ import { RightPanelPhases } from "../../../stores/right-panel/RightPanelStorePha
+ 
+ // Stub TimelinePanel so we can capture the `eventFilter` predicate it is handed without rendering a real timeline.
+ let mockLastTimelineProps: { eventFilter?: (ev: MatrixEvent) => boolean } = {};
+-jest.mock("../../structures/TimelinePanel", () => ({
++vi.mock("../../structures/TimelinePanel", () => ({
+     __esModule: true,
+     default: (props: { eventFilter?: (ev: MatrixEvent) => boolean }) => {
+         mockLastTimelineProps = props;
+@@ -37,11 +38,11 @@ const renderView = (): void => {
+     render(
+         <RoomFilesView
+             timelineSet={{} as never}
+-            onPaginationRequest={jest.fn()}
++            onPaginationRequest={vi.fn()}
+             empty={<div />}
+-            onClose={jest.fn()}
++            onClose={vi.fn()}
+             isRoomEncrypted={false}
+-            onMeasurement={jest.fn()}
++            onMeasurement={vi.fn()}
+         />,
+         // The card reads the right panel store off the SDK context.
+         clientAndSDKContextRenderOptions(SDKContextClass.instance.client!, SDKContextClass.instance),
+@@ -52,7 +53,7 @@ describe("RoomFilesView", () => {
+     beforeEach(() => {
+         // Restored here rather than in an afterEach so it lands after React Testing Library has unmounted the
+         // previous render, never in the middle of one.
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+         stubClient();
+         mockLastTimelineProps = {};
+     });
+@@ -76,7 +77,7 @@ describe("RoomFilesView", () => {
+     });
+ 
+     it("offers a back button when the right panel has a card to go back to", () => {
+-        jest.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
++        vi.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
+             { phase: RightPanelPhases.RoomSummary, state: {} },
+             { phase: RightPanelPhases.FilePanel, state: {} },
+         ]);
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index 5980f515ab..fda683b9e8 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import React from "react";
+ import { mocked } from "jest-mock";
+ import { render, screen, waitFor } from "jest-matrix-react";
+@@ -19,12 +20,12 @@ import { Action } from "../../../dispatcher/actions";
+ import { MatrixClientPeg } from "../../../MatrixClientPeg";
+ import { SdkContextClass } from "../../../contexts/SDKContext";
+ 
+-jest.mock("../../../settings/SettingsStore");
+-jest.mock("../../../contexts/SDKContext", () => ({
++vi.mock("../../../settings/SettingsStore");
++vi.mock("../../../contexts/SDKContext", () => ({
+     SdkContextClass: {
+         instance: {
+             roomViewStore: {
+-                getRoomId: jest.fn(),
++                getRoomId: vi.fn(),
+             },
+         },
+     },
+@@ -32,10 +33,10 @@ jest.mock("../../../contexts/SDKContext", () => ({
+ 
+ describe("RoomSearchJumpToDate", () => {
+     const roomId = "!room:example.org";
+-    const mockTimestampToEvent = jest.fn();
++    const mockTimestampToEvent = vi.fn();
+ 
+     const setFeatureEnabled = (enabled: boolean): void => {
+-        mocked(SettingsStore).getValue.mockImplementation((key): any => {
++        vi.mocked(SettingsStore).getValue.mockImplementation((key): any => {
+             if (key === "feature_jump_to_date") return enabled;
+             if (String(key) === UIFeature.TimelineEnableRelativeDates) return true;
+             return undefined;
+@@ -44,19 +45,19 @@ describe("RoomSearchJumpToDate", () => {
+ 
+     beforeEach(() => {
+         setFeatureEnabled(true);
+-        mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
+-        mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
++        vi.mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
++        vi.mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
+ 
+         mockTimestampToEvent.mockReset();
+-        jest.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
++        vi.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
+             timestampToEvent: mockTimestampToEvent,
+         } as any);
+-        jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
++        vi.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
++        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the calendar trigger when jump-to-date is enabled", () => {
+@@ -93,7 +94,7 @@ describe("RoomSearchJumpToDate", () => {
+         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
+         const roomB = "!roomB:example.org";
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
++        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+ 
+         const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+         rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+index 1c20ab47c3..148f60e845 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
+ import React from "react";
+ import { render, screen } from "jest-matrix-react";
+ import userEvent from "@testing-library/user-event";
+@@ -14,12 +15,12 @@ import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle";
+ 
+ describe("RoomSearchOrderToggle", () => {
+     it("renders the order toggle trigger", () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />);
+         expect(screen.getByTestId("search-order-toggle-button")).toBeInTheDocument();
+     });
+ 
+     it("selecting Most relevant requests relevance (Rank) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -29,7 +30,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("selecting Most recent requests recency (Recent) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -39,7 +40,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("checks the radio matching the active order (controlled)", async () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+ 
+@@ -49,13 +50,13 @@ describe("RoomSearchOrderToggle", () => {
+ 
+     it("shows the active-order indicator only for a non-default (relevance) order", () => {
+         const { rerender } = render(
+-            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />,
++            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />,
+         );
+         // Default (recency): no indicator dot, and the accessible name is the neutral label.
+         expect(screen.getByTestId("search-order-toggle-button")).not.toHaveAttribute("data-indicator");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results");
+ 
+-        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+         // Relevance: the indicator dot is shown and the active state is folded into the accessible name.
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAttribute("data-indicator", "default");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results (by relevance)");
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+index e50b979adf..17cff34bf0 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, afterEach } from "vitest";
+ import React from "react";
+ import { mocked } from "jest-mock";
+ import { render, screen } from "jest-matrix-react";
+@@ -18,14 +19,14 @@ const member = (userId: string, name: string): RoomMember => ({ userId, name })
+ 
+ describe("RoomSearchSenderFilter", () => {
+     const buildRoom = (members: RoomMember[]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, "@me:server");
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the filter trigger when the room has other members", () => {
+@@ -33,7 +34,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -45,7 +46,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@me:server", "Me")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -53,7 +54,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("selecting a member adds them to the sender filter", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -69,7 +70,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("toggling an already-selected member off removes them", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -113,7 +114,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+                 senders={["@alice:server", "@bob:server"]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -121,7 +122,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("clears all selected senders via the clear action", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
+diff --git a/apps/web/src/components/views/room_settings/AliasSettings.test.ts b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+index a3781b2270..433dd5557a 100644
+--- a/apps/web/src/components/views/room_settings/AliasSettings.test.ts
++++ b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++import { describe, it, expect } from "vitest";
+ import { MatrixError } from "matrix-js-sdk/src/matrix";
+ 
+ import { getAliasCreationErrorMessage } from "./AliasSettings";
+diff --git a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+index 64735ca6df..5039835450 100644
+--- a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
++++ b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
+ // @vitest-environment happy-dom
+ 
+ import React, { type ComponentProps } from "react";
+-import { describe, it, expect, vi, beforeEach } from "vitest";
++import { describe, it, expect, vi, beforeEach , type MockInstance} from "vitest";
+ import { render, screen, waitFor } from "test-utils-rtl";
+ import { RoomMember } from "matrix-js-sdk/src/matrix";
+ import userEvent from "@testing-library/user-event";
+@@ -150,14 +150,14 @@ describe("ReadReceiptGroup", () => {
+         describe("inside a scrolling boundary", () => {
+             let boundary: HTMLDivElement;
+             let rowTop: number;
+-            let rectSpy: jest.SpyInstance;
++            let rectSpy: MockInstance;
+ 
+             beforeEach(() => {
+                 boundary = document.createElement("div");
+                 sizeElement(boundary, 220, 300);
+                 document.body.appendChild(boundary);
+                 sizeElement(document.documentElement, 1024, 768);
+-                rectSpy = jest
++                rectSpy = vi
+                     .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+                     .mockImplementation(function (this: HTMLElement) {
+                         if (this === boundary) return rect(100, 0, 220, 300);
+@@ -212,7 +212,7 @@ describe("ReadReceiptGroup", () => {
+ 
+     describe("<ReadReceiptGroup />", () => {
+         stubClient();
+-        mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
++        vi.mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
+ 
+         const receipts = ["@alice:example.org", "@bob:example.org", "@carol:example.org"].map((userId) => ({
+             userId,
+@@ -220,11 +220,11 @@ describe("ReadReceiptGroup", () => {
+             ts: new Date(2024, 4, 15).getTime(),
+         }));
+         let rowTop: number;
+-        let rectSpy: jest.SpyInstance;
++        let rectSpy: MockInstance;
+ 
+         beforeEach(() => {
+             sizeElement(document.documentElement, 1024, 768);
+-            rectSpy = jest
++            rectSpy = vi
+                 .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+                 .mockImplementation(function (this: HTMLElement) {
+                     if (this.classList.contains("mx_AutoHideScrollbar")) return rect(100, 0, 220, 300);
+diff --git a/apps/web/src/components/views/spaces/SpacePanel.test.tsx b/apps/web/src/components/views/spaces/SpacePanel.test.tsx
+index b3c409282e..d2312bfe29 100644
+--- a/apps/web/src/components/views/spaces/SpacePanel.test.tsx
++++ b/apps/web/src/components/views/spaces/SpacePanel.test.tsx
+@@ -227,7 +227,7 @@ describe("<SpacePanel />", () => {
+         function mockCollapsedSetting(collapsed: boolean): void {
+             const originalGetValue = SettingsStore.getValue;
+             spies.push(
+-                jest
++                vi
+                     .spyOn(SettingsStore, "getValue")
+                     .mockImplementation((setting, ...args) =>
+                         setting === "Spaces.isPanelCollapsed" ? collapsed : originalGetValue(setting, ...args),
+diff --git a/apps/web/src/settings/ChatBackgrounds.test.ts b/apps/web/src/settings/ChatBackgrounds.test.ts
+index c717aff8ed..e431b0f10e 100644
+--- a/apps/web/src/settings/ChatBackgrounds.test.ts
++++ b/apps/web/src/settings/ChatBackgrounds.test.ts
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
+ import { type MatrixClient } from "matrix-js-sdk/src/matrix";
+ 
+ import {
+@@ -18,7 +19,7 @@ import {
+ 
+ describe("ChatBackgrounds", () => {
+     const clientWith = (httpUrl: string | null): MatrixClient =>
+-        ({ mxcUrlToHttp: jest.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
++        ({ mxcUrlToHttp: vi.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
+ 
+     describe("CHAT_BACKGROUND_PRESETS", () => {
+         it("exposes the bundled presets", () => {
+diff --git a/apps/web/src/slash-commands/query.test.ts b/apps/web/src/slash-commands/query.test.ts
+index bd47b4d4a5..9e3229b85e 100644
+--- a/apps/web/src/slash-commands/query.test.ts
++++ b/apps/web/src/slash-commands/query.test.ts
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { setUpCommandTest } from "./__mocks__";
+ import * as createRoom from "../createRoom";
+ import dis from "../dispatcher/dispatcher";
+@@ -15,12 +16,12 @@ describe("/query", () => {
+     const dmRoomId = "!dm:example.com";
+ 
+     beforeEach(() => {
+-        jest.spyOn(createRoom, "ensureDMExists").mockResolvedValue(dmRoomId);
+-        jest.spyOn(dis, "dispatch").mockImplementation(() => {});
++        vi.spyOn(createRoom, "ensureDMExists").mockResolvedValue(dmRoomId);
++        vi.spyOn(dis, "dispatch").mockImplementation(() => {});
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("should return usage if no args", () => {
+diff --git a/apps/web/src/slash-commands/spoiler.test.ts b/apps/web/src/slash-commands/spoiler.test.ts
+index 5d96390399..4e716b035e 100644
+--- a/apps/web/src/slash-commands/spoiler.test.ts
++++ b/apps/web/src/slash-commands/spoiler.test.ts
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect } from "vitest";
+ import { type IContent } from "matrix-js-sdk/src/matrix";
+ 
+ import { setUpCommandTest } from "./__mocks__";
+diff --git a/apps/web/src/stores/MemberListStore.test.ts b/apps/web/src/stores/MemberListStore.test.ts
+index 9debabd24b..21eb5bddea 100644
+--- a/apps/web/src/stores/MemberListStore.test.ts
++++ b/apps/web/src/stores/MemberListStore.test.ts
+@@ -135,7 +135,7 @@ describe("MemberListStore", () => {
+         });
+         // Lazy loading means the client may hold no User for a member at all, which is the only
+         // thing that ever populates RoomMember.user.
+-        mocked(client.getUser).mockReturnValue(null);
++        vi.mocked(client.getUser).mockReturnValue(null);
+ 
+         const { joined } = await store.loadMemberList(roomId);
+         expect(joined.map((m) => m.userId)).toEqual([doris, alice, bob, charlie]);
+diff --git a/apps/web/src/stores/RoomViewStore.test.ts b/apps/web/src/stores/RoomViewStore.test.ts
+index b9b13c727c..b2336151b0 100644
+--- a/apps/web/src/stores/RoomViewStore.test.ts
++++ b/apps/web/src/stores/RoomViewStore.test.ts
+@@ -516,7 +516,7 @@ describe("RoomViewStore", function () {
+ 
+             roomViewStore.showJoinRoomError(new MatrixError(undefined, 404), roomId);
+ 
+-            expect(mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
++            expect(vi.mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
+                 title: "Room not found",
+                 description: "The room may no longer exist or is unavailable from your server.",
+             });
+diff --git a/apps/web/src/stores/SearchSessionStore.test.ts b/apps/web/src/stores/SearchSessionStore.test.ts
+index 01e9e846f8..faaeddd997 100644
+--- a/apps/web/src/stores/SearchSessionStore.test.ts
++++ b/apps/web/src/stores/SearchSessionStore.test.ts
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+ import { SearchSessionStore, SearchSessionStoreEvent } from "./SearchSessionStore";
+@@ -62,7 +63,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("emits Update when a session starts", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             start();
+             expect(listener).toHaveBeenCalledTimes(1);
+@@ -94,7 +95,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("is a no-op when there is no active session", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
+             expect(store.hasActiveSession()).toBe(false);
+@@ -130,7 +131,7 @@ describe("SearchSessionStore", () => {
+         it("moves the cursor and emits Update", () => {
+             start();
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1"), match("!b:server", "$2")] });
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.setCurrentMatchIndex(1);
+             expect(store.currentMatchIndex).toBe(1);
+@@ -190,7 +191,7 @@ describe("SearchSessionStore", () => {
+ 
+         it("does not emit Update when toggled (it is not view state)", () => {
+             start();
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.beginSteppingJump("$e");
+             store.consumeSteppingJump();
+diff --git a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+index aa9bb53693..f94ecd00ee 100644
+--- a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
++++ b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, beforeAll } from "vitest";
++import { vi, describe, it, expect, beforeAll } from "vitest";
+ import { RelationType } from "matrix-js-sdk/src/matrix";
+ import { mkEvent, stubClient } from "test-utils";
+ 
+@@ -45,7 +45,7 @@ describe("MessageEventPreview", () => {
+                 room: "!room:example.com",
+                 type: "m.room.message",
+             });
+-            jest.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
++            vi.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
+ 
+             expect(preview.getTextFor(event)).toBe(`${userId}: Unable to decrypt message`);
+         });
+diff --git a/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+index 50d64d76de..4f5012502e 100644
+--- a/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
++++ b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+ import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
+ import SettingsStore from "../settings/SettingsStore";
+ import { SettingLevel } from "../settings/SettingLevel";
+@@ -17,22 +18,22 @@ const TOAST_KEY = "in-room-search-nudge";
+ const ctrlF = (): KeyboardEvent => new KeyboardEvent("keydown", { key: "f", ctrlKey: true });
+ 
+ describe("showInRoomSearchNudgeIfNeeded", () => {
+-    let addOrReplaceToast: jest.SpyInstance;
+-    let setValue: jest.SpyInstance;
++    let addOrReplaceToast: MockInstance;
++    let setValue: MockInstance;
+ 
+     const mockSettings = (values: Record<string, boolean>): void => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
+     };
+ 
+     beforeEach(() => {
+-        addOrReplaceToast = jest
++        addOrReplaceToast = vi
+             .spyOn(ToastStore.sharedInstance(), "addOrReplaceToast")
+             .mockImplementation(() => undefined);
+-        setValue = jest.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
++        setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("shows the one-time toast on Ctrl/Cmd+F when in-room search is disabled and not yet shown", () => {
+diff --git a/apps/web/src/utils/StorageManager.test.ts b/apps/web/src/utils/StorageManager.test.ts
+index 593f4f79d4..c7807497af 100644
+--- a/apps/web/src/utils/StorageManager.test.ts
++++ b/apps/web/src/utils/StorageManager.test.ts
+@@ -123,7 +123,7 @@ describe("StorageManager", () => {
+ 
+     describe("tryPersistStorage", () => {
+         // node/happy-dom do not implement navigator.storage, so stub it per-test; vi.replaceProperty (aka
+-        // jest.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
++        // vi.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
+         function setStorage(value: unknown): void {
+             Object.defineProperty(navigator, "storage", { value, configurable: true });
+         }
+diff --git a/apps/web/src/utils/i18n-helpers.test.ts b/apps/web/src/utils/i18n-helpers.test.ts
+index 6d9a7df5b5..4cf020a64a 100644
+--- a/apps/web/src/utils/i18n-helpers.test.ts
++++ b/apps/web/src/utils/i18n-helpers.test.ts
+@@ -68,16 +68,16 @@ describe("roomContextDetails", () => {
+         ]);
+ 
+         beforeEach(() => {
+-            jest.spyOn(SDKContextClass.instance.spaceStore, "getKnownParents").mockReturnValue(new Set());
++            vi.spyOn(SDKContextClass.instance.spaceStore, "getKnownParents").mockReturnValue(new Set());
+         });
+ 
+         it("should show the partner's user ID while they are in the room", () => {
+-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(partner);
++            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(partner);
+             expect(roomContextDetails(dm)!.details).toBe(partner);
+         });
+ 
+         it("should not show the user ID of a partner who was never seen in the room", () => {
+-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
++            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+             expect(roomContextDetails(dm)!.details).not.toBe(parted);
+         });
+ 
+@@ -85,7 +85,7 @@ describe("roomContextDetails", () => {
+             dm.currentState.setStateEvents([
+                 mkMembership({ room: dm.roomId, user: parted, mship: KnownMembership.Leave, event: true }),
+             ]);
+-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
++            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+             expect(roomContextDetails(dm)!.details).not.toBe(parted);
+         });
+     });
+diff --git a/apps/web/src/utils/notifications.test.ts b/apps/web/src/utils/notifications.test.ts
+index 1e26d29372..4c80b24d18 100644
+--- a/apps/web/src/utils/notifications.test.ts
++++ b/apps/web/src/utils/notifications.test.ts
+@@ -184,8 +184,8 @@ describe("notifications", () => {
+                 // The predecessor's highlights are folded into this room's badge, so they have to be
+                 // cleared from here or the user is left with a count they cannot reach
+                 oldRoom.setUnreadNotificationCount(NotificationCountType.Highlight, 3);
+-                jest.spyOn(room, "findPredecessor").mockReturnValue({ roomId: OLD_ROOM_ID });
+-                jest.spyOn(client, "getRoom").mockImplementation((roomId) => (roomId === OLD_ROOM_ID ? oldRoom : null));
++                vi.spyOn(room, "findPredecessor").mockReturnValue({ roomId: OLD_ROOM_ID });
++                vi.spyOn(client, "getRoom").mockImplementation((roomId) => (roomId === OLD_ROOM_ID ? oldRoom : null));
+             });
+ 
+             it("marks the replaced room as read too", async () => {
+diff --git a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+index 95213067d6..db29fa7dc1 100644
+--- a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
++++ b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+@@ -367,13 +367,13 @@ describe("RoomListViewModel", () => {
+             });
+ 
+             // Open the room at the top of the list.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
+             dispatcher.dispatch({ action: Action.ActiveRoomChanged, newRoomId: "!room1:server" });
+             await flushPromises();
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // Reading it demotes it in the store, but sticky keeps it where the user is looking.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room2, room3, room1] }],
+             });
+@@ -386,7 +386,7 @@ describe("RoomListViewModel", () => {
+ 
+             // Moving to the next room down has to fall back to the store's order, in which the room
+             // being left is last. Reusing the pinned order would record room2 at index 1.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
+             dispatcher.dispatch({
+                 action: Action.ActiveRoomChanged,
+                 oldRoomId: "!room1:server",
+@@ -401,7 +401,7 @@ describe("RoomListViewModel", () => {
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // So when room2 is read in turn, the still-unread room3 does not jump above it.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room3, room2, room1] }],
+             });
+-- 
+2.52.0
+
