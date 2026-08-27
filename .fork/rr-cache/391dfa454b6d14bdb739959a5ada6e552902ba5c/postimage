@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 // @vitest-environment happy-dom
 
 import React, { type ComponentProps } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { render, screen, waitFor } from "test-utils-rtl";
 import { RoomMember } from "matrix-js-sdk/src/matrix";
 import userEvent from "@testing-library/user-event";
@@ -150,14 +150,14 @@ describe("ReadReceiptGroup", () => {
         describe("inside a scrolling boundary", () => {
             let boundary: HTMLDivElement;
             let rowTop: number;
-            let rectSpy: jest.SpyInstance;
+            let rectSpy: MockInstance;
 
             beforeEach(() => {
                 boundary = document.createElement("div");
                 sizeElement(boundary, 220, 300);
                 document.body.appendChild(boundary);
                 sizeElement(document.documentElement, 1024, 768);
-                rectSpy = jest
+                rectSpy = vi
                     .spyOn(HTMLElement.prototype, "getBoundingClientRect")
                     .mockImplementation(function (this: HTMLElement) {
                         if (this === boundary) return rect(100, 0, 220, 300);
@@ -220,11 +220,11 @@ describe("ReadReceiptGroup", () => {
             ts: new Date(2024, 4, 15).getTime(),
         }));
         let rowTop: number;
-        let rectSpy: jest.SpyInstance;
+        let rectSpy: MockInstance;
 
         beforeEach(() => {
             sizeElement(document.documentElement, 1024, 768);
-            rectSpy = jest
+            rectSpy = vi
                 .spyOn(HTMLElement.prototype, "getBoundingClientRect")
                 .mockImplementation(function (this: HTMLElement) {
                     if (this.classList.contains("mx_AutoHideScrollbar")) return rect(100, 0, 220, 300);

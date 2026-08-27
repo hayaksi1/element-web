@@ -1070,6 +1070,39 @@ if check_duplicate_snapshot_keys; then
     log "snapshot keys: no duplicates"
 fi
 
+# ------------------------------------------- 5b2. cached-resolution audit
+
+# A postimage IS the merge result for its conflict, replayed verbatim on every rebuild
+# forever. A defective one is therefore worse than no cache at all: it reproduces the
+# same broken file silently, and the branch still merges cleanly, so nothing upstream of
+# the test run notices. Two of these shipped before this check existed - one left a file
+# unparseable, one left jest idioms in a vitest suite that only failed on the runner.
+audit_rr_cache() {
+    local f bad=""
+    for f in "$RR_REPO"/*/postimage; do
+        [[ -e "$f" ]] || continue
+        # A resolution that still holds conflict markers was never finished.
+        if grep -qE '^(<{7}|>{7})$' "$f"; then
+            bad+="$f (unresolved conflict markers)"$'\n'; continue
+        fi
+        # jest in a file that imports vitest is a half-done migration. Files that do not
+        # import vitest are the legacy suites, where jest is correct - leave them be.
+        # Match a bare `jest` too: the real code writes `jest` and `.spyOn(...)` on
+        # separate lines often enough that a `jest\.` pattern misses it entirely.
+        if grep -q 'from "vitest"' "$f" && grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
+            bad+="$f (jest idioms in a vitest resolution)"$'\n'
+        fi
+    done
+    [[ -z "$bad" ]] && { log "rr-cache: ${RR_COUNT:-?} cached resolutions, none defective"; return 0; }
+    warn "DEFECTIVE CACHED RESOLUTIONS:"
+    warn "$(indent "${bad%$'\n'}")"
+    die "A postimage is replayed verbatim on every rebuild, so each of these reproduces a
+broken file every run while the merge still reports clean. Fix the postimage itself -
+editing the merged file afterwards fixes this run and no other."
+}
+RR_COUNT="$(find "$RR_REPO" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+audit_rr_cache
+
 # ------------------------------------------- 5c. stale-exemption report
 
 # An allowlist is a category people agree to stop looking at, which is exactly where a

@@ -68,16 +68,16 @@ describe("roomContextDetails", () => {
         ]);
 
         beforeEach(() => {
-            jest.spyOn(SDKContextClass.instance.spaceStore, "getKnownParents").mockReturnValue(new Set());
+            vi.spyOn(SDKContextClass.instance.spaceStore, "getKnownParents").mockReturnValue(new Set());
         });
 
         it("should show the partner's user ID while they are in the room", () => {
-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(partner);
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(partner);
             expect(roomContextDetails(dm)!.details).toBe(partner);
         });
 
         it("should not show the user ID of a partner who was never seen in the room", () => {
-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
             expect(roomContextDetails(dm)!.details).not.toBe(parted);
         });
 
@@ -85,7 +85,7 @@ describe("roomContextDetails", () => {
             dm.currentState.setStateEvents([
                 mkMembership({ room: dm.roomId, user: parted, mship: KnownMembership.Leave, event: true }),
             ]);
-            jest.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
             expect(roomContextDetails(dm)!.details).not.toBe(parted);
         });
     });
