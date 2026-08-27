@@ -1277,7 +1277,17 @@ longer matched and a frozen install refused it. Written by pnpm, never by hand."
     ok "  PASS  pnpm install"
 }
 gate_install
-gate "pnpm lint"      pnpm lint
+# Run the lint steps individually rather than through `pnpm lint`. That script is a
+# single && chain with lint:types first, so while the floated js-sdk carries type errors
+# the chain exits there and the other five steps never execute - and the node_modules
+# tolerance would then wave the whole thing through. Tolerating a dependency's type
+# errors must not also mean skipping every check that would catch ours.
+gate "lint:types"     pnpm -r --workspace-concurrency=1 lint:types
+gate "lint:fmt"       pnpm lint:fmt
+gate "lint:js"        pnpm lint:js
+gate "lint:style"     pnpm -r lint:style
+gate "lint:workflows" pnpm lint:workflows
+gate "lint:knip"      pnpm lint:knip
 gate "pnpm test:unit" pnpm test:unit
 
 if (( GATES_PASSED )); then ok "all verification gates passed"; else warn "one or more gates FAILED"; fi
