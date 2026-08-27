@@ -1260,6 +1260,13 @@ gate_install() {
         GATES_PASSED=0
         return
     fi
+    # Rewriting the lockfile can move a dependency that ships a binary rather than just
+    # JavaScript. Relinking does not re-run its install script, so the package resolves
+    # while the binary it needs is the previous version's or absent - which surfaces much
+    # later as a test failing to collect, nowhere near the install that caused it.
+    if ! pnpm rebuild electron 2>/dev/null; then
+        warn "  could not rebuild electron; the desktop suites may not find its binary"
+    fi
     if ! git diff --quiet -- pnpm-lock.yaml; then
         git add -- pnpm-lock.yaml
         git commit --quiet -m "Regenerate the lockfile for the rebuilt workspace" \
