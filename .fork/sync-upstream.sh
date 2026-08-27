@@ -94,6 +94,7 @@ CONTRIB_FILE="$REPO_ROOT/.fork/contrib.txt"
 PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
 DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
 RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
+DROPS_FILE="$GIT_COMMON/fork-sync-drops"
 
 # ---------------------------------------------------------------- helpers
 
@@ -448,27 +449,13 @@ assert_branch_landed() {
 
     (( lost == 0 )) && return 0
 
-    export_rr_cache
-    echo >&2
-    printf '%s============== MERGE DROPPED BRANCH CONTENT ==============%s\n' "$RED" "$RST" >&2
-    cat >&2 <<EOF
-branch : $branch
-
-The merge committed cleanly but the files above came out exactly as our side had
-them, so $branch contributed nothing to them. This is almost always a conflict
-resolved to upstream's side by mistake. It is how pr/search-top-bar's Searching and
-RoomView suites and pr/message-hover-actions' EventTileActionBarViewModel suite were
-lost -- each is still an ancestor of the integration branch, so an ancestry check
-cannot see it.
-
-Re-do this merge and keep both sides, then:
-
-    .fork/sync-upstream.sh --continue
-
-If the drop is deliberate (upstream superseded the branch's approach), record the
-path in .fork/relocations.txt or drop the branch from its manifest, and re-run.
-EOF
-    exit 4
+    # Recorded, not raised. A nightly run that stops on the fifth of ninety-odd branches
+    # tells you almost nothing; one that finishes and hands back every branch that
+    # dropped content tells you where to spend the morning. A conflict still halts -
+    # nothing can be committed until a human resolves it - but a drop is only visible
+    # after the merge commit exists, and costs nothing to carry to the end of the run.
+    printf '%s\n' "$branch" >> "$DROPS_FILE"
+    return 0
 }
 
 # Indent a multi-line string by four spaces, without shelling out.
@@ -513,6 +500,7 @@ log "mirror     : $MIRROR   integration: $INTEGRATION"
 if (( DRY_RUN )); then warn "DRY RUN - nothing will be modified or pushed"; fi
 
 PHASE=""; INDEX=0; BRANCH=""
+(( CONTINUE )) || rm -f "$DROPS_FILE"
 # Whether we are still before the feature-rebase resume point. Kept separate from
 # CONTINUE: clearing CONTINUE here would also disable the integration-merge resume
 # below, silently turning every --continue into a full rebuild.
@@ -896,6 +884,29 @@ Fix each file, then:
 and re-run. Nothing has been pushed."
 }
 assert_no_conflict_markers
+
+# ------------------------------------------- 5b. dropped-content report
+
+if [[ -s "$DROPS_FILE" ]]; then
+    export_rr_cache
+    echo >&2
+    printf '%s============== MERGES THAT DROPPED BRANCH CONTENT ==============%s\n' "$RED" "$RST" >&2
+    sort -u "$DROPS_FILE" | while read -r b; do printf '  %s\n' "$b" >&2; done
+    cat >&2 <<'EOF'
+
+Each branch above merged cleanly, but for at least one file the result is exactly
+what our side already had - so the branch contributed nothing there. The per-branch
+LOST lines earlier in this log name the files.
+
+This is almost always a conflict resolved to upstream's side by mistake, and it is
+invisible to every ancestry check: the branch IS merged, only its content is gone.
+
+Redo the affected merge keeping both sides. If a drop is deliberate because upstream
+superseded the branch's approach, list the path in .fork/accept-upstream-deletions.txt
+or drop the branch from its manifest, and re-run.
+EOF
+    exit 4
+fi
 
 # ------------------------------------------- 5b. snapshot sanity
 
