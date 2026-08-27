@@ -96,6 +96,10 @@ DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
 RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
 DROPS_FILE="$GIT_COMMON/fork-sync-drops"
 STILL_DROPPED="$GIT_COMMON/fork-sync-drops-final"
+# Which allowlist entries actually silenced something this run. An exemption nobody
+# exercises is the dangerous kind: it stays authoritative long after the reason for it
+# has gone, and blinds the guard to a real drop on that path forever.
+ACCEPTED_USED="$GIT_COMMON/fork-sync-accepted-used"
 # assert_branch_landed runs twice: once per merge, where it can only see that merge's
 # result, and once at the end against the finished tree. RECHECK selects the pass.
 RECHECK=0
@@ -473,6 +477,7 @@ assert_branch_landed() {
         f_reloc="$(reloc_target "$f" 2>/dev/null || true)"
         if [[ -n "$accepted" ]] && printf '%s\n' "$accepted" | grep -qxF -e "$f" -e "${f_reloc:-$f}"; then
             $log "    $f: upstream deleted it and the allowlist accepts that; not a drop"
+            (( RECHECK )) || printf '%s\n%s\n' "$f" "${f_reloc:-$f}" >> "$ACCEPTED_USED"
             continue
         fi
         theirs="$(git rev-parse --verify --quiet "$branch:$f")" || continue
@@ -562,7 +567,7 @@ log "mirror     : $MIRROR   integration: $INTEGRATION"
 if (( DRY_RUN )); then warn "DRY RUN - nothing will be modified or pushed"; fi
 
 PHASE=""; INDEX=0; BRANCH=""
-(( CONTINUE )) || rm -f "$DROPS_FILE" "$STILL_DROPPED"
+(( CONTINUE )) || rm -f "$DROPS_FILE" "$STILL_DROPPED" "$ACCEPTED_USED"
 # Whether we are still before the feature-rebase resume point. Kept separate from
 # CONTINUE: clearing CONTINUE here would also disable the integration-merge resume
 # below, silently turning every --continue into a full rebuild.
@@ -1063,6 +1068,33 @@ check_duplicate_snapshot_keys() {
 }
 if check_duplicate_snapshot_keys; then
     log "snapshot keys: no duplicates"
+fi
+
+# ------------------------------------------- 5c. stale-exemption report
+
+# An allowlist is a category people agree to stop looking at, which is exactly where a
+# real problem survives longest. Three separate defects this fork hit were hiding in one:
+# an uncollected test directory, files dropped by a dead worker, and a stylesheet sitting
+# among documentation everyone had agreed was noise. So the exemptions justify themselves
+# every run rather than accumulate quietly.
+if [[ -f "$DELETIONS_FILE" ]]; then
+    STALE=""
+    while IFS= read -r entry; do
+        entry="${entry%%#*}"; entry="${entry//[[:space:]]/}"
+        [[ -n "$entry" ]] || continue
+        if [[ ! -f "$ACCEPTED_USED" ]] || ! grep -qxF -- "$entry" "$ACCEPTED_USED"; then
+            STALE+="$entry"$'\n'
+        fi
+    done < "$DELETIONS_FILE"
+    if [[ -n "$STALE" ]]; then
+        warn "allowlist entries that silenced nothing this run:"
+        warn "$(indent "${STALE%$'\n'}")"
+        warn "Each is either obsolete, or covers a path no branch touches any more. Delete"
+        warn "what no longer earns its place: an exemption nobody exercises still blinds"
+        warn "the guard to a genuine drop on that path."
+    else
+        log "allowlist: every entry earned its place this run"
+    fi
 fi
 
 # ------------------------------------------------- 6. verification gates
