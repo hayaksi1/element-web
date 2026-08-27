@@ -1,7 +1,10 @@
 name: Fork sync
 
-# Rebuilds the fork against upstream:
+# Publish half of the sync pipeline. Rebuilds the fork against upstream:
 #   develop --ff-only-> upstream/develop, feat/* rebased, combined rebuilt.
+#
+# Detection is `fork-detect.yml`, which runs daily and only predicts conflicts. This
+# workflow does the real thing, so it never runs the preflight.
 #
 # NOTE: scheduled workflows only ever run from the repository's DEFAULT branch. `develop`
 # is a pristine mirror of upstream and must never carry this file, so the default branch
@@ -9,8 +12,10 @@ name: Fork sync
 
 on:
     schedule:
-        # 03:17 UTC daily. Off the hour on purpose: GitHub drops scheduled runs at :00.
-        - cron: "17 3 * * *"
+        # 03:17 UTC on Mondays and Thursdays. Off the hour on purpose: GitHub drops
+        # scheduled runs at :00. Twice weekly rather than daily because the daily job of
+        # noticing an upstream conflict now belongs to fork-detect.yml.
+        - cron: "17 3 * * 1,4"
     workflow_dispatch:
         inputs:
             dry_run_only:
@@ -18,6 +23,8 @@ on:
                 type: boolean
                 default: false
 
+# Shared with fork-detect.yml on purpose: a detect run must never start while this
+# rebuild is in flight.
 concurrency:
     group: fork-sync
     cancel-in-progress: false
@@ -132,7 +139,11 @@ jobs:
                   CODE: ${{ steps.sync.outputs.exit_code }}
               run: |
                   set -euo pipefail
-                  title="Upstream sync conflict: ${BRANCH}"
+                  # One fixed-title issue, shared with fork-detect.yml. Two workflows
+                  # managing two titles defeats the "one place to look" property the split
+                  # rests on, and each one's close-on-clean would silently fail to close the
+                  # other's issue. The branch lives in the body, not the title.
+                  title="Sync conflicts"
                   kind="feature rebase"
                   resume_hint="git rebase --continue"
                   contrib_note=""
@@ -182,9 +193,18 @@ jobs:
                       exit 0
                   fi
 
-                  existing="$(gh issue list --state open --search "\"$title\" in:title" \
+                  # --state all: the issue is closed whenever a run comes back clean, so the
+                  # next conflict must reopen that same issue rather than open a second one.
+                  existing="$(gh issue list --state all --search "\"$title\" in:title" \
                               --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
                   if [ -n "$existing" ]; then
+                      if [ "$(gh issue view "$existing" --json state --jq .state 2>/dev/null)" = "CLOSED" ]; then
+                          gh issue reopen "$existing" || echo "::warning::could not reopen issue #$existing"
+                      fi
+                      # Publish knows things detect cannot - it stopped mid-rebuild, so it has
+                      # the exact resume commands. Write that richer body over detect's.
+                      gh issue edit "$existing" --body-file issue-body.md \
+                        || echo "::warning::could not update the body of issue #$existing"
                       gh issue comment "$existing" --body-file issue-body.md \
                         || echo "::warning::could not comment on issue #$existing"
                   else
@@ -198,11 +218,13 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
-                  gh issue list --state open --search '"Upstream sync conflict:" in:title' \
-                      --json number --jq '.[].number' | while read -r n; do
-                      [ -z "$n" ] && continue
-                      gh issue close "$n" --comment "Resolved: the sync completed cleanly."
-                  done
+                  set -euo pipefail
+                  title="Sync conflicts"
+                  num="$(gh issue list --state open --search "\"$title\" in:title" \
+                         --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
+                  [ -z "$num" ] && { echo "nothing open to close"; exit 0; }
+                  gh issue close "$num" --comment "Resolved: the rebuild completed cleanly and every gate passed." \
+                    || echo "::warning::could not close issue #$num"
 
             - name: Upload logs
               if: always()
