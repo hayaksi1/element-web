@@ -192,6 +192,10 @@ unresolved path, written even when the run is clean, so "nothing conflicted" and
 never got that far" cannot be confused. It is run output, not tooling: it is gitignored and
 must never be committed.
 
+`.fork/report-sync-conflicts.sh [report]` is what reflects that file in the issue; the
+detect workflow runs it right after `--detect`. `FORK_ISSUE_DRY_RUN=1` prints every `gh`
+write instead of doing it.
+
 ## Adding a branch
 
 ```bash
