@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach, type MockInstance } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, act, cleanup, waitFor, within } from "test-utils-rtl";
 import { type MatrixClient, type Room } from "matrix-js-sdk/src/matrix";
@@ -222,7 +222,7 @@ describe("<SpacePanel />", () => {
 
         // Restore only these spies: the suite mocks MatrixClientPeg once in beforeAll, so a blanket
         // restoreAllMocks here would log the following tests out.
-        let spies: vi.SpyInstance[] = [];
+        let spies: MockInstance[] = [];
 
         function mockCollapsedSetting(collapsed: boolean): void {
             const originalGetValue = SettingsStore.getValue;

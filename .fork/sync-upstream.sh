@@ -1092,6 +1092,11 @@ audit_rr_cache() {
         if grep -q 'from "vitest"' "$f" && grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
             bad+="$f (jest idioms in a vitest resolution)"$'\n'
         fi
+        # vitest has no `vi.SpyInstance`; the type is `MockInstance`, imported by name.
+        # A blanket jest.->vi. rewrite produces this and it compiles nowhere.
+        if grep -qE '\bvi\.(SpyInstance|Mocked|Mock)\b' "$f"; then
+            bad+="$f (vi.* used as a type; vitest exports these as named types)"$'\n'
+        fi
     done
     [[ -z "$bad" ]] && { log "rr-cache: ${RR_COUNT:-?} cached resolutions, none defective"; return 0; }
     warn "DEFECTIVE CACHED RESOLUTIONS:"
