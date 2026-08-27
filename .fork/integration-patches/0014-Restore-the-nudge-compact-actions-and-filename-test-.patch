@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:38:49 +0300
+Subject: [PATCH] Restore the nudge, compact-actions and filename test cases
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three more suites lost their fork cases the same way: the one-time toast that
+points a web user at the opt-in in-room search shortcut, the wrapper class the
+compact action bar keys off, and a video named by its filename rather than by
+its caption. All three behaviours are live here and were left with nothing
+asserting them.
+
+The two nudge cases now drive a native keydown on the body instead of typing
+through the harness. The nudge deliberately hangs off the document listener's
+nothing-focused path so the browser find bar is never suppressed, and typed
+input reaches the React handler instead, which bypasses it entirely — the
+original cases passed only on a harness where the two paths coincided.
+---
+ .../structures/LoggedInView.test.tsx          | 44 ++++++++++++++++++-
+ .../message-body/VideoBodyViewModel.test.ts   | 14 ++++++
+ 2 files changed, 57 insertions(+), 1 deletion(-)
+
+diff --git a/apps/web/src/components/structures/LoggedInView.test.tsx b/apps/web/src/components/structures/LoggedInView.test.tsx
+index 469ff37da7..70af086340 100644
+--- a/apps/web/src/components/structures/LoggedInView.test.tsx
++++ b/apps/web/src/components/structures/LoggedInView.test.tsx
+@@ -11,7 +11,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
+ import React from "react";
+-import { render, fireEvent, type RenderResult } from "test-utils-rtl";
++import { act, render, fireEvent, waitFor, type RenderResult } from "test-utils-rtl";
+ import {
+     ConditionKind,
+     EventType,
+@@ -428,6 +428,28 @@ describe("<LoggedInView />", () => {
+         expect(defaultDispatcher.fire).toHaveBeenCalledWith(Action.FocusMessageSearch);
+     });
+ 
++    it("shows the one-time in-room search nudge on Ctrl+F when the shortcut is disabled (web)", async () => {
++        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
++        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, false);
++        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
++
++        getComponent();
++        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
++
++        expect(addOrReplaceToast).toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
++    });
++
++    it("does not show the in-room search nudge when the shortcut is enabled", async () => {
++        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
++        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, true);
++        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
++
++        getComponent();
++        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
++
++        expect(addOrReplaceToast).not.toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
++    });
++
+     it("should go home on home shortcut", async () => {
+         vi.spyOn(defaultDispatcher, "dispatch").mockImplementation(() => {});
+ 
+@@ -504,6 +526,26 @@ describe("<LoggedInView />", () => {
+         });
+     });
+ 
++    describe("compact message actions", () => {
++        afterEach(async () => {
++            await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
++        });
++
++        it("toggles the wrapper class when the compactMessageActions setting changes", async () => {
++            await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
++            const { container } = getComponent();
++            const wrapper = (): Element | null => container.querySelector(".mx_MatrixChat_wrapper");
++
++            expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(false);
++
++            await act(async () => {
++                await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
++            });
++
++            await waitFor(() => expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(true));
++        });
++    });
++
+     describe("resource limit exceeded errors", () => {
+         it("pops a toast when M_RESOURCE_LIMIT_EXCEEDED is seen down sync", async () => {
+             const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
+diff --git a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+index 2bd54fbff7..b1669d1076 100644
+--- a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
++++ b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+@@ -488,6 +488,20 @@ describe("VideoBodyViewModel", () => {
+         expect(vm.getSnapshot().src).toBe("data:video/mp4,");
+     });
+ 
++    it("names the video by its filename rather than its caption", () => {
++        const vm = createVm({
++            mxEvent: createEvent({
++                body: "a caption",
++                content: { filename: "holiday.mp4" },
++            }),
++        });
++
++        vm.setMediaVisible(true);
++
++        expect(vm.getSnapshot().videoTitle).toBe("holiday.mp4");
++        expect(vm.getSnapshot().videoLabel).toBe("holiday.mp4");
++    });
++
+     it("does not emit for unchanged targeted setters", () => {
+         const event = createEvent();
+         const onPreviewClick = vi.fn();
