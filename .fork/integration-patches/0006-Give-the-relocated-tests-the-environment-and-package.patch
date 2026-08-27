@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:19:56 +0300
+Subject: [PATCH 06/10] Give the relocated tests the environment and packages
+ they need
+
+Three of them needed a DOM. apps/web defaults to environment: "node", and
+a file opts in with a per-file pragma; without it, query.test.ts and
+spoiler.test.ts reached FileBodyViewModel's module-level cacheDownloadIcon,
+whose window.btoa call rejected during module init rather than inside a
+test - killing the worker thread outright. Files a dead worker was running
+appear in neither the passed nor the failed tally, so the run looked
+coherent while two files silently evaporated.
+
+Four more imported jest-matrix-react, which the vitest migration removed;
+they use test-utils-rtl like every other co-located suite. Two imported
+mocked from jest-mock without using it, and one reached for SdkContextClass
+in SDKContext, where only the React context lives.
+
+Also imports the hooks two files actually use: adding a vitest import that
+omits the hook the file calls fixes nothing.
+
+Fork-Feature: fork-tooling
+---
+ .fork/sync-upstream.sh                                |  9 ++-------
+ .../views/right_panel/RoomFilesView.test.tsx          |  2 +-
+ .../views/right_panel/RoomSearchJumpToDate.test.tsx   | 11 +++++------
+ .../views/right_panel/RoomSearchOrderToggle.test.tsx  |  2 +-
+ .../views/right_panel/RoomSearchSenderFilter.test.tsx |  3 +--
+ .../components/views/rooms/ReadReceiptGroup.test.tsx  |  2 +-
+ apps/web/src/slash-commands/query.test.ts             |  2 ++
+ apps/web/src/slash-commands/spoiler.test.ts           |  2 ++
+ apps/web/src/toasts/InRoomSearchNudgeToast.test.ts    |  2 ++
+ apps/web/src/utils/i18n-helpers.test.ts               |  2 +-
+ 10 files changed, 18 insertions(+), 19 deletions(-)
+
+diff --git a/.fork/sync-upstream.sh b/.fork/sync-upstream.sh
+index 6e13f2e1cd..4d0fbfafe0 100755
+--- a/.fork/sync-upstream.sh
++++ b/.fork/sync-upstream.sh
+@@ -894,8 +894,8 @@ if (( ${#PATCHES[@]} )); then
+     log "applying ${#PATCHES[@]} integration patch(es)"
+     for p in "${PATCHES[@]}"; do
+         log "  $(basename "$p")"
+-        if git apply --check "$p" 2>/dev/null; then
+-            git apply "$p"
++        if git apply --index --check "$p" 2>/dev/null; then
++            git apply --index "$p"
+         elif git apply --3way --check "$p" 2>/dev/null; then
+             git apply --3way "$p"
+         else
+@@ -913,11 +913,6 @@ Regenerate it from the current tree, or delete it if it is obsolete:
+ EOF
+             exit 4
+         fi
+-        # Stage ONLY what the patch touches. `git add -A` would sweep in any unrelated
+-        # untracked file sitting in the tree and publish it.
+-        while IFS= read -r pf; do
+-            [[ -n "$pf" ]] && git add -- "$pf"
+-        done < <(git apply --numstat -z "$p" 2>/dev/null | tr '\0' '\n' | awk 'NR%3==0')
+         git commit --quiet -m "Apply integration patch $(basename "$p")" \
+                             -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
+     done
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+index 6dc9fcbef4..eefd892a27 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+@@ -8,7 +8,7 @@
+ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import React from "react";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+-import { render, screen, fireEvent } from "jest-matrix-react";
++import { render, screen, fireEvent } from "test-utils-rtl";
+ 
+ import { RoomFilesView } from "./RoomFilesView";
+ import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "test-utils";
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index fda683b9e8..3f97db4c87 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -7,8 +7,7 @@
+ 
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen, waitFor } from "jest-matrix-react";
++import { render, screen, waitFor } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Direction } from "matrix-js-sdk/src/matrix";
+ 
+@@ -18,11 +17,11 @@ import { UIFeature } from "../../../settings/UIFeature";
+ import dispatcher from "../../../dispatcher/dispatcher";
+ import { Action } from "../../../dispatcher/actions";
+ import { MatrixClientPeg } from "../../../MatrixClientPeg";
+-import { SdkContextClass } from "../../../contexts/SDKContext";
++import { SDKContextClass } from "../../../contexts/SDKContextClass";
+ 
+ vi.mock("../../../settings/SettingsStore");
+ vi.mock("../../../contexts/SDKContext", () => ({
+-    SdkContextClass: {
++    SDKContextClass: {
+         instance: {
+             roomViewStore: {
+                 getRoomId: vi.fn(),
+@@ -53,7 +52,7 @@ describe("RoomSearchJumpToDate", () => {
+             timestampToEvent: mockTimestampToEvent,
+         } as any);
+         vi.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
+-        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
++        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+     });
+ 
+     afterEach(() => {
+@@ -94,7 +93,7 @@ describe("RoomSearchJumpToDate", () => {
+         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
+         const roomB = "!roomB:example.org";
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
+-        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
++        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+ 
+         const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+         rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+index 148f60e845..87d1591b98 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+@@ -7,7 +7,7 @@
+ 
+ import { describe, it, expect, vi } from "vitest";
+ import React from "react";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+index 17cff34bf0..fef6cf156c 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+@@ -7,8 +7,7 @@
+ 
+ import { describe, it, expect, vi, afterEach } from "vitest";
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
+ 
+diff --git a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+index 5039835450..ada64802c7 100644
+--- a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
++++ b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
+ // @vitest-environment happy-dom
+ 
+ import React, { type ComponentProps } from "react";
+-import { describe, it, expect, vi, beforeEach , type MockInstance} from "vitest";
++import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+ import { render, screen, waitFor } from "test-utils-rtl";
+ import { RoomMember } from "matrix-js-sdk/src/matrix";
+ import userEvent from "@testing-library/user-event";
+diff --git a/apps/web/src/slash-commands/query.test.ts b/apps/web/src/slash-commands/query.test.ts
+index 9e3229b85e..b8b2c4483f 100644
+--- a/apps/web/src/slash-commands/query.test.ts
++++ b/apps/web/src/slash-commands/query.test.ts
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { setUpCommandTest } from "./__mocks__";
+ import * as createRoom from "../createRoom";
+diff --git a/apps/web/src/slash-commands/spoiler.test.ts b/apps/web/src/slash-commands/spoiler.test.ts
+index 4e716b035e..b4d34c8d45 100644
+--- a/apps/web/src/slash-commands/spoiler.test.ts
++++ b/apps/web/src/slash-commands/spoiler.test.ts
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect } from "vitest";
+ import { type IContent } from "matrix-js-sdk/src/matrix";
+ 
+diff --git a/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+index 4f5012502e..e019b42851 100644
+--- a/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
++++ b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+ import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
+ import SettingsStore from "../settings/SettingsStore";
+diff --git a/apps/web/src/utils/i18n-helpers.test.ts b/apps/web/src/utils/i18n-helpers.test.ts
+index 4cf020a64a..af08da2669 100644
+--- a/apps/web/src/utils/i18n-helpers.test.ts
++++ b/apps/web/src/utils/i18n-helpers.test.ts
+@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, vi } from "vitest";
++import { describe, it, expect, vi, beforeEach } from "vitest";
+ import { Room } from "matrix-js-sdk/src/matrix";
+ import { KnownMembership } from "matrix-js-sdk/src/types";
+ import { mkMembership, stubClient } from "test-utils";

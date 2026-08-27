@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:24:39 +0300
+Subject: [PATCH 07/10] Let the relocated right-panel tests run against a DOM
+
+Renaming these four into the collected tree made the runner pick them up,
+but they kept the project default of `environment: "node"`. Every one of
+them renders through React Testing Library, so three failed outright and
+RoomSearchJumpToDate took a worker thread down with it: an unhandled
+rejection during module init is fatal to the whole thread rather than to
+the test, which silently drops the file from both the pass and fail
+tallies. Opting each file into happy-dom is the same per-file convention
+every other component test here already follows.
+
+The path-rewriting pass that repointed the relative imports also caught
+two strings it should not have. It rewrote a CSS class selector as though
+it were a module path, which happy-dom rejects outright where jsdom would
+have quietly returned nothing, and it left the module mock naming the old
+module while the import moved to the new one, so the mock stopped
+intercepting anything.
+---
+ .../src/components/views/right_panel/RoomFilesView.test.tsx   | 4 +++-
+ .../views/right_panel/RoomSearchJumpToDate.test.tsx           | 4 +++-
+ .../views/right_panel/RoomSearchOrderToggle.test.tsx          | 2 ++
+ .../views/right_panel/RoomSearchSenderFilter.test.tsx         | 2 ++
+ 4 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+index eefd892a27..7553da6b18 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import React from "react";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+@@ -73,7 +75,7 @@ describe("RoomFilesView", () => {
+ 
+         expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
+         expect(screen.getByTestId("base-card-close-button")).toBeInTheDocument();
+-        expect(screen.getByPlaceholderText("Search files…").closest("../../../../test/unit-tests/components/views/right_panel/.mx_BaseCard_header")).toBeNull();
++        expect(screen.getByPlaceholderText("Search files…").closest(".mx_BaseCard_header")).toBeNull();
+     });
+ 
+     it("offers a back button when the right panel has a card to go back to", () => {
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index 3f97db4c87..26953731c2 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import React from "react";
+ import { render, screen, waitFor } from "test-utils-rtl";
+@@ -20,7 +22,7 @@ import { MatrixClientPeg } from "../../../MatrixClientPeg";
+ import { SDKContextClass } from "../../../contexts/SDKContextClass";
+ 
+ vi.mock("../../../settings/SettingsStore");
+-vi.mock("../../../contexts/SDKContext", () => ({
++vi.mock("../../../contexts/SDKContextClass", () => ({
+     SDKContextClass: {
+         instance: {
+             roomViewStore: {
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+index 87d1591b98..259aea13c1 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi } from "vitest";
+ import React from "react";
+ import { render, screen } from "test-utils-rtl";
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+index fef6cf156c..f0450f486b 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+@@ -5,6 +5,8 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
+ import { describe, it, expect, vi, afterEach } from "vitest";
+ import React from "react";
+ import { render, screen } from "test-utils-rtl";
