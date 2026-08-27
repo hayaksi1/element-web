@@ -6,7 +6,7 @@
 #   feat/*               fork-local features, REBASED onto develop  (.fork/features.txt)
 #   pr/*                 upstream contribution branches, MERGED as-is, never rewritten
 #                                                          (.fork/contrib.txt)
-#   combined/integration develop + every feat/* + every pr/*, rebuilt from scratch
+#   combined develop + every feat/* + every pr/*, rebuilt from scratch
 #
 # See .fork/README.md for the why. Run --help for flags.
 
@@ -25,7 +25,7 @@ trap '[[ -n "${FORK_SYNC_TMP:-}" ]] && rm -f "$FORK_SYNC_TMP"' EXIT
 REMOTE="${FORK_REMOTE:-gh}"
 UPSTREAM="${FORK_UPSTREAM:-upstream}"
 MIRROR="${FORK_MIRROR_BRANCH:-develop}"
-INTEGRATION="${FORK_INTEGRATION_BRANCH:-combined/integration}"
+INTEGRATION="${FORK_INTEGRATION_BRANCH:-combined}"
 
 DRY_RUN=0
 NO_PUSH=0
@@ -51,7 +51,7 @@ Rebuild this fork against upstream.
   feat/*               fork-local features, REBASED onto develop  (.fork/features.txt)
   pr/*                 upstream contribution branches, MERGED as-is, never rewritten
                                                          (.fork/contrib.txt)
-  combined/integration develop + every feat/* + every pr/*, rebuilt from scratch
+  combined develop + every feat/* + every pr/*, rebuilt from scratch
 
 Usage: .fork/sync-upstream.sh [flags]
 
@@ -64,7 +64,7 @@ Usage: .fork/sync-upstream.sh [flags]
 
 Environment: FORK_REMOTE (default gh), FORK_UPSTREAM (default upstream),
              FORK_MIRROR_BRANCH (default develop),
-             FORK_INTEGRATION_BRANCH (default combined/integration).
+             FORK_INTEGRATION_BRANCH (default combined).
 
 Exit codes: 0 ok - 1 error - 2 feature rebase conflict - 3 integration merge
             conflict - 4 patch failed - 5 verification gate failed.
@@ -653,6 +653,33 @@ else
 fi
 
 export_rr_cache
+
+# ------------------------------------------- 5b. snapshot sanity
+
+# A merged .snap can end up defining the same exports[...] key twice. Jest evaluates the
+# file as a JS module, so the last assignment silently wins: a stale block shadows the
+# correct one, and neither git status nor a green test count shows it.
+check_duplicate_snapshot_keys() {
+    local f dupes found=0
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        dupes="$(grep -o '^exports\[[^]]*\]' "$f" | sort | uniq -d)"
+        if [[ -n "$dupes" ]]; then
+            found=1
+            warn "duplicate snapshot keys in $f:"
+            warn "$(indent "$dupes")"
+        fi
+    done < <(git ls-files '*.snap')
+    if (( found )); then
+        warn "Regenerate those files rather than hand-editing them; the last duplicate wins"
+        warn "silently, so a passing suite does not mean the snapshot is right."
+        return 1
+    fi
+    return 0
+}
+if check_duplicate_snapshot_keys; then
+    log "snapshot keys: no duplicates"
+fi
 
 # ------------------------------------------------- 6. verification gates
 

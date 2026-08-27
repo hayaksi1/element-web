@@ -1,7 +1,7 @@
 # Upstream contribution branches, in merge order.
 #
 # These back pull requests against element-hq/element-web. They are MERGED into
-# combined/integration as-is and are NEVER rebased, amended or pushed by the sync
+# combined as-is and are NEVER rebased, amended or pushed by the sync
 # script -- rewriting one detaches its review threads and re-fires its CI.
 #
 # Do NOT list a branch whose PR was already MERGED upstream. Upstream squash-merges,
@@ -23,16 +23,20 @@
 #   pr/room-list-max-width-persist      zero commits of its own
 #   pr/search-infra                     self-declared WIP; folds into pr/search-stepping
 #   ...and all 49 branches whose PR is MERGED.
+#   pr/search-cmdf-default              subset of pr/search-cmdf-toast
+#   pr/search-stepping                  subset of pr/search-from-filter
+#   pr/search-from-filter               subset of pr/search-order-toggle
+#   pr/search-order-toggle              subset of pr/search-jump-to-date
+#   pr/search-jump-to-date              subset of pr/search-top-bar
+#
+# Those five are strict ancestors of a branch already listed. Merging a subset AND its
+# superset replays the same 20+ file conflicts twice for no added content. Only the
+# maximal element of each chain is listed.
 
 pr/desktop-white-flash
 pr/desktop-smooth-scroll
 pr/desktop-window-geometry
-pr/search-cmdf-default
 pr/search-cmdf-toast
-pr/search-stepping
-pr/search-from-filter
-pr/search-order-toggle
-pr/search-jump-to-date
 pr/search-top-bar
 pr/chat-background
 pr/bubble-full-width

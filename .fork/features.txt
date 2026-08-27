@@ -5,7 +5,7 @@
 # A branch backing an OPEN upstream pull request must go in contrib.txt instead --
 # rebasing it would rewrite the PR head.
 #
-# One branch per line. Order matters: it is the merge order into combined/integration.
+# One branch per line. Order matters: it is the merge order into combined.
 # Blank lines and # comments are ignored.
 
 feat/fork-tooling
