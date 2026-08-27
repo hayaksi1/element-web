@@ -528,6 +528,42 @@ restore_rr_worktree() {
     git checkout --quiet -- "$RR_REPO" 2>/dev/null || true
 }
 
+# ------------------------------------------- 5b2. cached-resolution audit
+
+# A postimage IS the merge result for its conflict, replayed verbatim on every rebuild
+# forever. A defective one is therefore worse than no cache at all: it reproduces the
+# same broken file silently, and the branch still merges cleanly, so nothing upstream of
+# the test run notices. Two of these shipped before this check existed - one left a file
+# unparseable, one left jest idioms in a vitest suite that only failed on the runner.
+audit_rr_cache() {
+    local f bad=""
+    for f in "$RR_REPO"/*/postimage; do
+        [[ -e "$f" ]] || continue
+        # A resolution that still holds conflict markers was never finished.
+        if grep -qE '^(<{7}|>{7})$' "$f"; then
+            bad+="$f (unresolved conflict markers)"$'\n'; continue
+        fi
+        # jest in a file that imports vitest is a half-done migration. Files that do not
+        # import vitest are the legacy suites, where jest is correct - leave them be.
+        # Match a bare `jest` too: the real code writes `jest` and `.spyOn(...)` on
+        # separate lines often enough that a `jest\.` pattern misses it entirely.
+        if grep -q 'from "vitest"' "$f" && grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
+            bad+="$f (jest idioms in a vitest resolution)"$'\n'
+        fi
+        # vitest has no `vi.SpyInstance`; the type is `MockInstance`, imported by name.
+        # A blanket jest.->vi. rewrite produces this and it compiles nowhere.
+        if grep -qE '\bvi\.(SpyInstance|Mocked|Mock)\b' "$f"; then
+            bad+="$f (vi.* used as a type; vitest exports these as named types)"$'\n'
+        fi
+    done
+    [[ -z "$bad" ]] && { log "rr-cache: ${RR_COUNT:-?} cached resolutions, none defective"; return 0; }
+    warn "DEFECTIVE CACHED RESOLUTIONS:"
+    warn "$(indent "${bad%$'\n'}")"
+    die "A postimage is replayed verbatim on every rebuild, so each of these reproduces a
+broken file every run while the merge still reports clean. Fix the postimage itself -
+editing the merged file afterwards fixes this run and no other."
+}
+
 import_rr_cache() {
     mkdir -p "$RR_LIVE"
     if [[ -d "$RR_REPO" ]]; then
@@ -628,6 +664,12 @@ if (( ! DRY_RUN )); then
     git config rerere.enabled true
     git config rerere.autoUpdate true
     import_rr_cache
+    # Audit the cache before spending 93 merges on it. A defective postimage is replayed
+    # verbatim into the tree, so finding out afterwards means every merge downstream of it
+    # is built on a file we already know is wrong - and an earlier guard can exit first and
+    # hide the reason entirely.
+    RR_COUNT="$(find "$RR_REPO" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+    audit_rr_cache
 fi
 
 mapfile -t FEATURES < <(read_list "$FEATURES_FILE")
@@ -1082,7 +1124,10 @@ fi
 # vitest. A suite that has not migrated keeps jest, which is correct there.
 sweep_jest_idioms() {
     local f swept=0 files
-    files="$(git ls-files -- 'apps/web/src/**/*.test.ts' 'apps/web/src/**/*.test.tsx' || true)"
+    # ** requires an intervening directory, so the bare apps/web/src/*.test.ts files
+    # need their own pattern; without it 37 collected suites were invisible here.
+    files="$(git ls-files -- ':(glob)apps/web/src/**/*.test.ts' ':(glob)apps/web/src/**/*.test.tsx' \
+                            'apps/web/src/*.test.ts' 'apps/web/src/*.test.tsx' || true)"
     [[ -n "$files" ]] || return 0
     while IFS= read -r f; do
         [[ -n "$f" && -f "$f" ]] || continue
@@ -1112,43 +1157,6 @@ unmigrated ones keep jest, which is correct there."
 }
 sweep_jest_idioms
 
-# ------------------------------------------- 5b2. cached-resolution audit
-
-# A postimage IS the merge result for its conflict, replayed verbatim on every rebuild
-# forever. A defective one is therefore worse than no cache at all: it reproduces the
-# same broken file silently, and the branch still merges cleanly, so nothing upstream of
-# the test run notices. Two of these shipped before this check existed - one left a file
-# unparseable, one left jest idioms in a vitest suite that only failed on the runner.
-audit_rr_cache() {
-    local f bad=""
-    for f in "$RR_REPO"/*/postimage; do
-        [[ -e "$f" ]] || continue
-        # A resolution that still holds conflict markers was never finished.
-        if grep -qE '^(<{7}|>{7})$' "$f"; then
-            bad+="$f (unresolved conflict markers)"$'\n'; continue
-        fi
-        # jest in a file that imports vitest is a half-done migration. Files that do not
-        # import vitest are the legacy suites, where jest is correct - leave them be.
-        # Match a bare `jest` too: the real code writes `jest` and `.spyOn(...)` on
-        # separate lines often enough that a `jest\.` pattern misses it entirely.
-        if grep -q 'from "vitest"' "$f" && grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
-            bad+="$f (jest idioms in a vitest resolution)"$'\n'
-        fi
-        # vitest has no `vi.SpyInstance`; the type is `MockInstance`, imported by name.
-        # A blanket jest.->vi. rewrite produces this and it compiles nowhere.
-        if grep -qE '\bvi\.(SpyInstance|Mocked|Mock)\b' "$f"; then
-            bad+="$f (vi.* used as a type; vitest exports these as named types)"$'\n'
-        fi
-    done
-    [[ -z "$bad" ]] && { log "rr-cache: ${RR_COUNT:-?} cached resolutions, none defective"; return 0; }
-    warn "DEFECTIVE CACHED RESOLUTIONS:"
-    warn "$(indent "${bad%$'\n'}")"
-    die "A postimage is replayed verbatim on every rebuild, so each of these reproduces a
-broken file every run while the merge still reports clean. Fix the postimage itself -
-editing the merged file afterwards fixes this run and no other."
-}
-RR_COUNT="$(find "$RR_REPO" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-audit_rr_cache
 
 # ------------------------------------------- 5c. stale-exemption report
 
