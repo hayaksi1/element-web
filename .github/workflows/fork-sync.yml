@@ -139,7 +139,13 @@ jobs:
                   if [ "$CODE" = "3" ]; then
                       kind="integration merge"
                       resume_hint="git commit --no-edit"
-                      contrib_note="\`${BRANCH}\` may be an upstream contribution branch. If it is, **do not rebase or amend it** - it is the head of an open PR. Resolve in the integration merge only."
+                      # The script already knows which manifest the branch came from; say it
+                      # rather than hedging, because the two cases have opposite rules.
+                      if grep -qxF -- "${BRANCH}" .fork/contrib.txt 2>/dev/null; then
+                          contrib_note="\`${BRANCH}\` is an upstream contribution branch. **Do not rebase or amend it** - it is the head of an open PR, and rewriting it detaches the review threads. Resolve in the integration merge only; rerere records the resolution and replays it on every later rebuild."
+                      else
+                          contrib_note="\`${BRANCH}\` is a fork-only feature branch, so the durable fix is commits on that branch, not a cached resolution."
+                      fi
                   fi
 
                   {
@@ -155,7 +161,8 @@ jobs:
                       printf 'Do not use `-X ours` or `-X theirs`.\n\n'
                       [ -n "$contrib_note" ] && printf '%s\n\n' "$contrib_note"
                       printf 'Once resolved, commit the rerere cache so this never has to be resolved again:\n'
-                      printf '```bash\ngit add .fork/rr-cache && git commit -m "Record conflict resolutions from this sync"\n```\n\n'
+                      printf '```bash\ngit switch feat/fork-tooling\ngit add .fork/rr-cache\ngit commit -m "Record conflict resolutions from this sync"\ngit push gh feat/fork-tooling\n```\n\n'
+                      printf '%s\n\n' "The branch matters: \`combined\` is rebuilt from scratch every sync, so a cache committed there is deleted by the next run and the same conflict returns forever."
                       printf '<sub>Run [%s](%s/%s/actions/runs/%s)</sub>\n' \
                           "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
                   } > issue-body.md
