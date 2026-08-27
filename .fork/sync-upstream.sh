@@ -913,6 +913,10 @@ Regenerate it from the current tree, or delete it if it is obsolete:
 EOF
             exit 4
         fi
+        if git diff --cached --quiet; then
+            log "  already in the tree - nothing to commit"
+            continue
+        fi
         git commit --quiet -m "Apply integration patch $(basename "$p")" \
                             -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
     done
