@@ -205,11 +205,17 @@ resolve_lockfile() {
 resolve_one_sided_adds() {
     local path code resolved=0
     while read -r code path; do
+        local stage=""
         case "$code" in
-            UA) git show ":3:$path" > "$path" 2>/dev/null && git add -- "$path" || continue ;;
-            AU) git show ":2:$path" > "$path" 2>/dev/null && git add -- "$path" || continue ;;
+            UA) stage=3 ;;
+            AU) stage=2 ;;
             *)  continue ;;
         esac
+        if ! git show ":${stage}:$path" > "$path" 2>/dev/null; then
+            warn "    could not read stage $stage of $path; leaving it conflicted"
+            continue
+        fi
+        git add -- "$path"
         log "    took the only side that has $path ($code)"
         resolved=1
     done < <(git status --porcelain | awk '$1=="UA"||$1=="AU"{print $1, $2}')
