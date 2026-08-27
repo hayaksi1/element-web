@@ -1,36 +1,142 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
-Date: Thu, 27 Aug 2026 20:35:05 +0300
-Subject: [PATCH] Restore the fork test cases the merge resolved away
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
-
-Five suites came out of the merge holding upstream's version of a file the fork
-had also extended, so the cases guarding fork behaviour went with it: the
-collapsed action bar, the sender and order filters on search, the search header
-and its match stepper, the jump-to-date affordance and the header search
-button. Every one of them still guards live source on this branch, so the
-behaviour shipped untested rather than unshipped.
-
-Each suite is extended in place rather than replaced with the feature branch's
-copy. Taking the branch's file wholesale reads as an improvement — the test
-count goes up — while silently deleting the cases other branches had added to
-the same file since.
-
-One case does not pass yet and is left failing rather than hidden: with the
-search-header suite present, "should leave the caret in the search box when it
-is emptied" loses the caret to a button. It passes alone and fails after that
-suite runs, so two branches' tests are sharing state through something neither
-resets.
----
- apps/web/src/Searching.test.ts                |  384 +++-
- .../components/structures/RoomView.test.tsx   | 1692 ++++++++++++++++-
- .../right_panel/RoomSummaryCardView.test.tsx  |   23 +
- .../rooms/RoomHeader/RoomHeader.test.tsx      |   10 +
- .../room/EventTileActionBarViewModel.test.ts  |  102 +
- 5 files changed, 2119 insertions(+), 92 deletions(-)
-
+diff --git a/apps/desktop/src/auto-launch.test.ts b/apps/desktop/src/auto-launch.test.ts
+index e1d13bff2f..c023bb16d3 100644
+--- a/apps/desktop/src/auto-launch.test.ts
++++ b/apps/desktop/src/auto-launch.test.ts
+@@ -109,9 +109,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.setState("enabled");
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", false);
+-            expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: false }),
+-            );
++            expect(setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: true, args: [] }));
+         });
+ 
+         it("enables auto-launch minimised (hidden) at login", async () => {
+@@ -119,7 +117,7 @@ describe("AutoLaunch", () => {
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", true);
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true, args: ["--hidden"] }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+@@ -336,7 +334,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.migrate();
+ 
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+diff --git a/apps/desktop/src/auto-launch.ts b/apps/desktop/src/auto-launch.ts
+index 666d59f54f..291b115cbe 100644
+--- a/apps/desktop/src/auto-launch.ts
++++ b/apps/desktop/src/auto-launch.ts
+@@ -85,8 +85,9 @@ function linuxDesktopEntry(minimised: boolean): string {
+  * Whether the app should start hidden (minimised to tray) for this launch.
+  *
+  * On Windows/Linux the login item passes `--hidden`, surfaced here as `argsHidden`. On macOS the
+- * native loginItem API cannot pass arguments and `openAsHidden` is a no-op on macOS 13+, so we
+- * instead derive it from `wasOpenedAtLogin` plus the stored minimised preference.
++ * native loginItem API cannot pass arguments and has no minimised flag (`openAsHidden` was a no-op
++ * on macOS 13+ and Electron 44 removed it), so we instead derive it from `wasOpenedAtLogin` plus
++ * the stored minimised preference.
+  */
+ export function shouldStartHidden(argsHidden: boolean): boolean {
+     if (argsHidden) return true;
+@@ -125,7 +126,8 @@ export class AutoLaunch {
+      * On Windows a Squirrel install lives in a versioned `app-x.y.z` directory, so the login item
+      * must point at the stable `Update.exe` (`--processStart`) rather than the versioned executable,
+      * otherwise it breaks on the next update. MSI installs have no `Update.exe`, so there we launch
+-     * the executable directly (its location is stable across updates). `openAsHidden` is macOS-only.
++     * the executable directly (its location is stable across updates). macOS carries no minimised
++     * flag here; {@link shouldStartHidden} derives it from the stored preference instead.
+      *
+      * @param minimised - whether the app should start hidden/minimised.
+      */
+@@ -146,7 +148,6 @@ export class AutoLaunch {
+ 
+         return {
+             openAtLogin: true,
+-            openAsHidden: minimised, // macOS-only, no-op on macOS 13+ (see shouldStartHidden); ignored on Linux
+             args: minimised ? ["--hidden"] : [],
+         };
+     }
+diff --git a/apps/desktop/src/electron-main.ts b/apps/desktop/src/electron-main.ts
+index 2f95dff947..d025a91fd0 100644
+--- a/apps/desktop/src/electron-main.ts
++++ b/apps/desktop/src/electron-main.ts
+@@ -25,7 +25,7 @@ import {
+     screen,
+ } from "electron";
+ import * as Sentry from "@sentry/electron/main";
+-import path, { dirname } from "node:path";
++import path from "node:path";
+ import { URL, fileURLToPath } from "node:url";
+ 
+ import "./ipc.js";
+diff --git a/apps/desktop/src/ipc.test.ts b/apps/desktop/src/ipc.test.ts
+index 76a4c5b4a4..8331c39268 100644
+--- a/apps/desktop/src/ipc.test.ts
++++ b/apps/desktop/src/ipc.test.ts
+@@ -6,7 +6,7 @@ Please see LICENSE files in the repository root for full details.
+ */
+ 
+ import { expect, describe, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
+-import { desktopCapturer, ipcMain, type IpcMainInvokeEvent } from "electron";
++import { desktopCapturer } from "electron";
+ 
+ import { getConfig } from "./config.js";
+ import { consumeDisplayMediaCallback } from "./displayMediaCallback.js";
+@@ -197,7 +197,7 @@ describe("setThemeColor", () => {
+ 
+     beforeAll(async () => {
+         await import("./ipc.js");
+-        handler = vi.mocked(ipcMain.on).mock.calls.find(([channel]) => channel === "setThemeColor")![1] as never;
++        handler = ipcHandlers["setThemeColor"] as never;
+         expect(handler).toBeDefined();
+     });
+ 
+diff --git a/apps/desktop/src/store.test.ts b/apps/desktop/src/store.test.ts
+index ac2712e9ac..699099b867 100644
+--- a/apps/desktop/src/store.test.ts
++++ b/apps/desktop/src/store.test.ts
+@@ -204,7 +204,7 @@ describe("Store", () => {
+     let store: Store;
+ 
+     beforeAll(() => {
+-        store = Store.initialize(undefined);
++        store = Store.instance ?? Store.initialize(undefined);
+     });
+ 
+     beforeEach(() => {
+diff --git a/apps/web/src/ContentMessages.test.ts b/apps/web/src/ContentMessages.test.ts
+index 9dd8964bc1..4a3ade1fd9 100644
+--- a/apps/web/src/ContentMessages.test.ts
++++ b/apps/web/src/ContentMessages.test.ts
+@@ -441,7 +441,7 @@ describe("uploadFile", () => {
+ 
+     it("should keep the uploaded file so it does not have to be downloaded again", async () => {
+         clearUploadedMedia();
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
+         const file = new Blob(["hello"]);
+ 
+         await uploadFile(client, "!roomId:server", file);
+@@ -452,8 +452,8 @@ describe("uploadFile", () => {
+     it("should keep the plaintext of an encrypted upload rather than the ciphertext", async () => {
+         clearUploadedMedia();
+         vi.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
+-        mocked(encrypt.encryptAttachment).mockResolvedValue({
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
++        vi.mocked(encrypt.encryptAttachment).mockResolvedValue({
+             data: new ArrayBuffer(123),
+             info: {} as IEncryptedFile,
+         });
 diff --git a/apps/web/src/Searching.test.ts b/apps/web/src/Searching.test.ts
 index 97fe568e19..8940d98df9 100644
 --- a/apps/web/src/Searching.test.ts
@@ -434,8 +540,132 @@ index 97fe568e19..8940d98df9 100644
 +        });
 +    });
  });
+diff --git a/apps/web/src/autocomplete/BotCommandProvider.test.tsx b/apps/web/src/autocomplete/BotCommandProvider.test.ts
+similarity index 100%
+rename from apps/web/src/autocomplete/BotCommandProvider.test.tsx
+rename to apps/web/src/autocomplete/BotCommandProvider.test.ts
+diff --git a/apps/web/src/components/structures/LoggedInView.test.tsx b/apps/web/src/components/structures/LoggedInView.test.tsx
+index a23a9d130b..269a0e06ac 100644
+--- a/apps/web/src/components/structures/LoggedInView.test.tsx
++++ b/apps/web/src/components/structures/LoggedInView.test.tsx
+@@ -11,7 +11,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
+ import React from "react";
+-import { act, fireEvent, render, waitFor, type RenderResult } from "test-utils-rtl";
++import { act, render, fireEvent, waitFor, type RenderResult } from "test-utils-rtl";
+ import {
+     ConditionKind,
+     EventType,
+@@ -428,6 +428,28 @@ describe("<LoggedInView />", () => {
+         expect(defaultDispatcher.fire).toHaveBeenCalledWith(Action.FocusMessageSearch);
+     });
+ 
++    it("shows the one-time in-room search nudge on Ctrl+F when the shortcut is disabled (web)", async () => {
++        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
++        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, false);
++        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
++
++        getComponent();
++        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
++
++        expect(addOrReplaceToast).toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
++    });
++
++    it("does not show the in-room search nudge when the shortcut is enabled", async () => {
++        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
++        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, true);
++        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
++
++        getComponent();
++        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
++
++        expect(addOrReplaceToast).not.toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
++    });
++
+     it("should go home on home shortcut", async () => {
+         vi.spyOn(defaultDispatcher, "dispatch").mockImplementation(() => {});
+ 
+@@ -601,7 +623,7 @@ describe("<LoggedInView />", () => {
+         });
+ 
+         const mockChatBackgroundSettings = (values: Record<string, unknown>): void => {
+-            getValueSpy = jest
++            getValueSpy = vi
+                 .spyOn(SettingsStore, "getValue")
+                 .mockImplementation(((name: string, ...rest: unknown[]) =>
+                     name in values
+@@ -613,7 +635,7 @@ describe("<LoggedInView />", () => {
+         };
+ 
+         const getChatBody = (container: HTMLElement): HTMLElement =>
+-            container.querySelector(".mx_MatrixChat") as HTMLElement;
++            container.querySelector<HTMLElement>(".mx_MatrixChat")!;
+ 
+         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
+             mockChatBackgroundSettings({
+diff --git a/apps/web/src/components/structures/RoomSearchView.test.tsx b/apps/web/src/components/structures/RoomSearchView.test.tsx
+index dc56d08f2c..cc989b46f7 100644
+--- a/apps/web/src/components/structures/RoomSearchView.test.tsx
++++ b/apps/web/src/components/structures/RoomSearchView.test.tsx
+@@ -261,6 +261,55 @@ describe("<RoomSearchView/>", () => {
+         expect(screen.queryByRole("progressbar")).toBeFalsy();
+     });
+ 
++    it("registers a pagination trigger (onLoadMoreReady) that calls searchPagination", async () => {
++        const searchResults: ISearchResults = {
++            results: [
++                SearchResult.fromJson(
++                    {
++                        rank: 1,
++                        result: {
++                            room_id: room.roomId,
++                            event_id: "$1",
++                            sender: client.getSafeUserId(),
++                            origin_server_ts: 1,
++                            content: { body: "PaginationProbe", msgtype: "m.text" },
++                            type: EventType.RoomMessage,
++                        },
++                        context: { profile_info: {}, events_before: [], events_after: [] },
++                    },
++                    eventMapper,
++                ),
++            ],
++            highlights: [],
++            next_batch: "next_batch",
++            count: 5,
++        };
++        vi.mocked(searchPagination).mockResolvedValue({ ...searchResults, next_batch: undefined });
++
++        let loadMore: (() => Promise<boolean>) | null = null;
++
++        render(
++            <RoomSearchView
++                inProgress={false}
++                term="search term"
++                scope={SearchScope.All}
++                promise={Promise.resolve(searchResults)}
++                className="someClass"
++                onUpdate={vi.fn()}
++                onLoadMoreReady={(fn) => {
++                    loadMore = fn;
++                }}
++            />,
++            clientAndSDKContextRenderOptions(client, sdkContext),
++        );
++
++        await screen.findByText("PaginationProbe");
++        expect(typeof loadMore).toBe("function");
++
++        await loadMore!();
++        expect(searchPagination).toHaveBeenCalled();
++    });
++
+     // oxlint-disable-next-line vitest/expect-expect
+     it("should handle resolutions after unmounting sanely", async () => {
+         const deferred = Promise.withResolvers<ISearchResults>();
 diff --git a/apps/web/src/components/structures/RoomView.test.tsx b/apps/web/src/components/structures/RoomView.test.tsx
-index 2534035860..ebd70e3b31 100644
+index 2534035860..0adb8c8493 100644
 --- a/apps/web/src/components/structures/RoomView.test.tsx
 +++ b/apps/web/src/components/structures/RoomView.test.tsx
 @@ -22,6 +22,7 @@ import {
@@ -464,7 +694,16 @@ index 2534035860..ebd70e3b31 100644
  import { MEGOLM_ENCRYPTION_ALGORITHM } from "../../utils/crypto";
  import MatrixClientContext from "../../contexts/MatrixClientContext";
  import { type ViewUserPayload } from "../../dispatcher/payloads/ViewUserPayload.ts";
-@@ -138,6 +141,10 @@ describe("RoomView", () => {
+@@ -134,10 +137,18 @@ describe("RoomView", () => {
+         vi.spyOn(cli, "getCrypto").mockReturnValue(undefined);
+     });
+ 
+-    afterEach(() => {
++    afterEach(async () => {
++        await act(async () => {
++            Modal.forceCloseAllModals();
++        });
++
          unmockPlatformPeg();
          vi.clearAllMocks();
  
@@ -475,7 +714,7 @@ index 2534035860..ebd70e3b31 100644
          // Can't vi.restoreAllMocks() because some tests will break
          vi.spyOn(pinnedEventHooks, "usePinnedEvents").mockRestore();
          vi.spyOn(pinnedEventHooks, "useSortedFetchedPinnedEvents").mockRestore();
-@@ -145,6 +152,33 @@ describe("RoomView", () => {
+@@ -145,6 +156,33 @@ describe("RoomView", () => {
          cleanup();
      });
  
@@ -509,7 +748,7 @@ index 2534035860..ebd70e3b31 100644
      const mountRoomView = async (
          ref?: RefObject<RoomView | null>,
          props?: Partial<ComponentProps<typeof RoomView>>,
-@@ -307,13 +341,1273 @@ describe("RoomView", () => {
+@@ -307,13 +345,1273 @@ describe("RoomView", () => {
              true,
          );
  
@@ -592,7 +831,7 @@ index 2534035860..ebd70e3b31 100644
 +
 +            // Once the promise settles, onSearchUpdate fills `previews` and the dropdown row appears.
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("gemini hit")).toBeInTheDocument();
 +                return el;
 +            });
@@ -641,7 +880,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("older hit")).toBeInTheDocument();
 +                return el;
 +            });
@@ -695,7 +934,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("gemini hit")).toBeInTheDocument();
 +            });
 +
@@ -1060,7 +1299,7 @@ index 2534035860..ebd70e3b31 100644
 +
 +            // Wait for the Telegram-style results dropdown to render its rows.
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("newer match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1149,7 +1388,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("older match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1211,7 +1450,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("older match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1285,7 +1524,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("older match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1299,7 +1538,7 @@ index 2534035860..ebd70e3b31 100644
 +            // Now view $newer, return to the list — the anchor must FOLLOW to $newer, not stick on the first-clicked
 +            // $older (the original "jumps to first result" bug).
 +            const dropdown2 = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("newer match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1362,7 +1601,7 @@ index 2534035860..ebd70e3b31 100644
 +            });
 +
 +            const dropdown = await waitFor(() => {
-+                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +                expect(within(el).getByText("older match")).toBeInTheDocument();
 +                return el;
 +            });
@@ -1627,7 +1866,7 @@ index 2534035860..ebd70e3b31 100644
 +            // the message — it does NOT end the search. The clear gate excludes it because it equals the durable
 +            // stepping target. (Previously this ended the search; the racy guard-clearing that enabled it was the root
 +            // of the "resets itself" bug, so the behaviour was intentionally changed.)
-+            const dropdown = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++            const dropdown = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
 +            await userEvent.click(within(dropdown).getByText("first"));
 +            await flushPromises();
 +            expect(roomViewRef.current!.state.search).toBeDefined();
@@ -1790,7 +2029,7 @@ index 2534035860..ebd70e3b31 100644
      });
  
      describe("full-size thread view", () => {
-@@ -1045,91 +2339,13 @@ describe("RoomView", () => {
+@@ -1045,91 +2343,13 @@ describe("RoomView", () => {
              return () => spy.mockRestore();
          };
  
@@ -1883,18 +2122,18 @@ index 2534035860..ebd70e3b31 100644
              await waitFor(() => expect(roomViewRef.current).toBeTruthy());
              // @ts-ignore - triggering a search organically is a lot of work
              act(() =>
-@@ -1177,7 +2393,9 @@ describe("RoomView", () => {
+@@ -1177,7 +2397,9 @@ describe("RoomView", () => {
                  expect(container.querySelector(".mx_RoomView_searchResultsPanel")).toBeVisible();
              });
  
 -            const searchResultTile = getByText("search term").closest(".mx_EventTile");
 +            // Scope to the results panel: the term now also appears in the top-of-chat search bar input.
-+            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
++            const resultsPanel = container.querySelector<HTMLElement>(".mx_RoomView_searchResultsPanel")!;
 +            const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
              expect(searchResultTile).not.toBeNull();
  
              const unhover = stubElementHover(searchResultTile!);
-@@ -1199,7 +2417,7 @@ describe("RoomView", () => {
+@@ -1199,7 +2421,7 @@ describe("RoomView", () => {
              const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
  
              const roomViewRef = createRef<RoomView>();
@@ -1903,18 +2142,18 @@ index 2534035860..ebd70e3b31 100644
              await waitFor(() => expect(roomViewRef.current).toBeTruthy());
              // @ts-ignore - triggering a search organically is a lot of work
              act(() =>
-@@ -1248,7 +2466,9 @@ describe("RoomView", () => {
+@@ -1248,7 +2470,9 @@ describe("RoomView", () => {
              });
              const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
  
 -            const searchResultTile = getByText("search term").closest(".mx_EventTile");
 +            // Scope to the results panel: the term now also appears in the top-of-chat search bar input.
-+            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
++            const resultsPanel = container.querySelector<HTMLElement>(".mx_RoomView_searchResultsPanel")!;
 +            const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
              expect(searchResultTile).not.toBeNull();
  
              const unhover = stubElementHover(searchResultTile!);
-@@ -1275,6 +2495,298 @@ describe("RoomView", () => {
+@@ -1275,6 +2499,298 @@ describe("RoomView", () => {
  
              await expect(findByPlaceholderText("Search messages…")).resolves.toHaveValue("search term");
          });
@@ -2213,6 +2452,1033 @@ index 2534035860..ebd70e3b31 100644
      });
  
      it("fires Action.RoomLoaded", async () => {
+diff --git a/apps/web/src/components/structures/RoomView.tsx b/apps/web/src/components/structures/RoomView.tsx
+index 5a8c2953b0..5c8f4dd283 100644
+--- a/apps/web/src/components/structures/RoomView.tsx
++++ b/apps/web/src/components/structures/RoomView.tsx
+@@ -2112,21 +2112,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
+         const session = SearchSessionStore.instance.getSnapshot();
+         if (!session || SearchSessionStore.instance.focusedMatch === null) return;
+ 
+-        this.setState({
+-            search: {
+-                searchId: session.searchId,
+-                roomId: session.roomId,
+-                term: session.term,
+-                scope: session.scope,
+-                promise: session.promise,
+-                abortController: session.abortController,
+-                inProgress: session.inProgress,
+-                count: session.count,
+-                error: session.error,
+-                currentMatchIndex: session.currentMatchIndex,
+-                highlights: session.highlights,
+-            },
+-        });
++        this.setState({ search: searchInfoFromSession(session) });
+     }
+ 
+     /**
+diff --git a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
+index 1ea6083cf8..7e3e7675a5 100644
+--- a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
++++ b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
+@@ -1181,6 +1181,32 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -1195,7 +1221,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1222,7 +1248,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1237,7 +1263,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1264,7 +1290,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1294,7 +1320,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -1736,6 +1762,32 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -1750,7 +1802,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1777,7 +1829,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1792,7 +1844,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1819,7 +1871,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1849,7 +1901,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -1916,7 +1968,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               >
+                 <svg
+                   aria-label="Messages in this room are not end-to-end encrypted"
+-                  aria-labelledby="react-use-id-6"
++                  aria-labelledby="react-use-id-7"
+                   class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                   color="var(--cpd-color-icon-info-primary)"
+                   fill="currentColor"
+@@ -2103,7 +2155,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-7"
++                  aria-labelledby="react-use-id-8"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -2221,6 +2273,32 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2235,7 +2313,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2262,7 +2340,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2277,7 +2355,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2304,7 +2382,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2334,7 +2412,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile mx_FacePile_toggled"
+               role="button"
+               tabindex="0"
+@@ -2401,7 +2479,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               >
+                 <svg
+                   aria-label="Messages in this room are not end-to-end encrypted"
+-                  aria-labelledby="react-use-id-6"
++                  aria-labelledby="react-use-id-7"
+                   class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                   color="var(--cpd-color-icon-info-primary)"
+                   fill="currentColor"
+@@ -2588,7 +2666,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-7"
++                  aria-labelledby="react-use-id-8"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -2706,6 +2784,32 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2720,7 +2824,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2747,7 +2851,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2762,7 +2866,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2789,7 +2893,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2819,7 +2923,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -2945,6 +3049,32 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-2"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2959,7 +3089,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2986,7 +3116,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-3"
++                aria-labelledby="react-use-id-4"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -3001,7 +3131,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3028,7 +3158,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-5"
++            aria-labelledby="react-use-id-6"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3058,7 +3188,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-6"
++              aria-labelledby="react-use-id-7"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -3127,7 +3257,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+                   tabindex="0"
+                 >
+                   <div
+-                    aria-labelledby="react-use-id-7"
++                    aria-labelledby="react-use-id-8"
+                     class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                     data-testid="e2e-icon"
+                     style="width: 12px; height: 12px;"
+@@ -3322,7 +3452,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-8"
++                  aria-labelledby="react-use-id-9"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -3471,13 +3601,39 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+             </div>
+           </button>
+           <button
+-            aria-label="Chat"
++            aria-label="Search"
+             aria-labelledby="react-use-id-1"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+             style="--cpd-icon-button-size: 32px;"
+             tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
++          <button
++            aria-label="Chat"
++            aria-labelledby="react-use-id-2"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
+           >
+             <div
+               class="_indicator-icon_147l5_17"
+@@ -3499,7 +3655,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-2"
++            aria-labelledby="react-use-id-3"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3526,7 +3682,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3556,7 +3712,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-4"
++              aria-labelledby="react-use-id-5"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -3642,7 +3798,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                 </p>
+               </div>
+               <button
+-                aria-labelledby="react-use-id-5"
++                aria-labelledby="react-use-id-6"
+                 class="_icon-button_1215g_8"
+                 data-kind="secondary"
+                 data-testid="base-card-close-button"
+@@ -3702,7 +3858,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                   >
+                     <svg
+                       aria-label="Messages in this room are not end-to-end encrypted"
+-                      aria-labelledby="react-use-id-6"
++                      aria-labelledby="react-use-id-7"
+                       class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                       color="var(--cpd-color-icon-info-primary)"
+                       fill="currentColor"
+@@ -3889,7 +4045,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                     </div>
+                     <button
+                       aria-label="Attachment"
+-                      aria-labelledby="react-use-id-7"
++                      aria-labelledby="react-use-id-8"
+                       class="_icon-button_1215g_8"
+                       data-kind="primary"
+                       role="button"
+diff --git a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx b/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
+index 65d0ede0c0..f19695657a 100644
+--- a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
++++ b/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
+@@ -727,7 +727,7 @@ describe("MessageContextMenu quick actions", () => {
+         ["React", "React"],
+         ["Edit", "Edit"],
+     ])("shows the %s option when showQuickActions is set", (_name, label) => {
+-        mocked(canEditContent).mockReturnValue(true);
++        vi.mocked(canEditContent).mockReturnValue(true);
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true, canReact: true });
+@@ -736,7 +736,7 @@ describe("MessageContextMenu quick actions", () => {
+     });
+ 
+     it("does not show the quick actions without showQuickActions or a right click", () => {
+-        mocked(canEditContent).mockReturnValue(true);
++        vi.mocked(canEditContent).mockReturnValue(true);
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, {}, { canSendMessages: true, canReact: true });
+@@ -749,7 +749,7 @@ describe("MessageContextMenu quick actions", () => {
+     // Copy and quote act on a text selection the user made before right clicking, so they must stay behind
+     // `rightClick` rather than riding along with the collapsed quick actions.
+     it("does not show copy or quote when only showQuickActions is set", () => {
+-        mocked(getSelectedText).mockReturnValue("hello");
++        vi.mocked(getSelectedText).mockReturnValue("hello");
+         const eventContent = createMessageEventContent("hello");
+ 
+         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true });
+diff --git a/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx b/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
+index bf3ac2d824..1c97b6f6d4 100644
+--- a/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
++++ b/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
+@@ -93,6 +93,7 @@ describe("<TextualBody />", () => {
+                 return null;
+             },
+             getRooms: () => [defaultRoom, otherRoom],
++            getVisibleRooms: () => [defaultRoom, otherRoom],
+             getAccountData: (): MatrixEvent | undefined => undefined,
+             isGuest: () => false,
+             mxcUrlToHttp: (s: string) => s,
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+similarity index 89%
+rename from apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+index a729f81e4e..7553da6b18 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+@@ -5,18 +5,21 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi, beforeEach } from "vitest";
+ import React from "react";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+-import { render, screen, fireEvent } from "jest-matrix-react";
++import { render, screen, fireEvent } from "test-utils-rtl";
+ 
+-import { RoomFilesView } from "../../../../../src/components/views/right_panel/RoomFilesView";
+-import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "../../../../test-utils";
+-import { SDKContextClass } from "../../../../../src/contexts/SDKContextClass";
+-import { RightPanelPhases } from "../../../../../src/stores/right-panel/RightPanelStorePhases";
++import { RoomFilesView } from "./RoomFilesView";
++import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "test-utils";
++import { SDKContextClass } from "../../../contexts/SDKContextClass";
++import { RightPanelPhases } from "../../../stores/right-panel/RightPanelStorePhases";
+ 
+ // Stub TimelinePanel so we can capture the `eventFilter` predicate it is handed without rendering a real timeline.
+ let mockLastTimelineProps: { eventFilter?: (ev: MatrixEvent) => boolean } = {};
+-jest.mock("../../../../../src/components/structures/TimelinePanel", () => ({
++vi.mock("../../structures/TimelinePanel", () => ({
+     __esModule: true,
+     default: (props: { eventFilter?: (ev: MatrixEvent) => boolean }) => {
+         mockLastTimelineProps = props;
+@@ -37,11 +40,11 @@ const renderView = (): void => {
+     render(
+         <RoomFilesView
+             timelineSet={{} as never}
+-            onPaginationRequest={jest.fn()}
++            onPaginationRequest={vi.fn()}
+             empty={<div />}
+-            onClose={jest.fn()}
++            onClose={vi.fn()}
+             isRoomEncrypted={false}
+-            onMeasurement={jest.fn()}
++            onMeasurement={vi.fn()}
+         />,
+         // The card reads the right panel store off the SDK context.
+         clientAndSDKContextRenderOptions(SDKContextClass.instance.client!, SDKContextClass.instance),
+@@ -52,7 +55,7 @@ describe("RoomFilesView", () => {
+     beforeEach(() => {
+         // Restored here rather than in an afterEach so it lands after React Testing Library has unmounted the
+         // previous render, never in the middle of one.
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+         stubClient();
+         mockLastTimelineProps = {};
+     });
+@@ -76,7 +79,7 @@ describe("RoomFilesView", () => {
+     });
+ 
+     it("offers a back button when the right panel has a card to go back to", () => {
+-        jest.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
++        vi.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
+             { phase: RightPanelPhases.RoomSummary, state: {} },
+             { phase: RightPanelPhases.FilePanel, state: {} },
+         ]);
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+index 389154e463..c31bebf455 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+@@ -141,6 +141,7 @@ export function RoomFilesView({
+                             filterRefs.current[index] = el;
+                         }}
+                         role="option"
++                        aria-selected={category === activeCategory}
+                         selected={category === activeCategory}
+                         onClick={() => vm.toggleCategory(category)}
+                     >
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+similarity index 60%
+rename from apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index cef119c958..04346ee836 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -5,26 +5,29 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen, waitFor } from "jest-matrix-react";
++import { render, screen, waitFor } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Direction } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchJumpToDate } from "../../../../../src/components/views/right_panel/RoomSearchJumpToDate";
+-import SettingsStore from "../../../../../src/settings/SettingsStore";
+-import { UIFeature } from "../../../../../src/settings/UIFeature";
+-import dispatcher from "../../../../../src/dispatcher/dispatcher";
+-import { Action } from "../../../../../src/dispatcher/actions";
+-import { MatrixClientPeg } from "../../../../../src/MatrixClientPeg";
+-import { SdkContextClass } from "../../../../../src/contexts/SDKContext";
+-
+-jest.mock("../../../../../src/settings/SettingsStore");
+-jest.mock("../../../../../src/contexts/SDKContext", () => ({
+-    SdkContextClass: {
++import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate";
++import SettingsStore from "../../../settings/SettingsStore";
++import { UIFeature } from "../../../settings/UIFeature";
++import dispatcher from "../../../dispatcher/dispatcher";
++import { Action } from "../../../dispatcher/actions";
++import { MatrixClientPeg } from "../../../MatrixClientPeg";
++import { SDKContextClass } from "../../../contexts/SDKContextClass";
++import { SDKContext } from "../../../contexts/SDKContext";
++
++vi.mock("../../../settings/SettingsStore");
++vi.mock("../../../contexts/SDKContextClass", () => ({
++    SDKContextClass: {
+         instance: {
+             roomViewStore: {
+-                getRoomId: jest.fn(),
++                getRoomId: vi.fn(),
+             },
+         },
+     },
+@@ -32,10 +35,14 @@ jest.mock("../../../../../src/contexts/SDKContext", () => ({
+ 
+ describe("RoomSearchJumpToDate", () => {
+     const roomId = "!room:example.org";
+-    const mockTimestampToEvent = jest.fn();
++
++    const withSdkContext = ({ children }: { children?: React.ReactNode }): React.ReactElement => (
++        <SDKContext.Provider value={SDKContextClass.instance}>{children}</SDKContext.Provider>
++    );
++    const mockTimestampToEvent = vi.fn();
+ 
+     const setFeatureEnabled = (enabled: boolean): void => {
+-        mocked(SettingsStore).getValue.mockImplementation((key): any => {
++        vi.mocked(SettingsStore).getValue.mockImplementation((key): any => {
+             if (key === "feature_jump_to_date") return enabled;
+             if (String(key) === UIFeature.TimelineEnableRelativeDates) return true;
+             return undefined;
+@@ -44,23 +51,23 @@ describe("RoomSearchJumpToDate", () => {
+ 
+     beforeEach(() => {
+         setFeatureEnabled(true);
+-        mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
+-        mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
++        vi.mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
++        vi.mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
+ 
+         mockTimestampToEvent.mockReset();
+-        jest.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
++        vi.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
+             timestampToEvent: mockTimestampToEvent,
+         } as any);
+-        jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
++        vi.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
++        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the calendar trigger when jump-to-date is enabled", () => {
+-        render(<RoomSearchJumpToDate roomId={roomId} />);
++        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+ 
+         expect(screen.getByTestId("search-jump-to-date-button")).toBeInTheDocument();
+     });
+@@ -68,7 +75,7 @@ describe("RoomSearchJumpToDate", () => {
+     it("renders nothing when jump-to-date is disabled", () => {
+         setFeatureEnabled(false);
+ 
+-        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />);
++        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+ 
+         expect(container).toBeEmptyDOMElement();
+     });
+@@ -76,7 +83,7 @@ describe("RoomSearchJumpToDate", () => {
+     it("jumps the current room to the picked date via a quick option", async () => {
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$event", origin_server_ts: 0 });
+ 
+-        render(<RoomSearchJumpToDate roomId={roomId} />);
++        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
+         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
+ 
+@@ -93,10 +100,12 @@ describe("RoomSearchJumpToDate", () => {
+         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
+         const roomB = "!roomB:example.org";
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
++        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+ 
+-        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+-        rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
++        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />, {
++            wrapper: withSdkContext,
++        });
++        rerender(withSdkContext({ children: <RoomSearchJumpToDate key={roomB} roomId={roomB} /> }));
+ 
+         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
+         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
+index 0deed542bd..ad77ba867f 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
+@@ -5,7 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import React, { type JSX, useState } from "react";
++import React, { type JSX, useContext, useState } from "react";
+ import { IconButton } from "@vector-im/compound-web";
+ import CalendarIcon from "@vector-im/compound-design-tokens/assets/web/icons/calendar";
+ import {
+@@ -16,6 +16,7 @@ import {
+ 
+ import { _t } from "../../../languageHandler";
+ import { DateSeparatorViewModel } from "../../../viewmodels/room/timeline/DateSeparatorViewModel";
++import { SDKContext } from "../../../contexts/SDKContext";
+ 
+ interface Props {
+     /**
+@@ -37,7 +38,10 @@ interface Props {
+  * MSC3030).
+  */
+ export function RoomSearchJumpToDate({ roomId }: Props): JSX.Element | null {
+-    const vm = useCreateAutoDisposedViewModel(() => new DateSeparatorViewModel({ roomId, ts: Date.now() }));
++    const sdkContext = useContext(SDKContext);
++    const vm = useCreateAutoDisposedViewModel(
++        () => new DateSeparatorViewModel({ roomId, ts: Date.now(), roomViewStore: sdkContext.roomViewStore }),
++    );
+     const { jumpToEnabled } = useViewModel(vm);
+     const [open, setOpen] = useState(false);
+ 
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+similarity index 87%
+rename from apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+index 4fb76db5b3..259aea13c1 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+@@ -5,21 +5,24 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi } from "vitest";
+ import React from "react";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchOrderToggle } from "../../../../../src/components/views/right_panel/RoomSearchOrderToggle";
++import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle";
+ 
+ describe("RoomSearchOrderToggle", () => {
+     it("renders the order toggle trigger", () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />);
+         expect(screen.getByTestId("search-order-toggle-button")).toBeInTheDocument();
+     });
+ 
+     it("selecting Most relevant requests relevance (Rank) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -29,7 +32,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("selecting Most recent requests recency (Recent) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -39,7 +42,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("checks the radio matching the active order (controlled)", async () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+ 
+@@ -49,13 +52,13 @@ describe("RoomSearchOrderToggle", () => {
+ 
+     it("shows the active-order indicator only for a non-default (relevance) order", () => {
+         const { rerender } = render(
+-            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />,
++            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />,
+         );
+         // Default (recency): no indicator dot, and the accessible name is the neutral label.
+         expect(screen.getByTestId("search-order-toggle-button")).not.toHaveAttribute("data-indicator");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results");
+ 
+-        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+         // Relevance: the indicator dot is shown and the active state is folded into the accessible name.
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAttribute("data-indicator", "default");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results (by relevance)");
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+similarity index 88%
+rename from apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+index c423c9478a..f0450f486b 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+@@ -5,27 +5,29 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi, afterEach } from "vitest";
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchSenderFilter } from "../../../../../src/components/views/right_panel/RoomSearchSenderFilter";
+-import { stubClient } from "../../../../test-utils";
++import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter";
++import { stubClient } from "test-utils";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+ describe("RoomSearchSenderFilter", () => {
+     const buildRoom = (members: RoomMember[]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, "@me:server");
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the filter trigger when the room has other members", () => {
+@@ -33,7 +35,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -45,7 +47,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@me:server", "Me")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -53,7 +55,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("selecting a member adds them to the sender filter", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -69,7 +71,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("toggling an already-selected member off removes them", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -113,7 +115,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+                 senders={["@alice:server", "@bob:server"]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -121,7 +123,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("clears all selected senders via the clear action", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
 diff --git a/apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx b/apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx
 index 7769f13f72..4bfd5ee42e 100644
 --- a/apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx
@@ -2254,6 +3520,109 @@ index 7769f13f72..4bfd5ee42e 100644
      });
  
      it("opens room file panel on button click", () => {
+diff --git a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+index a4848d8add..7788c7cde4 100644
+--- a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+@@ -129,6 +129,8 @@ const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null
+     );
+ };
+ 
++const EMPTY_SENDERS: string[] = [];
++
+ const RoomSummaryCardView: React.FC<IProps> = ({
+     room,
+     permalinkCreator,
+@@ -138,7 +140,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
+     onSearchOrderChange,
+     focusRoomSearch,
+     searchTerm = "",
+-    searchSenders = [],
++    searchSenders = EMPTY_SENDERS,
+     searchOrder = SearchOrderBy.Recent,
+ }) => {
+     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
+diff --git a/apps/web/src/components/views/right_panel/UserInfo.tsx b/apps/web/src/components/views/right_panel/UserInfo.tsx
+index bd90b215be..4248bda805 100644
+--- a/apps/web/src/components/views/right_panel/UserInfo.tsx
++++ b/apps/web/src/components/views/right_panel/UserInfo.tsx
+@@ -202,7 +202,7 @@ const useMemberProfile = (member: Member): Member => {
+         if (!needsProfile) return;
+ 
+         let cancelled = false;
+-        userProfilesStore.getOrFetchProfile(userId).then((profile) => {
++        void userProfilesStore.getOrFetchProfile(userId).then((profile) => {
+             if (cancelled || !profile) return;
+ 
+             const memberWithProfile = new RoomMember("", userId);
+diff --git a/apps/web/src/components/views/room_settings/AliasSettings-test.ts b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+similarity index 91%
+rename from apps/web/src/components/views/room_settings/AliasSettings-test.ts
+rename to apps/web/src/components/views/room_settings/AliasSettings.test.ts
+index cf5779756d..433dd5557a 100644
+--- a/apps/web/src/components/views/room_settings/AliasSettings-test.ts
++++ b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+@@ -5,9 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++import { describe, it, expect } from "vitest";
+ import { MatrixError } from "matrix-js-sdk/src/matrix";
+ 
+-import { getAliasCreationErrorMessage } from "../../../../../src/components/views/room_settings/AliasSettings";
++import { getAliasCreationErrorMessage } from "./AliasSettings";
+ 
+ describe("getAliasCreationErrorMessage", () => {
+     it.each([
+diff --git a/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx b/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
+index dfdf86602b..d7a3aa978e 100644
+--- a/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
++++ b/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
+@@ -120,7 +120,7 @@ describe("BasicMessageComposer", () => {
+     });
+ 
+     it("should resolve emoji shortcodes once they are closed", async () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
+             return settingName === "MessageComposerInput.autoReplaceEmoji";
+         });
+         userEvent.setup();
+@@ -155,7 +155,7 @@ describe("BasicMessageComposer", () => {
+     });
+ 
+     it("should leave emoji shortcodes alone when replacement is switched off", async () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
+         userEvent.setup();
+         const model = new EditorModel([], pc, renderer);
+         render(<BasicMessageComposer model={model} room={room} />, {
+diff --git a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+index 16f624062b..638a8732f7 100644
+--- a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
++++ b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+@@ -15,12 +15,7 @@ import { RoomMember } from "matrix-js-sdk/src/matrix";
+ import userEvent from "@testing-library/user-event";
+ import { stubClient } from "test-utils";
+ 
+-import {
+-    determineAvatarPosition,
+-    ReadReceiptGroup,
+-    ReadReceiptPerson,
+-    readReceiptTooltip,
+-} from "./ReadReceiptGroup";
++import { determineAvatarPosition, ReadReceiptGroup, ReadReceiptPerson, readReceiptTooltip } from "./ReadReceiptGroup";
+ import * as languageSettings from "../../../i18n/settings";
+ import dispatcher from "../../../dispatcher/dispatcher";
+ import { Action } from "../../../dispatcher/actions";
+@@ -212,7 +207,7 @@ describe("ReadReceiptGroup", () => {
+ 
+     describe("<ReadReceiptGroup />", () => {
+         stubClient();
+-        mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
++        vi.mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
+ 
+         const receipts = ["@alice:example.org", "@bob:example.org", "@carol:example.org"].map((userId) => ({
+             userId,
 diff --git a/apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx b/apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx
 index 589982dd39..c1b57c3969 100644
 --- a/apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx
@@ -2282,8 +3651,1155 @@ index 589982dd39..c1b57c3969 100644
      it("opens the notifications panel", async () => {
          const user = userEvent.setup();
          await SettingsStore.setValue("feature_notifications", null, SettingLevel.DEVICE, true);
+diff --git a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap b/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
+index f8c86405fd..fb30beb9cd 100644
+--- a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
++++ b/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
+@@ -43,6 +43,32 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         </div>
+       </div>
+     </button>
++    <button
++      aria-label="Search"
++      aria-labelledby="react-use-id-1"
++      class="_icon-button_1215g_8"
++      data-kind="primary"
++      role="button"
++      style="--cpd-icon-button-size: 32px;"
++      tabindex="0"
++    >
++      <div
++        class="_indicator-icon_147l5_17"
++        style="--cpd-icon-button-size: 100%;"
++      >
++        <svg
++          fill="currentColor"
++          height="1em"
++          viewBox="0 0 24 24"
++          width="1em"
++          xmlns="http://www.w3.org/2000/svg"
++        >
++          <path
++            d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++          />
++        </svg>
++      </div>
++    </button>
+     <button
+       aria-disabled="false"
+       aria-expanded="false"
+@@ -51,7 +77,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       data-state="closed"
+-      id="radix-react-use-id-1"
++      id="radix-react-use-id-2"
+       role="button"
+       style="--cpd-icon-button-size: 32px;"
+       tabindex="0"
+@@ -62,7 +88,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         style="--cpd-icon-button-size: 100%;"
+       >
+         <svg
+-          aria-labelledby="react-use-id-2"
++          aria-labelledby="react-use-id-3"
+           fill="currentColor"
+           height="1em"
+           viewBox="0 0 24 24"
+@@ -83,7 +109,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       data-state="closed"
+-      id="radix-react-use-id-3"
++      id="radix-react-use-id-4"
+       role="button"
+       style="--cpd-icon-button-size: 32px;"
+       tabindex="0"
+@@ -94,7 +120,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         style="--cpd-icon-button-size: 100%;"
+       >
+         <svg
+-          aria-labelledby="react-use-id-4"
++          aria-labelledby="react-use-id-5"
+           fill="currentColor"
+           height="1em"
+           viewBox="0 0 24 24"
+@@ -109,7 +135,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+     </button>
+     <button
+       aria-label="Threads"
+-      aria-labelledby="react-use-id-5"
++      aria-labelledby="react-use-id-6"
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       role="button"
+@@ -136,7 +162,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+     </button>
+     <button
+       aria-label="Room info"
+-      aria-labelledby="react-use-id-6"
++      aria-labelledby="react-use-id-7"
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       role="button"
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+index c6ec3ff06e..c0d84ec072 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+@@ -11,8 +11,12 @@ import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/searc
+ import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
+ import ListIcon from "@vector-im/compound-design-tokens/assets/web/icons/list-view";
+ import { type Room, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
+-import { Box, Flex } from "@element-hq/web-shared-components";
+-import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
++import {
++    Box,
++    Flex,
++    SearchMatchNavigation,
++    type SearchMatchNavigationViewModel,
++} from "@element-hq/web-shared-components";
+ 
+ import { _t } from "../../../languageHandler";
+ import { Key } from "../../../Keyboard";
+diff --git a/apps/web/src/components/views/rooms/wysiwyg_composer/components/WysiwygComposer.test.tsx b/apps/web/src/components/views/rooms/wysiwyg_composer/components/WysiwygComposer.test.tsx
+index 9cc5932972..5673131bcc 100644
+--- a/apps/web/src/components/views/rooms/wysiwyg_composer/components/WysiwygComposer.test.tsx
++++ b/apps/web/src/components/views/rooms/wysiwyg_composer/components/WysiwygComposer.test.tsx
+@@ -606,14 +606,6 @@ describe("WysiwygComposer", () => {
+             vi.spyOn(EventUtils, "findEditableEvent").mockReturnValue(mockEvent);
+         });
+ 
+-        function select(selection: SubSelection) {
+-            return act(async () => {
+-                await setSelection(selection);
+-                // the event is not automatically fired by jest
+-                document.dispatchEvent(new CustomEvent("selectionchange"));
+-            });
+-        }
+-
+         describe("In message creation", () => {
+             it("Should not moving when the composer is filled", async () => {
+                 // When
+@@ -636,20 +628,6 @@ describe("WysiwygComposer", () => {
+                 // When
+                 const { textbox, spyDispatcher } = await setup();
+ 
+-                // Put the caret at the start of the composer explicitly, as the editing tests
+-                // below do. The composer does this itself once ready, but via an effect driven by
+-                // a state update from the async wasm init that is not wrapped in act(), so waiting
+-                // for contentEditable="true" does not guarantee the caret has landed. With no
+-                // caret inside the editor, isCaretAtStart() is false, ArrowUp is ignored, and
+-                // nothing is ever dispatched.
+-                await select({
+-                    anchorNode: textbox,
+-                    anchorOffset: 0,
+-                    focusNode: textbox,
+-                    focusOffset: 0,
+-                    isForward: true,
+-                });
+-
+                 fireEvent.keyDown(textbox, {
+                     key: "ArrowUp",
+                 });
+@@ -664,6 +642,14 @@ describe("WysiwygComposer", () => {
+         });
+ 
+         describe("In message editing", () => {
++            function select(selection: SubSelection) {
++                return act(async () => {
++                    await setSelection(selection);
++                    // the event is not automatically fired by jest
++                    document.dispatchEvent(new CustomEvent("selectionchange"));
++                });
++            }
++
+             describe("Moving up", () => {
+                 it("Should not moving when caret is not at beginning of the text", async () => {
+                     // When
+diff --git a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
+index b2c9027875..945d7bc545 100644
+--- a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
++++ b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
+@@ -50,10 +50,11 @@ describe("createMessageContent", () => {
+ 
+             // Then
+             expect(content).toEqual({
+-                body: "Alice hello",
+-                format: "org.matrix.custom.html",
+-                formatted_body: mention,
+-                msgtype: "m.text",
++                "body": "Alice hello",
++                "format": "org.matrix.custom.html",
++                "formatted_body": mention,
++                "msgtype": "m.text",
++                "m.mentions": {},
+             });
+         });
+ 
+@@ -232,7 +233,8 @@ describe("createMessageContent", () => {
+ 
+             // Bob was already notified by the message being edited, so only Carol is new.
+             expect(content["m.mentions"]).toEqual({ user_ids: ["@carol:element.io"] });
+-            expect(content["m.new_content"]!["m.mentions"]).toEqual({
++            const newContent = content["m.new_content"] as unknown as Record<string, unknown>;
++            expect(newContent["m.mentions"]).toEqual({
+                 user_ids: ["@bob:element.io", "@carol:element.io"],
+             });
+         });
+diff --git a/apps/web/test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx b/apps/web/src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx
+similarity index 81%
+rename from apps/web/test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx
+rename to apps/web/src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx
+index 1cd548e4ea..0f63e29c9d 100644
+--- a/apps/web/test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx
++++ b/apps/web/src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx
+@@ -6,24 +6,27 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+ import React from "react";
+-import { fireEvent, render, type RenderResult, screen, waitFor } from "jest-matrix-react";
++import { fireEvent, render, type RenderResult, screen, waitFor } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ 
+-import PreferencesUserSettingsTab from "../../../../../../../src/components/views/settings/tabs/user/PreferencesUserSettingsTab";
+-import { MatrixClientPeg } from "../../../../../../../src/MatrixClientPeg";
++import PreferencesUserSettingsTab from "./PreferencesUserSettingsTab";
++import { MatrixClientPeg } from "../../../../../MatrixClientPeg";
+ import {
+     getMockClientWithEventEmitter,
+     mockClientMethodsServer,
+     mockClientMethodsUser,
+     mockPlatformPeg,
+     stubClient,
+-} from "../../../../../../test-utils";
+-import SettingsStore from "../../../../../../../src/settings/SettingsStore";
+-import { SettingLevel } from "../../../../../../../src/settings/SettingLevel";
+-import MatrixClientBackedController from "../../../../../../../src/settings/controllers/MatrixClientBackedController";
+-import PlatformPeg from "../../../../../../../src/PlatformPeg";
+-import { type SettingKey } from "../../../../../../../src/settings/Settings.tsx";
++} from "test-utils";
++import SettingsStore from "../../../../../settings/SettingsStore";
++import { SettingLevel } from "../../../../../settings/SettingLevel";
++import MatrixClientBackedController from "../../../../../settings/controllers/MatrixClientBackedController";
++import PlatformPeg from "../../../../../PlatformPeg";
++import { type SettingKey } from "../../../../../settings/Settings.tsx";
+ 
+ describe("PreferencesUserSettingsTab", () => {
+     beforeEach(() => {
+@@ -44,7 +47,7 @@ describe("PreferencesUserSettingsTab", () => {
+     });
+ 
+     it("should reload when changing language", async () => {
+-        const reloadStub = jest.fn();
++        const reloadStub = vi.fn();
+         PlatformPeg.get()!.reload = reloadStub;
+ 
+         renderTab();
+@@ -85,16 +88,16 @@ describe("PreferencesUserSettingsTab", () => {
+     });
+ 
+     it("should not show spell check setting if unsupported", async () => {
+-        PlatformPeg.get()!.supportsSpellCheckSettings = jest.fn().mockReturnValue(false);
++        PlatformPeg.get()!.supportsSpellCheckSettings = vi.fn().mockReturnValue(false);
+ 
+         renderTab();
+         expect(screen.queryByRole("switch", { name: "Allow spell check" })).not.toBeInTheDocument();
+     });
+ 
+     it("should enable spell check", async () => {
+-        const spellCheckEnableFn = jest.fn();
+-        PlatformPeg.get()!.supportsSpellCheckSettings = jest.fn().mockReturnValue(true);
+-        PlatformPeg.get()!.getSpellCheckEnabled = jest.fn().mockReturnValue(false);
++        const spellCheckEnableFn = vi.fn();
++        PlatformPeg.get()!.supportsSpellCheckSettings = vi.fn().mockReturnValue(true);
++        PlatformPeg.get()!.getSpellCheckEnabled = vi.fn().mockReturnValue(false);
+         PlatformPeg.get()!.setSpellCheckEnabled = spellCheckEnableFn;
+ 
+         renderTab();
+@@ -109,20 +112,20 @@ describe("PreferencesUserSettingsTab", () => {
+     describe("send read receipts", () => {
+         beforeEach(() => {
+             stubClient();
+-            jest.spyOn(SettingsStore, "setValue");
+-            jest.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
++            vi.spyOn(SettingsStore, "setValue");
++            vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+         });
+ 
+         afterEach(() => {
+-            jest.resetAllMocks();
++            vi.resetAllMocks();
+         });
+ 
+         const getToggle = () => renderTab().getByRole("switch", { name: "Send read receipts" });
+ 
+         const mockIsVersionSupported = (val: boolean) => {
+             const client = MatrixClientPeg.safeGet();
+-            jest.spyOn(client, "doesServerSupportUnstableFeature").mockResolvedValue(false);
+-            jest.spyOn(client, "isVersionSupported").mockImplementation(async (version: string) => {
++            vi.spyOn(client, "doesServerSupportUnstableFeature").mockResolvedValue(false);
++            vi.spyOn(client, "isVersionSupported").mockImplementation(async (version: string) => {
+                 if (version === "v1.4") return val;
+                 return false;
+             });
+diff --git a/apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap b/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+similarity index 94%
+rename from apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap
+rename to apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+index dafd594a12..de83d179be 100644
+--- a/apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap
++++ b/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+@@ -1,6 +1,6 @@
+-// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
++// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+ 
+-exports[`PreferencesUserSettingsTab should render 1`] = `
++exports[`PreferencesUserSettingsTab > should render 1`] = `
+ <DocumentFragment>
+   <div
+     class="mx_SettingsTab"
+@@ -279,6 +279,12 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     >
+                       Use Ctrl + F to search timeline
+                     </label>
++                    <span
++                      class="_message_1o4d9_86 _help-message_1o4d9_92"
++                      id="radix-react-use-id-2"
++                    >
++                      When enabled, the search shortcut opens in-room message search instead of your browser's find-on-page. Searching encrypted rooms requires the desktop app with message search enabled.
++                    </span>
+                   </div>
+                 </div>
+               </div>
+@@ -436,7 +442,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-2"
++                      id="radix-react-use-id-3"
+                     >
+                       Requires your server to support MSC4133
+                     </span>
+@@ -505,7 +511,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-3"
++                      id="radix-react-use-id-4"
+                     >
+                       Your server doesn't support disabling sending read receipts.
+                     </span>
+@@ -630,7 +636,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-4"
++                      id="radix-react-use-id-5"
+                     >
+                       <span>
+                         Start messages with 
+@@ -1116,7 +1122,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                 <h2
+                   class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
+                 >
+-                  Timeline
++                  Threads
+                 </h2>
+               </div>
+               <div
+@@ -1132,7 +1138,6 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_container_udcm8_10"
+                     >
+                       <input
+-                        checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+                         id="mx_SettingsFlag_dXFDGgBsKXay"
+@@ -1151,10 +1156,37 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_dXFDGgBsKXay"
+                     >
+-                      Show typing notifications
++                      Show threads in the main chat area
+                     </label>
++                    <span
++                      class="_message_1o4d9_86 _help-message_1o4d9_92"
++                      id="radix-react-use-id-6"
++                    >
++                      Opening a thread replaces the conversation instead of opening the right-hand panel.
++                    </span>
+                   </div>
+                 </div>
++              </div>
++            </div>
++          </form>
++          <form
++            class="_root_1o4d9_17"
++          >
++            <div
++              class="mx_SettingsSubsection"
++            >
++              <div
++                class="mx_SettingsSubsectionHeading"
++              >
++                <h2
++                  class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
++                >
++                  Timeline
++                </h2>
++              </div>
++              <div
++                class="mx_SettingsSubsection_content"
++              >
+                 <div
+                   class="_inline-field_1o4d9_33"
+                 >
+@@ -1184,7 +1216,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_7Az0xw4Bs4Tt"
+                     >
+-                      Show a placeholder for removed messages
++                      Show typing notifications
+                     </label>
+                   </div>
+                 </div>
+@@ -1217,7 +1249,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_8jmzPIlPoBCv"
+                     >
+-                      Show read receipts sent by other users
++                      Show a placeholder for removed messages
+                     </label>
+                   </div>
+                 </div>
+@@ -1250,7 +1282,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_enFRaTjdsFou"
+                     >
+-                      Show join/leave messages (invites/removes/bans unaffected)
++                      Show read receipts sent by other users
+                     </label>
+                   </div>
+                 </div>
+@@ -1283,7 +1315,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_bfwnd5rz4XNX"
+                     >
+-                      Show display name changes
++                      Show join/leave messages (invites/removes/bans unaffected)
+                     </label>
+                   </div>
+                 </div>
+@@ -1297,6 +1329,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_container_udcm8_10"
+                     >
+                       <input
++                        checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+                         id="mx_SettingsFlag_gs5uWEzYzZrS"
+@@ -1315,8 +1348,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_gs5uWEzYzZrS"
+                     >
+-                      Show chat effects (animations when receiving e.g. confetti)
+-                      Disable smooth scrolling (reduces motion)
++                      Show display name changes
+                     </label>
+                   </div>
+                 </div>
+@@ -1349,7 +1381,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_qWg7OgID1yRR"
+                     >
+-                      Show profile picture changes
++                      Show chat effects (animations when receiving e.g. confetti)
+                     </label>
+                   </div>
+                 </div>
+@@ -1363,7 +1395,6 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_container_udcm8_10"
+                     >
+                       <input
+-                        checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+                         id="mx_SettingsFlag_pOPewl7rtMbV"
+@@ -1382,7 +1413,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_pOPewl7rtMbV"
+                     >
+-                      Show avatars in user, room and event mentions
++                      Disable smooth scrolling (reduces motion)
+                     </label>
+                   </div>
+                 </div>
+@@ -1415,7 +1446,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_cmt3PZSyNp3v"
+                     >
+-                      Enable big emoji in chat
++                      Show profile picture changes
+                     </label>
+                   </div>
+                 </div>
+@@ -1448,7 +1479,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_dJJz3lHUv9XX"
+                     >
+-                      Jump to the bottom of the timeline when you send a message
++                      Show avatars in user, room and event mentions
+                     </label>
+                   </div>
+                 </div>
+@@ -1480,6 +1511,72 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     <label
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_SBSSOZDRlzlA"
++                    >
++                      Enable big emoji in chat
++                    </label>
++                  </div>
++                </div>
++                <div
++                  class="_inline-field_1o4d9_33"
++                >
++                  <div
++                    class="_inline-field-control_1o4d9_45"
++                  >
++                    <div
++                      class="_container_udcm8_10"
++                    >
++                      <input
++                        checked=""
++                        class="_input_udcm8_24"
++                        disabled=""
++                        id="mx_SettingsFlag_FLEpLCb0jpp6"
++                        role="switch"
++                        type="checkbox"
++                      />
++                      <div
++                        class="_ui_udcm8_34"
++                      />
++                    </div>
++                  </div>
++                  <div
++                    class="_inline-field-body_1o4d9_39"
++                  >
++                    <label
++                      class="_label_1o4d9_60"
++                      for="mx_SettingsFlag_FLEpLCb0jpp6"
++                    >
++                      Jump to the bottom of the timeline when you send a message
++                    </label>
++                  </div>
++                </div>
++                <div
++                  class="_inline-field_1o4d9_33"
++                >
++                  <div
++                    class="_inline-field-control_1o4d9_45"
++                  >
++                    <div
++                      class="_container_udcm8_10"
++                    >
++                      <input
++                        checked=""
++                        class="_input_udcm8_24"
++                        disabled=""
++                        id="mx_SettingsFlag_NQFWldEwbV3q"
++                        role="switch"
++                        type="checkbox"
++                      />
++                      <div
++                        class="_ui_udcm8_34"
++                      />
++                    </div>
++                  </div>
++                  <div
++                    class="_inline-field-body_1o4d9_39"
++                  >
++                    <label
++                      class="_label_1o4d9_60"
++                      for="mx_SettingsFlag_NQFWldEwbV3q"
+                     >
+                       Show current profile picture and name for users in message history
+                     </label>
+@@ -1517,7 +1614,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                     >
+                       <input
+                         class="_input_udcm8_24"
+-                        id="react-use-id-5"
++                        id="react-use-id-7"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1531,7 +1628,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="react-use-id-5"
++                      for="react-use-id-7"
+                     >
+                       Hide avatars of room and inviter
+                     </label>
+@@ -1545,13 +1642,13 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                 >
+                   <label
+                     class="_label_1o4d9_60"
+-                    for="radix-react-use-id-6"
++                    for="radix-react-use-id-8"
+                   >
+                     Show media in timeline
+                   </label>
+                   <span
+                     class="_message_1o4d9_86 _help-message_1o4d9_92 mx_MediaPreviewAccountSetting_RadioHelp"
+-                    id="radix-react-use-id-7"
++                    id="radix-react-use-id-9"
+                   >
+                     A hidden media can always be shown by tapping on it
+                   </span>
+@@ -1664,7 +1761,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                         checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="react-use-id-8"
++                        id="react-use-id-10"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1678,13 +1775,13 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="react-use-id-8"
++                      for="react-use-id-10"
+                     >
+                       Allow users to invite you to rooms
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-9"
++                      id="radix-react-use-id-11"
+                     >
+                       Your server does not implement this feature.
+                     </span>
+@@ -1729,7 +1826,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                       <input
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="mx_SettingsFlag_FLEpLCb0jpp6"
++                        id="mx_SettingsFlag_5ZjibYJT2HFm"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1743,7 +1840,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="mx_SettingsFlag_FLEpLCb0jpp6"
++                      for="mx_SettingsFlag_5ZjibYJT2HFm"
+                     >
+                       Show NSFW content
+                     </label>
+@@ -1783,7 +1880,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                         checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="mx_SettingsFlag_NQFWldEwbV3q"
++                        id="mx_SettingsFlag_mTnTitfNlxc2"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1797,7 +1894,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="mx_SettingsFlag_NQFWldEwbV3q"
++                      for="mx_SettingsFlag_mTnTitfNlxc2"
+                     >
+                       Prompt before sending invites to potentially invalid matrix IDs
+                     </label>
+diff --git a/apps/web/src/components/views/spaces/SpacePanel.tsx b/apps/web/src/components/views/spaces/SpacePanel.tsx
+index e51d931d08..4d02e377e4 100644
+--- a/apps/web/src/components/views/spaces/SpacePanel.tsx
++++ b/apps/web/src/components/views/spaces/SpacePanel.tsx
+@@ -367,15 +367,17 @@ const SpacePanel: React.FC = () => {
+     const sdkContext = useContext(SDKContext);
+     const client = sdkContext.client!;
+     const [dragging, setDragging] = useState(false);
+-    const [isPanelCollapsed, setPanelCollapsedState] = useState(() =>
+-        SettingsStore.getValue("Spaces.isPanelCollapsed"),
+-    );
++    const [isPanelCollapsed, setPanelCollapsed] = useState(() => SettingsStore.getValue("Spaces.isPanelCollapsed"));
+     // Remember how the panel was left so that it comes back the same way, as the room list beside it
+     // already does. Expanding it is a deliberate act, not something to undo on every launch.
+-    const setPanelCollapsed = useCallback((collapsed: boolean): void => {
+-        setPanelCollapsedState(collapsed);
+-        SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, collapsed);
+-    }, []);
++    const isFirstRender = useRef(true);
++    useEffect(() => {
++        if (isFirstRender.current) {
++            isFirstRender.current = false;
++            return;
++        }
++        void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, isPanelCollapsed);
++    }, [isPanelCollapsed]);
+     const ref = useRef<HTMLDivElement>(null);
+     useLayoutEffect(() => {
+         if (ref.current) UIStore.instance.trackElementDimensions("SpacePanel", ref.current);
+diff --git a/apps/web/src/settings/ChatBackgrounds-test.ts b/apps/web/src/settings/ChatBackgrounds.test.ts
+similarity index 94%
+rename from apps/web/src/settings/ChatBackgrounds-test.ts
+rename to apps/web/src/settings/ChatBackgrounds.test.ts
+index 3656c5b72f..36ffac2534 100644
+--- a/apps/web/src/settings/ChatBackgrounds-test.ts
++++ b/apps/web/src/settings/ChatBackgrounds.test.ts
+@@ -5,6 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
+ import { type MatrixClient } from "matrix-js-sdk/src/matrix";
+ 
+ import {
+@@ -14,11 +15,11 @@ import {
+     getChatBackgroundPreset,
+     MIN_CHAT_BACKGROUND_OPACITY,
+     resolveChatBackground,
+-} from "../../../src/settings/ChatBackgrounds";
++} from "./ChatBackgrounds";
+ 
+ describe("ChatBackgrounds", () => {
+     const clientWith = (httpUrl: string | null): MatrixClient =>
+-        ({ mxcUrlToHttp: jest.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
++        ({ mxcUrlToHttp: vi.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
+ 
+     describe("CHAT_BACKGROUND_PRESETS", () => {
+         it("exposes the bundled presets", () => {
+@@ -113,7 +114,8 @@ describe("ChatBackgrounds", () => {
+         });
+ 
+         it("resolves an mxc URI to the same http url in both themes", () => {
+-            const client = clientWith("https://cdn.example/wall.png");
++            const toHttp = vi.fn().mockReturnValue("https://cdn.example/wall.png");
++            const client = { mxcUrlToHttp: toHttp } as unknown as MatrixClient;
+             const uploaded = {
+                 image: 'url("https://cdn.example/wall.png")',
+                 repeat: "no-repeat",
+@@ -123,7 +125,7 @@ describe("ChatBackgrounds", () => {
+                 light: uploaded,
+                 dark: uploaded,
+             });
+-            expect(client.mxcUrlToHttp).toHaveBeenCalled();
++            expect(toHttp).toHaveBeenCalled();
+         });
+ 
+         it("returns null when the mxc URI cannot be resolved to http", () => {
+diff --git a/apps/web/src/slash-commands/__snapshots__/spoiler-test.ts.snap b/apps/web/src/slash-commands/__snapshots__/spoiler-test.ts.snap
+deleted file mode 100644
+index 06e6a7dfc5..0000000000
+--- a/apps/web/src/slash-commands/__snapshots__/spoiler-test.ts.snap
++++ /dev/null
+@@ -1,3 +0,0 @@
+-// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+-
+-exports[`/spoiler should wrap the message in a spoiler span 1`] = `"<span data-mx-spoiler>this is a test message</span>"`;
+diff --git a/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap b/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap
+new file mode 100644
+index 0000000000..6099d666d7
+--- /dev/null
++++ b/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap
+@@ -0,0 +1,3 @@
++// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
++
++exports[`/spoiler > should wrap the message in a spoiler span 1`] = `"<span data-mx-spoiler>this is a test message</span>"`;
+diff --git a/apps/web/src/slash-commands/query-test.ts b/apps/web/src/slash-commands/query.test.ts
+similarity index 78%
+rename from apps/web/src/slash-commands/query-test.ts
+rename to apps/web/src/slash-commands/query.test.ts
+index 0bcd616e9d..b8b2c4483f 100644
+--- a/apps/web/src/slash-commands/query-test.ts
++++ b/apps/web/src/slash-commands/query.test.ts
+@@ -5,22 +5,25 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import { setUpCommandTest } from "./utils";
+-import * as createRoom from "../../../src/createRoom";
+-import dis from "../../../src/dispatcher/dispatcher";
+-import { Action } from "../../../src/dispatcher/actions";
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { setUpCommandTest } from "./__mocks__";
++import * as createRoom from "../createRoom";
++import dis from "../dispatcher/dispatcher";
++import { Action } from "../dispatcher/actions";
+ 
+ describe("/query", () => {
+     const roomId = "!room:example.com";
+     const dmRoomId = "!dm:example.com";
+ 
+     beforeEach(() => {
+-        jest.spyOn(createRoom, "ensureDMExists").mockResolvedValue(dmRoomId);
+-        jest.spyOn(dis, "dispatch").mockImplementation(() => {});
++        vi.spyOn(createRoom, "ensureDMExists").mockResolvedValue(dmRoomId);
++        vi.spyOn(dis, "dispatch").mockImplementation(() => {});
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("should return usage if no args", () => {
+diff --git a/apps/web/src/slash-commands/spoiler-test.ts b/apps/web/src/slash-commands/spoiler.test.ts
+similarity index 93%
+rename from apps/web/src/slash-commands/spoiler-test.ts
+rename to apps/web/src/slash-commands/spoiler.test.ts
+index 543fb41d74..b4d34c8d45 100644
+--- a/apps/web/src/slash-commands/spoiler-test.ts
++++ b/apps/web/src/slash-commands/spoiler.test.ts
+@@ -5,9 +5,12 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect } from "vitest";
+ import { type IContent } from "matrix-js-sdk/src/matrix";
+ 
+-import { setUpCommandTest } from "./utils";
++import { setUpCommandTest } from "./__mocks__";
+ 
+ describe("/spoiler", () => {
+     const roomId = "!room:example.com";
+diff --git a/apps/web/src/stores/MemberListStore.test.ts b/apps/web/src/stores/MemberListStore.test.ts
+index 9debabd24b..21eb5bddea 100644
+--- a/apps/web/src/stores/MemberListStore.test.ts
++++ b/apps/web/src/stores/MemberListStore.test.ts
+@@ -135,7 +135,7 @@ describe("MemberListStore", () => {
+         });
+         // Lazy loading means the client may hold no User for a member at all, which is the only
+         // thing that ever populates RoomMember.user.
+-        mocked(client.getUser).mockReturnValue(null);
++        vi.mocked(client.getUser).mockReturnValue(null);
+ 
+         const { joined } = await store.loadMemberList(roomId);
+         expect(joined.map((m) => m.userId)).toEqual([doris, alice, bob, charlie]);
+diff --git a/apps/web/src/stores/RoomViewStore.test.ts b/apps/web/src/stores/RoomViewStore.test.ts
+index b9b13c727c..b2336151b0 100644
+--- a/apps/web/src/stores/RoomViewStore.test.ts
++++ b/apps/web/src/stores/RoomViewStore.test.ts
+@@ -516,7 +516,7 @@ describe("RoomViewStore", function () {
+ 
+             roomViewStore.showJoinRoomError(new MatrixError(undefined, 404), roomId);
+ 
+-            expect(mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
++            expect(vi.mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
+                 title: "Room not found",
+                 description: "The room may no longer exist or is unavailable from your server.",
+             });
+diff --git a/apps/web/src/stores/SearchSessionStore-test.ts b/apps/web/src/stores/SearchSessionStore.test.ts
+similarity index 96%
+rename from apps/web/src/stores/SearchSessionStore-test.ts
+rename to apps/web/src/stores/SearchSessionStore.test.ts
+index b5f94cb451..faaeddd997 100644
+--- a/apps/web/src/stores/SearchSessionStore-test.ts
++++ b/apps/web/src/stores/SearchSessionStore.test.ts
+@@ -5,12 +5,13 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import { SearchSessionStore, SearchSessionStoreEvent } from "../../../src/stores/SearchSessionStore";
+-import { type SearchMatch, SearchScope } from "../../../src/Searching";
+-import defaultDispatcher from "../../../src/dispatcher/dispatcher";
+-import { Action } from "../../../src/dispatcher/actions";
++import { SearchSessionStore, SearchSessionStoreEvent } from "./SearchSessionStore";
++import { type SearchMatch, SearchScope } from "../Searching";
++import defaultDispatcher from "../dispatcher/dispatcher";
++import { Action } from "../dispatcher/actions";
+ 
+ const match = (roomId: string, eventId: string): SearchMatch => ({ roomId, eventId });
+ 
+@@ -62,7 +63,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("emits Update when a session starts", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             start();
+             expect(listener).toHaveBeenCalledTimes(1);
+@@ -94,7 +95,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("is a no-op when there is no active session", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
+             expect(store.hasActiveSession()).toBe(false);
+@@ -130,7 +131,7 @@ describe("SearchSessionStore", () => {
+         it("moves the cursor and emits Update", () => {
+             start();
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1"), match("!b:server", "$2")] });
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.setCurrentMatchIndex(1);
+             expect(store.currentMatchIndex).toBe(1);
+@@ -190,7 +191,7 @@ describe("SearchSessionStore", () => {
+ 
+         it("does not emit Update when toggled (it is not view state)", () => {
+             start();
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.beginSteppingJump("$e");
+             store.consumeSteppingJump();
+diff --git a/apps/web/src/stores/SearchSessionStore.ts b/apps/web/src/stores/SearchSessionStore.ts
+index 97eaa93577..5412252592 100644
+--- a/apps/web/src/stores/SearchSessionStore.ts
++++ b/apps/web/src/stores/SearchSessionStore.ts
+@@ -5,8 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import EventEmitter from "events";
+-import { type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
++import { type ISearchResults, type SearchOrderBy, TypedEventEmitter } from "matrix-js-sdk/src/matrix";
+ 
+ import { type SearchMatch, type SearchResultPreview, type SearchScope } from "../Searching";
+ import defaultDispatcher from "../dispatcher/dispatcher";
+@@ -87,7 +86,11 @@ export interface SearchSession extends SearchSessionParams {
+  * component. This singleton is that owner: {@link RoomView} mirrors it into its render state and re-hydrates from it
+  * after a remount, while {@link RoomSearchNavigationViewModel} reads/writes the cursor here.
+  */
+-export class SearchSessionStore extends EventEmitter {
++type SearchSessionStoreHandlerMap = {
++    [SearchSessionStoreEvent.Update]: () => void;
++};
++
++export class SearchSessionStore extends TypedEventEmitter<SearchSessionStoreEvent, SearchSessionStoreHandlerMap> {
+     private static _instance: SearchSessionStore | null = null;
+ 
+     private session: SearchSession | null = null;
+diff --git a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+index aa9bb53693..f94ecd00ee 100644
+--- a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
++++ b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, beforeAll } from "vitest";
++import { vi, describe, it, expect, beforeAll } from "vitest";
+ import { RelationType } from "matrix-js-sdk/src/matrix";
+ import { mkEvent, stubClient } from "test-utils";
+ 
+@@ -45,7 +45,7 @@ describe("MessageEventPreview", () => {
+                 room: "!room:example.com",
+                 type: "m.room.message",
+             });
+-            jest.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
++            vi.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
+ 
+             expect(preview.getTextFor(event)).toBe(`${userId}: Unable to decrypt message`);
+         });
+diff --git a/apps/web/src/toasts/InRoomSearchNudgeToast-test.ts b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+similarity index 80%
+rename from apps/web/src/toasts/InRoomSearchNudgeToast-test.ts
+rename to apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+index 757e0c0d1a..e019b42851 100644
+--- a/apps/web/src/toasts/InRoomSearchNudgeToast-test.ts
++++ b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+@@ -5,10 +5,13 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import { showInRoomSearchNudgeIfNeeded } from "../../../src/toasts/InRoomSearchNudgeToast";
+-import SettingsStore from "../../../src/settings/SettingsStore";
+-import { SettingLevel } from "../../../src/settings/SettingLevel";
+-import ToastStore from "../../../src/stores/ToastStore";
++// @vitest-environment happy-dom
++
++import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
++import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
++import SettingsStore from "../settings/SettingsStore";
++import { SettingLevel } from "../settings/SettingLevel";
++import ToastStore from "../stores/ToastStore";
+ 
+ const TOAST_KEY = "in-room-search-nudge";
+ 
+@@ -17,22 +20,22 @@ const TOAST_KEY = "in-room-search-nudge";
+ const ctrlF = (): KeyboardEvent => new KeyboardEvent("keydown", { key: "f", ctrlKey: true });
+ 
+ describe("showInRoomSearchNudgeIfNeeded", () => {
+-    let addOrReplaceToast: jest.SpyInstance;
+-    let setValue: jest.SpyInstance;
++    let addOrReplaceToast: MockInstance;
++    let setValue: MockInstance;
+ 
+     const mockSettings = (values: Record<string, boolean>): void => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
+     };
+ 
+     beforeEach(() => {
+-        addOrReplaceToast = jest
++        addOrReplaceToast = vi
+             .spyOn(ToastStore.sharedInstance(), "addOrReplaceToast")
+             .mockImplementation(() => undefined);
+-        setValue = jest.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
++        setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("shows the one-time toast on Ctrl/Cmd+F when in-room search is disabled and not yet shown", () => {
+diff --git a/apps/web/src/utils/StorageManager.test.ts b/apps/web/src/utils/StorageManager.test.ts
+index 593f4f79d4..c7807497af 100644
+--- a/apps/web/src/utils/StorageManager.test.ts
++++ b/apps/web/src/utils/StorageManager.test.ts
+@@ -123,7 +123,7 @@ describe("StorageManager", () => {
+ 
+     describe("tryPersistStorage", () => {
+         // node/happy-dom do not implement navigator.storage, so stub it per-test; vi.replaceProperty (aka
+-        // jest.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
++        // vi.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
+         function setStorage(value: unknown): void {
+             Object.defineProperty(navigator, "storage", { value, configurable: true });
+         }
+diff --git a/apps/web/src/utils/exportUtils/PlainTextExport.test.ts b/apps/web/src/utils/exportUtils/PlainTextExport.test.ts
+index 689168392c..a237e2d97f 100644
+--- a/apps/web/src/utils/exportUtils/PlainTextExport.test.ts
++++ b/apps/web/src/utils/exportUtils/PlainTextExport.test.ts
+@@ -10,12 +10,15 @@ Please see LICENSE files in the repository root for full details.
+ 
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { MatrixEvent, type Room } from "matrix-js-sdk/src/matrix";
++import { saveAs } from "file-saver";
+ import { createTestClient, mkEvent, mkStubRoom, REPEATABLE_DATE } from "test-utils";
+ 
+ import { ExportType, type IExportOptions } from "./exportUtils";
+ import PlainTextExporter from "./PlainTextExport";
+ import SettingsStore from "../../settings/SettingsStore";
+ 
++vi.mock("file-saver", () => ({ saveAs: vi.fn() }));
++
+ class TestablePlainTextExporter extends PlainTextExporter {
+     public async testCreateOutput(events: MatrixEvent[]): Promise<string> {
+         return this.createOutput(events);
+@@ -73,6 +76,18 @@ describe("PlainTextExport", () => {
+         expect(events.map((e) => e.getId())).toEqual(["$message", "$root", "$reply"]);
+     });
+ 
++    it("should start the exported file with a UTF-8 byte order mark", async () => {
++        const exporter = new PlainTextExporter(stubRoom, ExportType.Timeline, stubOptions, () => {});
++
++        await exporter.export();
++
++        // Asserted as bytes rather than as text: the mark is what a reader looks at to know the
++        // encoding, so what matters is that those three bytes lead the file.
++        const saved = vi.mocked(saveAs).mock.calls[0][0] as Blob;
++        const bytes = new Uint8Array(await saved.arrayBuffer());
++        expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
++    });
++
+     it("should have an Element-branded destination file name", () => {
+         const exporter = new PlainTextExporter(stubRoom, ExportType.Timeline, stubOptions, () => {});
+ 
+diff --git a/apps/web/src/utils/i18n-helpers.test.ts b/apps/web/src/utils/i18n-helpers.test.ts
+index 4cf020a64a..af08da2669 100644
+--- a/apps/web/src/utils/i18n-helpers.test.ts
++++ b/apps/web/src/utils/i18n-helpers.test.ts
+@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, vi } from "vitest";
++import { describe, it, expect, vi, beforeEach } from "vitest";
+ import { Room } from "matrix-js-sdk/src/matrix";
+ import { KnownMembership } from "matrix-js-sdk/src/types";
+ import { mkMembership, stubClient } from "test-utils";
+diff --git a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+index 2bd54fbff7..b1669d1076 100644
+--- a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
++++ b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+@@ -488,6 +488,20 @@ describe("VideoBodyViewModel", () => {
+         expect(vm.getSnapshot().src).toBe("data:video/mp4,");
+     });
+ 
++    it("names the video by its filename rather than its caption", () => {
++        const vm = createVm({
++            mxEvent: createEvent({
++                body: "a caption",
++                content: { filename: "holiday.mp4" },
++            }),
++        });
++
++        vm.setMediaVisible(true);
++
++        expect(vm.getSnapshot().videoTitle).toBe("holiday.mp4");
++        expect(vm.getSnapshot().videoLabel).toBe("holiday.mp4");
++    });
++
+     it("does not emit for unchanged targeted setters", () => {
+         const event = createEvent();
+         const onPreviewClick = vi.fn();
+diff --git a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+index 95213067d6..db29fa7dc1 100644
+--- a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
++++ b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+@@ -367,13 +367,13 @@ describe("RoomListViewModel", () => {
+             });
+ 
+             // Open the room at the top of the list.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
+             dispatcher.dispatch({ action: Action.ActiveRoomChanged, newRoomId: "!room1:server" });
+             await flushPromises();
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // Reading it demotes it in the store, but sticky keeps it where the user is looking.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room2, room3, room1] }],
+             });
+@@ -386,7 +386,7 @@ describe("RoomListViewModel", () => {
+ 
+             // Moving to the next room down has to fall back to the store's order, in which the room
+             // being left is last. Reusing the pinned order would record room2 at index 1.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
+             dispatcher.dispatch({
+                 action: Action.ActiveRoomChanged,
+                 oldRoomId: "!room1:server",
+@@ -401,7 +401,7 @@ describe("RoomListViewModel", () => {
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // So when room2 is read in turn, the still-unread room3 does not jump above it.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room3, room2, room1] }],
+             });
 diff --git a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
-index 576d884592..fe341470e0 100644
+index 576d884592..6c834099ed 100644
 --- a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
 +++ b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
 @@ -35,6 +35,7 @@ import PosthogTrackers from "../../PosthogTrackers";
@@ -2412,12 +4928,39 @@ index 576d884592..fe341470e0 100644
 +
 +            // The view model watches the setting, so flipping it must repopulate the bar without a remount.
 +            compactMessageActions = false;
-+            const [, , onChange] = vi.mocked(SettingsStore.watchSetting).mock.calls.find(
-+                ([name]) => name === "compactMessageActions",
-+            )!;
++            const [, , onChange] = vi
++                .mocked(SettingsStore.watchSetting)
++                .mock.calls.find(([name]) => name === "compactMessageActions")!;
 +            onChange("compactMessageActions", null, SettingLevel.ACCOUNT, false, false);
 +
 +            expect(vm.getSnapshot().actions).toContain(ActionBarAction.Reply);
 +        });
 +    });
  });
+diff --git a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
+index 379ff8103c..7654c1327a 100644
+--- a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
++++ b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
+@@ -300,7 +300,7 @@ describe("EventTileViewModel", () => {
+         );
+ 
+         expect(fileSnapshot.event.isContinuation).toBe(false);
+-        expect(bubbleSnapshot.event.isContinuation).toBe(true);
++        expect(bubbleSnapshot.event.isContinuation).toBe(false);
+     });
+ 
+     it("derives line classes from event type, message type, and media eligibility", () => {
+diff --git a/packages/shared-components/.storybook/app-web-root.css b/packages/shared-components/.storybook/app-web-root.css
+index 4511efd83e..42ead265e2 100644
+--- a/packages/shared-components/.storybook/app-web-root.css
++++ b/packages/shared-components/.storybook/app-web-root.css
+@@ -38,8 +38,7 @@ Please see LICENSE files in the repository root for full details.
+         pre,
+         code {
+             font-family:
+-                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji",
+-                "Noto Color Emoji";
++                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+             font-size: 100% !important;
+         }
+     }
