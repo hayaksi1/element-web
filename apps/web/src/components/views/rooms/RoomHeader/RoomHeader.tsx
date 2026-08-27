@@ -14,6 +14,7 @@ import VoiceCallIcon from "@vector-im/compound-design-tokens/assets/web/icons/vo
 import CloseCallIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
 import ThreadsIcon from "@vector-im/compound-design-tokens/assets/web/icons/threads-solid";
 import RoomInfoIcon from "@vector-im/compound-design-tokens/assets/web/icons/info-solid";
+import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/search";
 import NotificationsIcon from "@vector-im/compound-design-tokens/assets/web/icons/notifications-solid";
 import VerifiedIcon from "@vector-im/compound-design-tokens/assets/web/icons/verified";
 import ErrorIcon from "@vector-im/compound-design-tokens/assets/web/icons/error-solid";
@@ -49,6 +50,7 @@ import WithPresenceIndicator, { useDmMember } from "../../avatars/WithPresenceIn
 import { type IOOBData } from "../../../../stores/ThreepidInviteStore.ts";
 import { MainSplitContentType } from "../../../../contexts/RoomContext.ts";
 import defaultDispatcher from "../../../../dispatcher/dispatcher.ts";
+import { Action } from "../../../../dispatcher/actions.ts";
 import { RoomSettingsTab } from "../../dialogs/RoomSettingsDialog-tab";
 import { useScopedRoomContext } from "../../../../contexts/ScopedRoomContext.tsx";
 import { ToggleableIcon } from "./toggle/ToggleableIcon.tsx";
@@ -319,6 +321,20 @@ function RoomHeaderButtons({
                     </Tooltip>
                 );
             })}
+
+            {/* Telegram-style header search button. Sits to the LEFT of the call buttons (matching Telegram desktop)
+                and opens & focuses the in-room search bar via the same dispatcher action as Ctrl/Cmd+F and Spotlight. */}
+            <Tooltip label={_t("action|search")}>
+                <IconButton
+                    onClick={(evt) => {
+                        evt.stopPropagation();
+                        defaultDispatcher.fire(Action.FocusMessageSearch);
+                    }}
+                    aria-label={_t("action|search")}
+                >
+                    <SearchIcon />
+                </IconButton>
+            </Tooltip>
 
             {isViewingCall && <CallGuestLinkButton room={room} />}
 

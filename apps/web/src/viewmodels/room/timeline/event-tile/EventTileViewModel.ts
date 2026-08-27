@@ -123,6 +123,8 @@ export interface EventTileDisplayInput {
     isHighlighted: boolean;
     /** Whether the tile is selected or has an open context menu. */
     isSelected: boolean;
+    /** Whether the tile is the search match currently focused while stepping in the live timeline. */
+    isSearchHighlightMatch?: boolean;
     /** Whether the tile is the last event in the timeline. */
     isLast?: boolean;
     /** Whether the tile is the last event in its section. */
@@ -794,6 +796,7 @@ export class EventTileViewModel extends BaseViewModel<EventTileRenderState, Even
             isSending,
             isHighlighted: display.isHighlighted,
             isSelected: display.isSelected,
+            isSearchHighlightMatch: display.isSearchHighlightMatch,
             isContinuation,
             eventType,
             isCallInvite,

@@ -55,6 +55,7 @@ export function getRoomContext(room: Room, override: Partial<RoomContextType>): 
         showApps: false,
         isPeeking: false,
         showRightPanel: true,
+        searchHeaderActive: false,
         joining: false,
         atEndOfLiveTimeline: true,
         showTopUnreadMessagesBar: false,
