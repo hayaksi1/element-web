@@ -87,6 +87,18 @@ jobs:
             - name: Enable pnpm
               run: corepack enable
 
+            # The unit gate runs a handful of suites in vitest browser mode, so the runner
+            # needs real browsers. Install deps first: the action resolves the playwright
+            # version through pnpm. The rebuild may move the lockfile, but the script's own
+            # install gate re-runs afterwards and the browsers live in ~/.cache, not node_modules.
+            - name: Install dependencies
+              run: pnpm install
+
+            - name: Setup playwright
+              uses: ./.github/actions/setup-playwright
+              with:
+                  write-cache: "true"
+
             - name: Dry run
               id: dryrun
               run: .fork/sync-upstream.sh --dry-run 2>&1 | tee dry-run.log

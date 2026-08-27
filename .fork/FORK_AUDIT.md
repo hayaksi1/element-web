@@ -6,7 +6,7 @@ document except the creation of this file and `git fetch`.
 - **Date:** 2026-08-27
 - **`develop` tip:** `3ccacb9d10` (2026-08-26)
 - **`upstream/develop` tip:** `b52f8d71c3` (2026-08-27)
-- **Merge base:** `716edc0d3e` — *Fix documentation references to Settings.tsx (#34766)*, 2026-08-21
+- **Merge base:** `716edc0d3e` — _Fix documentation references to Settings.tsx (#34766)_, 2026-08-21
 - **Drift:** `develop` is **38 behind / 352 ahead** of `upstream/develop`
 
 ---
@@ -21,14 +21,14 @@ the shape of the work:
 `develop` carries 352 commits: **117 merge commits and 235 non-merge commits**. Of those
 235 non-merge commits:
 
-| | count | meaning |
-|---|---:|---|
-| present verbatim on a `pr/*` branch | 130 | already split out |
-| present as an equivalent patch (rebased copy) on a `pr/*` branch | 27 | already split out |
-| **exist only on `develop`** | **78** | the actual work |
+|                                                                  |  count | meaning           |
+| ---------------------------------------------------------------- | -----: | ----------------- |
+| present verbatim on a `pr/*` branch                              |    130 | already split out |
+| present as an equivalent patch (rebased copy) on a `pr/*` branch |     27 | already split out |
+| **exist only on `develop`**                                      | **78** | the actual work   |
 
 `develop` is not a polluted trunk. It is **already an integration branch**, assembled by
-merging ~150 `pr/*` topic branches. The restructure is a *formalisation and renaming*
+merging ~150 `pr/*` topic branches. The restructure is a _formalisation and renaming_
 job, not a rescue. The 78 true orphans are the only commits that need new homes.
 
 ### 0.2 There are 86 open upstream pull requests — the plan in §4 would damage them
@@ -54,15 +54,15 @@ open PR. I will not do that, and the plan in Phase 2 splits the namespace instea
 ### 0.3 `develop` has a second root commit
 
 `git rev-list --max-parents=0 develop` returns **7 roots**; `upstream/develop` returns 6.
-The extra one is `eccb9d3f5c` *"Initial commit"* (2026-06-24, `admin@myhome.internal`,
+The extra one is `eccb9d3f5c` _"Initial commit"_ (2026-06-24, `admin@myhome.internal`,
 **4,925 files**).
 
 The fork was not created by cloning upstream. It was bootstrapped as a fresh repository
 from a v1.12.22 snapshot, and upstream was grafted on later at `db411f2f15` (2026-06-26,
-*"Merge upstream/develop into the fork"*).
+_"Merge upstream/develop into the fork"_).
 
 Consequence: the 39 commits authored by `admin@myhome.internal` between 2026-06-24 and
-2026-06-26 were written against a *parallel, unrelated history*. They are not cleanly
+2026-06-26 were written against a _parallel, unrelated history_. They are not cleanly
 cherry-pickable onto today's `upstream/develop` — expect real conflicts when re-homing
 them, not mechanical ones. Every later commit (196, by `hayaksi1`) sits on the grafted
 history and is well-behaved.
@@ -96,17 +96,17 @@ simply deleted.
 
 ### 1.1 By class
 
-| Class | Count | Disposition |
-|---|---:|---|
-| `pr/*` backing an **open** upstream PR | 86 | **Keep as-is. Never rebase, never rewrite.** |
-| `pr/*` whose PR is **merged** | 49 | Delete after verifying content is in upstream |
-| `pr/*` whose PR is **closed** (rejected) | 12 | Promote to `feat/*` — these are the fork's permanent identity |
-| `pr/*`/`feature/*` with **no PR** | 9 | Triage: promote or drop |
-| `backup/*`, `backup-develop-s61` | 7 | Superseded by the new backup tag; delete after |
-| `shots/*` | 7 | Screenshot scratch; delete |
-| `ss/*`, `sync/*`, `upstream-sync` | 4 | Dead scaffolding; delete |
-| `main` | 1 | 70,395 behind — dead parallel history, unrelated to upstream |
-| `demo/media-tabs`, `e2e/full-size-threads` | 2 | Scratch |
+| Class                                      | Count | Disposition                                                   |
+| ------------------------------------------ | ----: | ------------------------------------------------------------- |
+| `pr/*` backing an **open** upstream PR     |    86 | **Keep as-is. Never rebase, never rewrite.**                  |
+| `pr/*` whose PR is **merged**              |    49 | Delete after verifying content is in upstream                 |
+| `pr/*` whose PR is **closed** (rejected)   |    12 | Promote to `feat/*` — these are the fork's permanent identity |
+| `pr/*`/`feature/*` with **no PR**          |     9 | Triage: promote or drop                                       |
+| `backup/*`, `backup-develop-s61`           |     7 | Superseded by the new backup tag; delete after                |
+| `shots/*`                                  |     7 | Screenshot scratch; delete                                    |
+| `ss/*`, `sync/*`, `upstream-sync`          |     4 | Dead scaffolding; delete                                      |
+| `main`                                     |     1 | 70,395 behind — dead parallel history, unrelated to upstream  |
+| `demo/media-tabs`, `e2e/full-size-threads` |     2 | Scratch                                                       |
 
 ### 1.2 Staleness
 
@@ -116,21 +116,21 @@ almost nothing with `upstream/develop`.
 
 ### 1.3 Closed PRs — the fork's permanent divergence
 
-These twelve are the features upstream declined. They define what the fork *is*:
+These twelve are the features upstream declined. They define what the fork _is_:
 
-| Branch | PR | Title |
-|---|---|---|
-| `pr/chat-background` | #34297 | Add a customisable chat background behind the message timeline |
-| `pr/full-size-threads` | #34791 | Add a preference to open threads in the main chat area |
-| `pr/message-hover-actions` | #34315 | Add a setting to collapse message actions and the hover highlight |
-| `pr/message-hover-actions-upstream` | #34314 | Add a setting to collapse the message action bar |
-| `pr/search-top-bar` | #34014 | Move in-room search into a top-of-chat bar with a results dropdown |
-| `pr/search-jump-to-date` | #34012 | Add a jump-to-date calendar to the in-room search header |
-| `pr/search-order-toggle` | #34011 | Sort in-room search by relevance or recency |
-| `pr/search-from-filter` | #34010 | Filter in-room message search by sender |
-| `pr/seshat-circuit-breaker` | #33984/#33985 | Stop the search error dialog after every sync |
-| `pr/export-utf8-bom` | #34640 | Mark a plain text export as UTF-8 |
-| `pr/video-download-error-label` | #34517 | Distinguish a failed video download from a failed decryption |
+| Branch                              | PR            | Title                                                              |
+| ----------------------------------- | ------------- | ------------------------------------------------------------------ |
+| `pr/chat-background`                | #34297        | Add a customisable chat background behind the message timeline     |
+| `pr/full-size-threads`              | #34791        | Add a preference to open threads in the main chat area             |
+| `pr/message-hover-actions`          | #34315        | Add a setting to collapse message actions and the hover highlight  |
+| `pr/message-hover-actions-upstream` | #34314        | Add a setting to collapse the message action bar                   |
+| `pr/search-top-bar`                 | #34014        | Move in-room search into a top-of-chat bar with a results dropdown |
+| `pr/search-jump-to-date`            | #34012        | Add a jump-to-date calendar to the in-room search header           |
+| `pr/search-order-toggle`            | #34011        | Sort in-room search by relevance or recency                        |
+| `pr/search-from-filter`             | #34010        | Filter in-room message search by sender                            |
+| `pr/seshat-circuit-breaker`         | #33984/#33985 | Stop the search error dialog after every sync                      |
+| `pr/export-utf8-bom`                | #34640        | Mark a plain text export as UTF-8                                  |
+| `pr/video-download-error-label`     | #34517        | Distinguish a failed video download from a failed decryption       |
 
 ---
 
@@ -140,15 +140,15 @@ These twelve are the features upstream declined. They define what the fork *is*:
 
 `git diff upstream/develop...develop` → **400 files, +25,934 / −1,935**
 
-| Area | files |
-|---|---:|
-| `apps/web/src` | 197 |
-| `apps/web/test` | 68 |
-| `apps/web/playwright` | 39 |
-| `apps/desktop/src` | 38 |
-| `apps/web/res` | 24 |
-| `packages/shared-components/src` | 13 |
-| everything else | 21 |
+| Area                             | files |
+| -------------------------------- | ----: |
+| `apps/web/src`                   |   197 |
+| `apps/web/test`                  |    68 |
+| `apps/web/playwright`            |    39 |
+| `apps/desktop/src`               |    38 |
+| `apps/web/res`                   |    24 |
+| `packages/shared-components/src` |    13 |
+| everything else                  |    21 |
 
 95 files added, 299 upstream files modified, 6 removed.
 
@@ -157,20 +157,20 @@ These twelve are the features upstream declined. They define what the fork *is*:
 Fork touches counted across all 282 fork commits; upstream churn is commits in the last
 90 days on `upstream/develop`. **Collision risk is the product**, not either column alone.
 
-| Rank | File | fork | upstream/90d | note |
-|---:|---|---:|---:|---|
-| 1 | `apps/web/src/i18n/strings/en_EN.json` | 53 | 30 | **worst file in the repo.** Fully avoidable — see §3 |
-| 2 | `pnpm-lock.yaml` | 6 | **213** | most-churned upstream file; fork holds a structural −52 delta |
-| 3 | `apps/web/src/settings/Settings.tsx` | 21 | 23 | 8 fork-added settings, additive (+84/−3, 15 hunks) |
-| 4 | `apps/web/src/components/structures/RoomView.tsx` | 31 | 9 | **+566/−65 over 29 hunks** — deepest invasive edit in the fork |
-| 5 | `apps/web/src/components/structures/MatrixChat.tsx` | 11 | 17 | |
-| 6 | `apps/desktop/src/electron-main.ts` | 20 | 7 | no module API exists for this file |
-| 7 | `apps/web/src/components/views/rooms/EventTile.tsx` | 7 | 12 | |
-| 8 | `apps/web/src/components/structures/LoggedInView.tsx` | 8 | 12 | |
-| 9 | `apps/desktop/src/store.ts` | 17 | 3 | |
-| 10 | `apps/web/src/Searching.ts` | 18 | 1 | high fork churn, near-zero upstream churn — cheap |
-| 11 | `apps/web/res/css/_components.pcss` | 13 | 7 | append-only index file; conflicts are trivial |
-| 12 | `apps/web/src/Notifier.ts` | 10 | 6 | |
+| Rank | File                                                  | fork | upstream/90d | note                                                           |
+| ---: | ----------------------------------------------------- | ---: | -----------: | -------------------------------------------------------------- |
+|    1 | `apps/web/src/i18n/strings/en_EN.json`                |   53 |           30 | **worst file in the repo.** Fully avoidable — see §3           |
+|    2 | `pnpm-lock.yaml`                                      |    6 |      **213** | most-churned upstream file; fork holds a structural −52 delta  |
+|    3 | `apps/web/src/settings/Settings.tsx`                  |   21 |           23 | 8 fork-added settings, additive (+84/−3, 15 hunks)             |
+|    4 | `apps/web/src/components/structures/RoomView.tsx`     |   31 |            9 | **+566/−65 over 29 hunks** — deepest invasive edit in the fork |
+|    5 | `apps/web/src/components/structures/MatrixChat.tsx`   |   11 |           17 |                                                                |
+|    6 | `apps/desktop/src/electron-main.ts`                   |   20 |            7 | no module API exists for this file                             |
+|    7 | `apps/web/src/components/views/rooms/EventTile.tsx`   |    7 |           12 |                                                                |
+|    8 | `apps/web/src/components/structures/LoggedInView.tsx` |    8 |           12 |                                                                |
+|    9 | `apps/desktop/src/store.ts`                           |   17 |            3 |                                                                |
+|   10 | `apps/web/src/Searching.ts`                           |   18 |            1 | high fork churn, near-zero upstream churn — cheap              |
+|   11 | `apps/web/res/css/_components.pcss`                   |   13 |            7 | append-only index file; conflicts are trivial                  |
+|   12 | `apps/web/src/Notifier.ts`                            |   10 |            6 |                                                                |
 
 Files that are **not** a problem, contrary to the brief's assumption:
 `oxlint.config.ts`, `.oxfmtrc.jsonc`, `knip.ts`, root `package.json`, `nx.json`,
@@ -184,17 +184,17 @@ InfoPlist i18n work.
 1. **`en_EN.json` (+90/−22).** 53 fork commits vs 30 upstream commits per 90 days. Most
    of the 22 "deletions" are reword pairs, not removals of upstream strings. **This is
    the highest-value thing to fix and it is fully solvable** — see §3.1.
-2. **`pnpm-lock.yaml` (0/−52).** The fork *removes* the `auto-launch`,
+2. **`pnpm-lock.yaml` (0/−52).** The fork _removes_ the `auto-launch`,
    `@types/auto-launch` and `electron-window-state` dependencies, having replaced them
    with a native Electron `loginItem` implementation (`apps/desktop/src/auto-launch.ts`,
    commit `1bf22f45b9`, PR #33999). This is deliberate, not accidental. It also means:
 3. **`patches/@types__auto-launch.patch` is deleted by the fork** (commit `8053426880`)
    and its `patchedDependencies` entry removed from `pnpm-workspace.yaml`. Upstream still
    ships both. Your safety rule 6 says not to touch `patches/` — this predates the rule
-   and is a *consequence* of a shipped feature, so I have flagged it rather than reverting
+   and is a _consequence_ of a shipped feature, so I have flagged it rather than reverting
    it. **This needs your decision** (see §5, open question 2).
 4. **`apps/web/src/viewmodels/room/timeline/DateSeparatorViewModel.tsx` → `.ts`.** The
-   fork *renamed* an upstream file (commit `2510deb1a9`). Upstream still has the `.tsx`
+   fork _renamed_ an upstream file (commit `2510deb1a9`). Upstream still has the `.tsx`
    and six upstream files import it. Every upstream commit touching it will produce a
    rename/modify conflict or a silent duplicate. Cheap to revert; high recurring cost to
    keep.
@@ -204,19 +204,19 @@ InfoPlist i18n work.
 
 ### 2.4 Pure noise — drop these
 
-| Commit / artifact | Why |
-|---|---|
-| `apps/web/blob-report/report-Chrome-c7ab7a0.zip` | 528 KB committed Playwright blob report. Accidental. |
-| `6e1c5fc05c` *chore: ignore graphify-out/* | one-line `.gitignore` tweak; belongs in `feat/fork-tooling` |
-| `eccb9d3f5c` *Initial commit* | the 4,925-file parallel root. Disappears automatically when `develop` is reset. |
-| `05df42227d` *Drop the note above the InfoPlist test's directory constant* | comment-only |
-| `4d7523a4cf`, `4190f3124e`, `c8682f1b47` | snapshot/mock/lint-gate repairs — integration-only, not feature work |
+| Commit / artifact                                                          | Why                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `apps/web/blob-report/report-Chrome-c7ab7a0.zip`                           | 528 KB committed Playwright blob report. Accidental.                            |
+| `6e1c5fc05c` _chore: ignore graphify-out/_                                 | one-line `.gitignore` tweak; belongs in `feat/fork-tooling`                     |
+| `eccb9d3f5c` _Initial commit_                                              | the 4,925-file parallel root. Disappears automatically when `develop` is reset. |
+| `05df42227d` _Drop the note above the InfoPlist test's directory constant_ | comment-only                                                                    |
+| `4d7523a4cf`, `4190f3124e`, `c8682f1b47`                                   | snapshot/mock/lint-gate repairs — integration-only, not feature work            |
 
 **Commits with unusable messages.** Twelve commits are named only by issue number —
-`77d68752bb` *"34639 34659 34576 34476 34478"*, `ce500d4dc6` *"34007 34478 34486 33994"*,
-`cdb2233636` *"34007"*, `f9011de1f8` *"34001"*, `31aa20ca52` *"33990"*, `94926a75fb`
-*"33995"*, `c9e35d4d7a` *"33994"*, `f587f1b28d` *"33986"*, `85356027d9` *"34004"*,
-`f790137282` *"34478"*, `943369e6da` *"34512"*, `72d54d5b49` *"34606 34610 34604"*.
+`77d68752bb` _"34639 34659 34576 34476 34478"_, `ce500d4dc6` _"34007 34478 34486 33994"_,
+`cdb2233636` _"34007"_, `f9011de1f8` _"34001"_, `31aa20ca52` _"33990"_, `94926a75fb`
+_"33995"_, `c9e35d4d7a` _"33994"_, `f587f1b28d` _"33986"_, `85356027d9` _"34004"_,
+`f790137282` _"34478"_, `943369e6da` _"34512"_, `72d54d5b49` _"34606 34610 34604"_.
 
 These are **PR review fixes applied to `develop` instead of to the branch under review**.
 They are the mechanism by which `develop` drifted from its own topic branches. Each one
@@ -234,7 +234,7 @@ api-extractor public surface), `modules/banner`, `modules/widget-toggles`.
 ### 3.0 What is actually available
 
 - **Customisations are deprecated.** `docs/customisations.md` opens with
-  *"🦖 DEPRECATED … in favour of the Module API"*. The `customisations.json` mechanism is
+  _"🦖 DEPRECATED … in favour of the Module API"_. The `customisations.json` mechanism is
   not a target to migrate to.
 - **The Module API is the supported extension point.** `packages/module-api` exposes
   `i18n`, `customComponents`, `extras`, `navigation`, `composer`, `dialog`, `settings`,
@@ -262,12 +262,12 @@ change silently renders `<Tag/>` as literal text across ~40 stale translations.
 ### 3.2 The hard limits
 
 - **`SettingsApi` is `getValue()` only.** There is no `registerSetting`. A fork that
-  *adds* a setting must edit `Settings.tsx` and `en_EN.json`. Nothing can be done about
+  _adds_ a setting must edit `Settings.tsx` and `en_EN.json`. Nothing can be done about
   this today; it caps eight fork features at `PARTIAL`.
 - **There is no module API for the Electron main process.** The Module API is a web
   renderer API. All 38 `apps/desktop/src/*` files are `INVASIVE` by construction.
 - **No extension point for timeline internals.** `customComponents.registerMessageRenderer`
-  replaces rendering for a whole event *type*; it cannot alter `MessagePanel` grouping,
+  replaces rendering for a whole event _type_; it cannot alter `MessagePanel` grouping,
   `RoomView` layout, or scroll behaviour. `builtins.renderRoomView` embeds an entire room
   view and is not a patching mechanism.
 - **No extension point for search.** `Searching.ts`, `SearchSessionStore`, `EventIndex`
@@ -275,18 +275,18 @@ change silently renders `<Tag/>` as literal text across ~40 stale translations.
 
 ### 3.3 Classification
 
-| Feature | Class | Extension point / why not |
-|---|---|---|
-| **Fork i18n strings** (all of them) | `MODULARIZABLE` | `I18nApi.register()` + module `translations.json`. Removes hot-spot #1 entirely. |
-| **Setting *default* changes only** (jump-to-date on, warn-before-quit off, ⌘F search on) | `MODULARIZABLE` | `setting_defaults` in `config.json`. Zero code. |
-| **Chat background** (`feat/chat-background`) | `PARTIAL` | Artwork + CSS ship as a module (`modules/*/style.css`). The two settings (`RoomView.backgroundImage`, `RoomView.backgroundOpacity`) still need `Settings.tsx`. |
-| **Message action bar / hover** (`feat/message-action-bar`) | `PARTIAL` | CSS to a module. `compactMessageActions` setting + `EventTile`/`EventTileDerivedState` hooks stay in-tree. |
-| **Bot command autocomplete (MSC4332)** | `PARTIAL` | `composer` API covers upload options, not autocomplete providers. Provider registration stays in-tree. |
-| **Full-size thread view** (`feat/full-size-threads`) | `INVASIVE` | Rewires `RightPanelStore`, `RoomView`, `MatrixChat`. 31 files. No extension point. |
-| **Telegram-parity search UI** (`feat/search-*`) | `INVASIVE` | `RoomView.tsx` +566/−65 across 29 hunks, `MessagePanel`, `EventTile`, `Searching.ts`, plus a deleted upstream component. The fork's largest and most expensive divergence. |
-| **Seshat indexing / resilience** | `INVASIVE` | `apps/web/src/indexing/EventIndex.ts` — no module surface. |
-| **All macOS/desktop work** (21 orphans + ~20 `pr/desktop-*`) | `INVASIVE` | No Electron-main module API exists. Permanent. |
-| **Notification behaviour** (`Notifier.ts`, invite notifications, sound) | `INVASIVE` | No extension point. |
+| Feature                                                                                  | Class           | Extension point / why not                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fork i18n strings** (all of them)                                                      | `MODULARIZABLE` | `I18nApi.register()` + module `translations.json`. Removes hot-spot #1 entirely.                                                                                           |
+| **Setting _default_ changes only** (jump-to-date on, warn-before-quit off, ⌘F search on) | `MODULARIZABLE` | `setting_defaults` in `config.json`. Zero code.                                                                                                                            |
+| **Chat background** (`feat/chat-background`)                                             | `PARTIAL`       | Artwork + CSS ship as a module (`modules/*/style.css`). The two settings (`RoomView.backgroundImage`, `RoomView.backgroundOpacity`) still need `Settings.tsx`.             |
+| **Message action bar / hover** (`feat/message-action-bar`)                               | `PARTIAL`       | CSS to a module. `compactMessageActions` setting + `EventTile`/`EventTileDerivedState` hooks stay in-tree.                                                                 |
+| **Bot command autocomplete (MSC4332)**                                                   | `PARTIAL`       | `composer` API covers upload options, not autocomplete providers. Provider registration stays in-tree.                                                                     |
+| **Full-size thread view** (`feat/full-size-threads`)                                     | `INVASIVE`      | Rewires `RightPanelStore`, `RoomView`, `MatrixChat`. 31 files. No extension point.                                                                                         |
+| **Telegram-parity search UI** (`feat/search-*`)                                          | `INVASIVE`      | `RoomView.tsx` +566/−65 across 29 hunks, `MessagePanel`, `EventTile`, `Searching.ts`, plus a deleted upstream component. The fork's largest and most expensive divergence. |
+| **Seshat indexing / resilience**                                                         | `INVASIVE`      | `apps/web/src/indexing/EventIndex.ts` — no module surface.                                                                                                                 |
+| **All macOS/desktop work** (21 orphans + ~20 `pr/desktop-*`)                             | `INVASIVE`      | No Electron-main module API exists. Permanent.                                                                                                                             |
+| **Notification behaviour** (`Notifier.ts`, invite notifications, sound)                  | `INVASIVE`      | No extension point.                                                                                                                                                        |
 
 Honest summary: **two things are genuinely modularizable and both are cheap; the rest is
 not.** The fork's identity is deep timeline, search and Electron work, and the Module API
@@ -298,23 +298,23 @@ does the heavy lifting.
 
 ## 4. Feature grouping
 
-The 78 true orphans, grouped. `pr/*` names in the *existing branch* column mean the
+The 78 true orphans, grouped. `pr/*` names in the _existing branch_ column mean the
 feature already has a branch and the orphan is a divergent or later revision of it.
 
-| Proposed branch | Existing branch(es) | Orphan commits | Primary files |
-|---|---|---:|---|
-| `feat/search-ui` | `pr/search-top-bar`, `pr/search-stepping`, `pr/search-all-rooms`, `pr/search-order-toggle`, `pr/search-from-filter`, `pr/search-jump-to-date`, `pr/search-cmdf-*` | 21 — `30c1b18716` `726deffc5c` `32eb2271a0` `c121292038` `ee4981dfae` `2d656c059a` `3e3c25cd34` `bf0df9c789` `d7d6bc03f5` `3bd5b578e2` `511034fde7` `b36be65d68` `ef26e174c2` `c0e1b9418a` `42436b296f` `3cb364ca44` `99b66aee73` `de8d4c56bf` `49c4354511` `6fe7a3ef28` `26c7c763ad` | `RoomView.tsx`, `MessagePanel.tsx`, `SearchSessionStore.ts`, `RoomSearchHeader.tsx`, shared-components search |
-| `feat/search-indexing` | `pr/seshat-circuit-breaker`, `pr/search-resilience`, `pr/search-incomplete-warning` | 7 — `b2705016bd` `356b2d215b` `c43918a64e` `9ff6da5432` `f824c65906` `f9011de1f8` `85356027d9` | `apps/web/src/indexing/EventIndex.ts`, `Searching.ts` |
-| `feat/search-tz-fix` | `pr/jump-to-date-local-timezone` (#34476, open) | 1 — `2510deb1a9` | `DateSeparatorViewModel` — **carries the `.tsx`→`.ts` rename** |
-| `feat/chat-background` | `pr/chat-background` (#34297 closed) | 3 — `981bb6cead` `cb32e0cfb1` `6ea076b1f0` | `Settings.tsx`, `LoggedInView.tsx`, Appearance tab |
-| `feat/message-action-bar` | `pr/message-hover-actions` (#34315 closed), `feature/remove-message-hover-highlight` | 3 — `1eaf6a95bc` `ea00f52cfc` `2e7a4c1883` | `_EventTile.pcss`, `_EventBubbleTile.pcss`, `EventTileDerivedState.ts` |
-| `feat/full-size-threads` | `pr/full-size-threads` (#34791 closed), `e2e/full-size-threads` | 2 — `5d381d74ca` `898f6ebcb5` | `RightPanelStore`, `RoomView.tsx`, ThreadHeader |
-| `feat/macos-desktop` | ~20 open `pr/desktop-*` PRs | 14 — `8053426880` `030bce32e3` `6547496b4f` `984e7ca6ab` `373b91a4fc` `b485bd88b8` `c2b5a1867c` `230c7c6fe0` `80b8385bfd` `3ed204897b` `0788b1c2a3` `1bf22f45b9` `0f4e9351df` `4190f3124e` | `electron-main.ts`, `store.ts`, `ipc.ts`, `webcontents-handler.ts` |
-| `feat/macos-notification-sound` | `pr/macos-notification-sound` (no PR) | 1 — `7265b77ee6` | `apps/desktop/src`, `vector/platform` |
-| `feat/fork-misc` | — | 5 — `677662dfbf` `e4da7a4e9a` `6ea3ca82bb` `c23138bc54` `772e796d3a` | keyboard case-insensitivity, audio overlap, invite notify, leave dialog size, uploaded-media cache |
-| **`.fork/integration-patches/`** | — | 8 — `18def0a80c` `2e009e6790` `27c33c577c` `973eee36b3` `c8682f1b47` `4d7523a4cf` `b79d5e7528` `943369e6da` | e2e/snapshot/lint repairs that belong to no single feature |
-| **needs your call — misfiled review fixes** | various `pr/*` | 12 — the numeric-subject commits in §2.4 | must be split back onto the named `pr/*` branch |
-| **drop** | — | 2 — `eccb9d3f5c` `6e1c5fc05c` | parallel root; `.gitignore` chore |
+| Proposed branch                             | Existing branch(es)                                                                                                                                               |                                                                                                                                                                                                                                                                        Orphan commits | Primary files                                                                                                 |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | ------------------------------------------------------------------------------------------------------------- |
+| `feat/search-ui`                            | `pr/search-top-bar`, `pr/search-stepping`, `pr/search-all-rooms`, `pr/search-order-toggle`, `pr/search-from-filter`, `pr/search-jump-to-date`, `pr/search-cmdf-*` | 21 — `30c1b18716` `726deffc5c` `32eb2271a0` `c121292038` `ee4981dfae` `2d656c059a` `3e3c25cd34` `bf0df9c789` `d7d6bc03f5` `3bd5b578e2` `511034fde7` `b36be65d68` `ef26e174c2` `c0e1b9418a` `42436b296f` `3cb364ca44` `99b66aee73` `de8d4c56bf` `49c4354511` `6fe7a3ef28` `26c7c763ad` | `RoomView.tsx`, `MessagePanel.tsx`, `SearchSessionStore.ts`, `RoomSearchHeader.tsx`, shared-components search |
+| `feat/search-indexing`                      | `pr/seshat-circuit-breaker`, `pr/search-resilience`, `pr/search-incomplete-warning`                                                                               |                                                                                                                                                                                        7 — `b2705016bd` `356b2d215b` `c43918a64e` `9ff6da5432` `f824c65906` `f9011de1f8` `85356027d9` | `apps/web/src/indexing/EventIndex.ts`, `Searching.ts`                                                         |
+| `feat/search-tz-fix`                        | `pr/jump-to-date-local-timezone` (#34476, open)                                                                                                                   |                                                                                                                                                                                                                                                                      1 — `2510deb1a9` | `DateSeparatorViewModel` — **carries the `.tsx`→`.ts` rename**                                                |
+| `feat/chat-background`                      | `pr/chat-background` (#34297 closed)                                                                                                                              |                                                                                                                                                                                                                                            3 — `981bb6cead` `cb32e0cfb1` `6ea076b1f0` | `Settings.tsx`, `LoggedInView.tsx`, Appearance tab                                                            |
+| `feat/message-action-bar`                   | `pr/message-hover-actions` (#34315 closed), `feature/remove-message-hover-highlight`                                                                              |                                                                                                                                                                                                                                            3 — `1eaf6a95bc` `ea00f52cfc` `2e7a4c1883` | `_EventTile.pcss`, `_EventBubbleTile.pcss`, `EventTileDerivedState.ts`                                        |
+| `feat/full-size-threads`                    | `pr/full-size-threads` (#34791 closed), `e2e/full-size-threads`                                                                                                   |                                                                                                                                                                                                                                                         2 — `5d381d74ca` `898f6ebcb5` | `RightPanelStore`, `RoomView.tsx`, ThreadHeader                                                               |
+| `feat/macos-desktop`                        | ~20 open `pr/desktop-*` PRs                                                                                                                                       |                                                                                            14 — `8053426880` `030bce32e3` `6547496b4f` `984e7ca6ab` `373b91a4fc` `b485bd88b8` `c2b5a1867c` `230c7c6fe0` `80b8385bfd` `3ed204897b` `0788b1c2a3` `1bf22f45b9` `0f4e9351df` `4190f3124e` | `electron-main.ts`, `store.ts`, `ipc.ts`, `webcontents-handler.ts`                                            |
+| `feat/macos-notification-sound`             | `pr/macos-notification-sound` (no PR)                                                                                                                             |                                                                                                                                                                                                                                                                      1 — `7265b77ee6` | `apps/desktop/src`, `vector/platform`                                                                         |
+| `feat/fork-misc`                            | —                                                                                                                                                                 |                                                                                                                                                                                                                  5 — `677662dfbf` `e4da7a4e9a` `6ea3ca82bb` `c23138bc54` `772e796d3a` | keyboard case-insensitivity, audio overlap, invite notify, leave dialog size, uploaded-media cache            |
+| **`.fork/integration-patches/`**            | —                                                                                                                                                                 |                                                                                                                                                                           8 — `18def0a80c` `2e009e6790` `27c33c577c` `973eee36b3` `c8682f1b47` `4d7523a4cf` `b79d5e7528` `943369e6da` | e2e/snapshot/lint repairs that belong to no single feature                                                    |
+| **needs your call — misfiled review fixes** | various `pr/*`                                                                                                                                                    |                                                                                                                                                                                                                                              12 — the numeric-subject commits in §2.4 | must be split back onto the named `pr/*` branch                                                               |
+| **drop**                                    | —                                                                                                                                                                 |                                                                                                                                                                                                                                                         2 — `eccb9d3f5c` `6e1c5fc05c` | parallel root; `.gitignore` chore                                                                             |
 
 ---
 
