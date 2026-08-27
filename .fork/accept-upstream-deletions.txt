@@ -1,0 +1,17 @@
+# Paths where upstream DELETED the file and a contribution branch still modifies it.
+#
+# git rerere records content conflicts only. A modify/delete is a TREE conflict, so it
+# is never cached and would stop every single rebuild forever. Listing a path here tells
+# the sync script to accept upstream's deletion for that path and carry on.
+#
+# This is not a blanket -X ours. Each line is a deliberate, reviewed decision that the
+# file is gone upstream for good and the branch's change to it is obsolete. Removing a
+# feature's behaviour is a real consequence -- if the branch's change still matters, port
+# it to whatever replaced the file instead of listing it here.
+#
+# Format: one repo-relative path per line. # comments and blank lines ignored.
+
+# Deleted by upstream b68ecdb860 "Remove legacy room list (#34040)". The legacy room
+# list is gone; pr/desktop-smooth-scroll's change to it has nothing left to apply to.
+# The smooth-scroll setting itself still lands via that branch's other files.
+apps/web/src/components/views/rooms/RoomSublist.tsx
