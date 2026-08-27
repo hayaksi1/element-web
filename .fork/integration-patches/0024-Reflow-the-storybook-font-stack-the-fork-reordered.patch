@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 21:10:18 +0300
+Subject: [PATCH] Reflow the storybook font stack the fork reordered
+
+Moving the emoji families behind the generic fallback left the pre/code
+stack wrapped where the formatter would not have wrapped it, so the file
+failed the format check. Upstream's own copy passes, which makes this ours
+rather than the pre-existing documentation churn it was sitting alongside
+and being mistaken for.
+
+Wrapping only; the font order is untouched.
+---
+ packages/shared-components/.storybook/app-web-root.css | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/packages/shared-components/.storybook/app-web-root.css b/packages/shared-components/.storybook/app-web-root.css
+index 4511efd83e..42ead265e2 100644
+--- a/packages/shared-components/.storybook/app-web-root.css
++++ b/packages/shared-components/.storybook/app-web-root.css
+@@ -38,8 +38,7 @@ Please see LICENSE files in the repository root for full details.
+         pre,
+         code {
+             font-family:
+-                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji",
+-                "Noto Color Emoji";
++                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+             font-size: 100% !important;
+         }
+     }
