@@ -23,12 +23,12 @@ upstream/develop ──► develop            pristine mirror. ff-only. NEVER co
                        ├── pr/<x>               open upstream PR. NEVER rewritten.
                        └── pr/<y>
                              ↓
-                     combined/integration = develop + every feat/* + every pr/*
+                     combined = develop + every feat/* + every pr/*
                                             rebuilt from scratch by script
 ```
 
 - The fork remote is **`gh`**, not `origin`.
-- `combined/integration` is the **default branch** and the one you build and deploy. It is
+- `combined` is the **default branch** and the one you build and deploy. It is
   **disposable** — regenerated every sync. Never the source of truth for any code.
 
 ## Never
@@ -40,14 +40,14 @@ upstream/develop ──► develop            pristine mirror. ff-only. NEVER co
   Fix-ups go on top as new commits.
 - **Never `git merge upstream/develop` by hand.** Syncing is `.fork/sync-upstream.sh` and
   nothing else.
-- **Never hand-merge into `combined/integration`.** It is always the product of the script.
+- **Never hand-merge into `combined`.** It is always the product of the script.
 - **Never resolve a conflict with `-X ours` / `-X theirs`.**
 - **Never hand-edit `pnpm-lock.yaml`** — run `pnpm` and let it write the file.
 - **Never edit anything in `patches/`** unless the change *is* the dependency patch.
 - **Never reformat upstream code** and never touch `oxlint.config.ts` or `.oxfmtrc.jsonc`.
   They are byte-identical to upstream today; keep it that way.
 - `git push --force-with-lease` only. Never bare `--force`. Only ever for `develop`,
-  `combined/integration`, and rebased `feat/*`.
+  `combined`, and rebased `feat/*`.
 
 ## Where a change goes
 
@@ -57,7 +57,7 @@ upstream/develop ──► develop            pristine mirror. ff-only. NEVER co
 | Something to send upstream | new `pr/<slug>` cut from `develop`, added to `.fork/contrib.txt` |
 | Bug in an existing feature | **that feature's branch**, then rebuild. Never on the integration branch. |
 | Bug in an open PR | a **new commit** on that `pr/*` branch. Never amend. |
-| Cross-feature / integration-only fix | commit on `combined/integration`, then **immediately** export it: `git format-patch -1 -o .fork/integration-patches/` and commit that to `feat/fork-tooling`. Otherwise the next rebuild deletes it. |
+| Cross-feature / integration-only fix | commit on `combined`, then **immediately** export it: `git format-patch -1 -o .fork/integration-patches/` and commit that to `feat/fork-tooling`. Otherwise the next rebuild deletes it. |
 | Change to the sync tooling | `feat/fork-tooling` |
 
 **After changing any branch, rebuild:** `.fork/sync-upstream.sh`. Every fix must end up
