@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
 import React from "react";
 import { act, fireEvent, render, waitFor, type RenderResult } from "test-utils-rtl";
 import {
@@ -593,7 +593,7 @@ describe("<LoggedInView />", () => {
     describe("chat background", () => {
         // Captured before any spy is installed, so the fallback never recurses into the mock itself.
         const realGetValue = SettingsStore.getValue.bind(SettingsStore);
-        let getValueSpy: jest.SpyInstance | undefined;
+        let getValueSpy: MockInstance | undefined;
 
         afterEach(() => {
             getValueSpy?.mockRestore();
