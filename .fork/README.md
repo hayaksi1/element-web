@@ -2,7 +2,7 @@
 
 Everything fork-specific lives under `.fork/`. Upstream will never create that directory,
 so it can never conflict. The short version of the rules is in the repo-root `CLAUDE.md`;
-this file explains *why*.
+this file explains _why_.
 
 ## The problem this solves
 
@@ -12,7 +12,7 @@ three:
 
 1. **`develop` could no longer fast-forward.** Once your own commits are on the trunk,
    every sync is a merge, and every merge is a conflict negotiation.
-2. **Merged PRs got re-applied forever.** Upstream *squash*-merges. When one of our PRs
+2. **Merged PRs got re-applied forever.** Upstream _squash_-merges. When one of our PRs
    landed, upstream got one new commit with a new SHA and a new patch-id. Our original
    commits stayed on `develop`, so `git` had no idea the work was already upstream and
    dutifully re-applied it — conflicting against the very code it had become. 49 branches
@@ -44,13 +44,13 @@ and rebuilt from scratch on every sync. Nothing may live only there.
 `.fork/features.txt` and `.fork/contrib.txt` exist because the two kinds of branch must be
 treated differently, and getting this wrong does real damage.
 
-| | `feat/*` (`features.txt`) | `pr/*` (`contrib.txt`) |
-|---|---|---|
-| what it is | fork-local; upstream declined it or never saw it | head of an **open upstream pull request** |
-| on sync | **rebased** onto `develop` | **merged** into the integration branch |
-| rewritten? | yes, freely | **never** — no rebase, no amend, no force-push |
-| pushed by the script? | yes, `--force-with-lease` | **never** |
-| commit trailer | `Fork-Feature: <slug>` | none — these go upstream and must stay clean |
+|                       | `feat/*` (`features.txt`)                        | `pr/*` (`contrib.txt`)                         |
+| --------------------- | ------------------------------------------------ | ---------------------------------------------- |
+| what it is            | fork-local; upstream declined it or never saw it | head of an **open upstream pull request**      |
+| on sync               | **rebased** onto `develop`                       | **merged** into the integration branch         |
+| rewritten?            | yes, freely                                      | **never** — no rebase, no amend, no force-push |
+| pushed by the script? | yes, `--force-with-lease`                        | **never**                                      |
+| commit trailer        | `Fork-Feature: <slug>`                           | none — these go upstream and must stay clean   |
 
 Force-pushing a `pr/*` branch would rewrite commits that reviewers have already commented
 on, detach every review thread, and re-fire CI on the PR. Upstream's `CONTRIBUTING.md`
@@ -59,7 +59,7 @@ forbids it. The script has no code path that pushes a branch from `contrib.txt`.
 The cost of not rebasing them is that their conflicts surface later, in the integration
 merge, where the context is larger. That is what `rerere` is for.
 
-## Branches that are deliberately *not* in either list
+## Branches that are deliberately _not_ in either list
 
 A branch whose pull request was **merged** upstream must be excluded. Upstream squashed it,
 so the content is already in `develop`; merging the branch again re-applies old code
@@ -72,7 +72,7 @@ Keep such branches around for history if you like. Just never list them.
 ## rerere — resolve once, replay forever
 
 Because `pr/*` branches are frozen at whatever upstream they were cut from, merging ~100 of
-them onto a moving `develop` produces the *same* conflicts every single rebuild. Re-solving
+them onto a moving `develop` produces the _same_ conflicts every single rebuild. Re-solving
 them by hand each night is exactly the treadmill this restructure exists to end.
 
 `rerere` ("reuse recorded resolution") records how you resolved a conflict hunk and
@@ -124,14 +124,14 @@ the code underneath it — regenerate or delete it.
 
 ## Files here
 
-| Path | What |
-|---|---|
-| `sync-upstream.sh` | the only supported way to sync. `--help` for flags. |
-| `features.txt` | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first. |
-| `contrib.txt` | ordered `pr/*` branches, merged as-is. Order clusters conflicts together. |
-| `integration-patches/` | cross-feature fixes, re-applied after every rebuild |
-| `rr-cache/` | shared rerere conflict-resolution cache |
-| `FORK_AUDIT.md` | the 2026-08-27 audit this structure came from. Historical, but it records *why* each decision was made. |
+| Path                   | What                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sync-upstream.sh`     | the only supported way to sync. `--help` for flags.                                                     |
+| `features.txt`         | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first.                              |
+| `contrib.txt`          | ordered `pr/*` branches, merged as-is. Order clusters conflicts together.                               |
+| `integration-patches/` | cross-feature fixes, re-applied after every rebuild                                                     |
+| `rr-cache/`            | shared rerere conflict-resolution cache                                                                 |
+| `FORK_AUDIT.md`        | the 2026-08-27 audit this structure came from. Historical, but it records _why_ each decision was made. |
 
 ## Running a sync
 
@@ -169,8 +169,8 @@ The audit measured where this fork actually fights upstream. In order:
    quarter. **Avoidable.** Ship fork strings in a module's own `translations.json` and
    register them with `i18n.register()`. See `modules/banner` for the pattern.
 2. `pnpm-lock.yaml` — the most-churned file upstream has. Never hand-edit; run `pnpm`.
-3. `apps/web/src/settings/Settings.tsx` — unavoidable for *new* settings (`SettingsApi` is
-   read-only), but a change to a setting's *default* needs no code at all: use
+3. `apps/web/src/settings/Settings.tsx` — unavoidable for _new_ settings (`SettingsApi` is
+   read-only), but a change to a setting's _default_ needs no code at all: use
    `setting_defaults` in `config.json`.
 4. `apps/web/src/components/structures/RoomView.tsx` — the deepest edit in the fork.
    Add lines; never restructure.

@@ -7,25 +7,25 @@ not lost. Each is a real gap, not a rounding error.
 
 Upstream moved its unit tests from `apps/web/test/unit-tests/**` to co-located
 `src/**/*.test.tsx` and rewrote them for vitest. Several contribution branches still carry
-the *old* file at the *old* path with jest idioms, so merging them produces a conflict
+the _old_ file at the _old_ path with jest idioms, so merging them produces a conflict
 between two files that are the same test suite in different worlds.
 
 For these five, the merge took **upstream's relocated version**. Upstream's own cases are
 therefore intact, but any case the fork branch had added to that file is currently absent
 from `combined`:
 
-| File (upstream path) | Branch version | Cases in the branch copy |
-|---|---|---|
-| `apps/web/src/Searching.test.ts` | `pr/search-top-bar` | 22 |
-| `apps/web/src/components/structures/RoomSearchView.test.tsx` | `pr/search-top-bar` | 10 |
-| `apps/web/src/components/structures/RoomView.test.tsx` | `pr/search-top-bar` | 74 |
-| `apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx` | `pr/search-top-bar` | 25 |
-| `apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx` | `pr/search-top-bar` | 46 |
+| File (upstream path)                                                     | Branch version      | Cases in the branch copy |
+| ------------------------------------------------------------------------ | ------------------- | ------------------------ |
+| `apps/web/src/Searching.test.ts`                                         | `pr/search-top-bar` | 22                       |
+| `apps/web/src/components/structures/RoomSearchView.test.tsx`             | `pr/search-top-bar` | 10                       |
+| `apps/web/src/components/structures/RoomView.test.tsx`                   | `pr/search-top-bar` | 74                       |
+| `apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx` | `pr/search-top-bar` | 25                       |
+| `apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx`     | `pr/search-top-bar` | 46                       |
 
 Those counts are the whole file, most of which is upstream's own tests that already exist
 in the relocated copy. The fork-specific additions are the subset worth porting.
 
-**To port one:** diff the branch's copy against the version upstream had *before* it was
+**To port one:** diff the branch's copy against the version upstream had _before_ it was
 relocated, which isolates the fork's additions, then re-target them at the co-located file.
 
 ```bash

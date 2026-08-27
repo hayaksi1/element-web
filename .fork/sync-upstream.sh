@@ -1068,10 +1068,46 @@ fi
 # ------------------------------------------------- 6. verification gates
 
 GATES_PASSED=1
+TOLERATED=""
+
+# A gate that fails only inside node_modules is failing on somebody else's code. The
+# js-sdk is floated on purpose, so a bad commit upstream would otherwise wedge every
+# unattended run until a human pinned it - which is the one thing the float exists to
+# avoid. Tolerate that narrow case, and say so loudly enough that it cannot pass for a
+# pass. Anything with a single error outside node_modules still blocks the push.
+errors_are_all_vendored() {
+    local out="$1" lines
+    # A formatting failure is always one of our own files; a dependency cannot cause one.
+    # Bail before looking at type errors so a real fmt failure is never tolerated because
+    # the type errors alongside it happened to be vendored.
+    grep -q 'Format issues found' "$out" && return 1
+    # tsc colourises, so strip escapes first or every line reads as clean. Match on the
+    # error code rather than a path shape: nx prints `file:line:col - error TS…` and bare
+    # tsc prints `file(line,col): error TS…`, and only one of those was handled before.
+    lines="$(sed -r 's/\x1B\[[0-9;]*[mK]//g' "$out" | grep -E 'error TS[0-9]+' || true)"
+    [[ -n "$lines" ]] || return 1
+    ! printf '%s\n' "$lines" | grep -qv 'node_modules'
+}
+
 gate() {
     local name="$1"; shift
+    local out; out="$(mktemp)"
     log "gate: $name"
-    if "$@"; then ok "  PASS  $name"; else warn "  FAIL  $name"; GATES_PASSED=0; fi
+    if "$@" 2>&1 | tee "$out"; then
+        ok "  PASS  $name"
+    elif errors_are_all_vendored "$out"; then
+        local n; n="$(sed -r 's/\x1B\[[0-9;]*[mK]//g' "$out" | grep -cE 'error TS[0-9]+')"
+        warn "  TOLERATED  $name: $n error(s), every one inside node_modules"
+        sed -r 's/\x1B\[[0-9;]*[mK]//g' "$out" | grep -E 'error TS[0-9]+' | head -10 | while IFS= read -r l; do
+            warn "      $l"
+        done
+        warn "      Not fork code. Push allowed. Re-check when the dependency moves."
+        TOLERATED+="$name "
+    else
+        warn "  FAIL  $name"
+        GATES_PASSED=0
+    fi
+    rm -f "$out"
 }
 if (( SNAPSHOTS_STALE )); then
     warn "snapshots were conflicted and resolved to our side. If the test gate fails on a"
