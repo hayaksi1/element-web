@@ -199,6 +199,23 @@ resolve_lockfile() {
     return 0
 }
 
+# UA / AU mean exactly one side has the file at all: the other side never had it, so
+# there is no competing content and nothing for a human to arbitrate. Take the version
+# that exists. AA (both added, different content) is a real conflict and is left alone.
+resolve_one_sided_adds() {
+    local path code resolved=0
+    while read -r code path; do
+        case "$code" in
+            UA) git show ":3:$path" > "$path" 2>/dev/null && git add -- "$path" || continue ;;
+            AU) git show ":2:$path" > "$path" 2>/dev/null && git add -- "$path" || continue ;;
+            *)  continue ;;
+        esac
+        log "    took the only side that has $path ($code)"
+        resolved=1
+    done < <(git status --porcelain | awk '$1=="UA"||$1=="AU"{print $1, $2}')
+    return $(( ! resolved ))
+}
+
 # Jest/vitest .snap files are DERIVED from the components they render, so a hand-merged
 # snapshot is meaningless - the component is the truth. Resolve to our side and let the
 # test gate be the arbiter: if the merged UI really renders differently, the suite fails
@@ -532,6 +549,7 @@ merge_one() {
         resolve_listed_deletions || true
         resolve_lockfile || true
         resolve_snapshots || true
+        resolve_one_sided_adds || true
         local files; files="$(conflicting_files)"
         if [[ -z "$files" ]]; then
             # rerere and/or the deletion list resolved everything; conclude the merge.
