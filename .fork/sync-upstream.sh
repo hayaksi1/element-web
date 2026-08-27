@@ -29,6 +29,7 @@ INTEGRATION="${FORK_INTEGRATION_BRANCH:-combined/integration}"
 
 DRY_RUN=0
 NO_PUSH=0
+LOCKFILE_NEEDS_REGEN=0
 CONTINUE=0
 FEATURE_SUBSET=""
 
@@ -182,6 +183,20 @@ in_progress_rebase() {
 }
 
 conflicting_files() { git diff --name-only --diff-filter=U || true; }
+
+# pnpm-lock.yaml is generated, never hand-merged, and upstream churns it harder than any
+# other file in this repo. Resolve it to our side and let the `pnpm install` gate rewrite
+# it from the merged package.json files - that is the only authoritative resolution, and
+# it is why the install gate runs before anything is pushed.
+resolve_lockfile() {
+    local lock="pnpm-lock.yaml"
+    git diff --name-only --diff-filter=U | grep -qxF "$lock" || return 1
+    git show ":2:$lock" > "$lock"
+    git add -- "$lock"
+    log "    took our pnpm-lock.yaml; the install gate will regenerate it"
+    LOCKFILE_NEEDS_REGEN=1
+    return 0
+}
 
 # rerere only ever caches CONTENT conflicts. A modify/delete is a tree conflict, so it is
 # never replayed and would halt every rebuild forever. For paths explicitly listed as
@@ -494,6 +509,7 @@ merge_one() {
     save_state "merge-$kind" "$idx" "$branch"
     if ! git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch"; then
         resolve_listed_deletions || true
+        resolve_lockfile || true
         local files; files="$(conflicting_files)"
         if [[ -z "$files" ]]; then
             # rerere and/or the deletion list resolved everything; conclude the merge.
@@ -600,6 +616,9 @@ gate() {
     log "gate: $name"
     if "$@"; then ok "  PASS  $name"; else warn "  FAIL  $name"; GATES_PASSED=0; fi
 }
+if (( LOCKFILE_NEEDS_REGEN )); then
+    log "pnpm-lock.yaml conflicted during this rebuild; pnpm install will rewrite it"
+fi
 gate "pnpm install"   pnpm install
 gate "pnpm lint"      pnpm lint
 gate "pnpm test:unit" pnpm test:unit
