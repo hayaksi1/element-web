@@ -451,7 +451,7 @@ describe("uploadFile", () => {
 
     it("should keep the plaintext of an encrypted upload rather than the ciphertext", async () => {
         clearUploadedMedia();
-        jest.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
+        vi.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
         mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
         mocked(encrypt.encryptAttachment).mockResolvedValue({
             data: new ArrayBuffer(123),
