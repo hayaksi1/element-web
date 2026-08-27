@@ -1,0 +1,446 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:56:34 +0300
+Subject: [PATCH] Bring the fork's own code back under the lint rules
+
+Everything here was invisible while the desktop type check failed first, so it
+accumulated across several branches rather than being caught as it landed. The
+type errors are the interesting half.
+
+The space panel wrapped React's own setter to persist the collapsed preference,
+which both narrowed it to a value-only callback the child's prop type rejects
+and left a floating promise. Persisting from an effect keyed on the state
+instead hands the child the real setter, so the updater form works and the
+write is awaited-or-voided in one place; a first-render guard keeps it from
+writing back the value it just read.
+
+The jump-to-date control built its date-separator view model without the
+roomViewStore the model now requires, so it threw on render as well as failing
+the type check. It takes the store from the SDK context, like every other
+caller inside the room tree, rather than the global singleton, so an embedded
+room view gets its own. Its tests render the control bare and therefore now
+provide that context.
+
+The search session store moves to TypedEventEmitter, the file panel's option
+role gets the aria-selected it requires, and the remaining items are unused
+imports, a duplicate import, an array literal recreated on every render, and a
+restricted client call in a test that already had the mock to hand.
+---
+ apps/desktop/src/electron-main.ts             |  2 +-
+ apps/desktop/src/ipc.test.ts                  |  2 +-
+ .../structures/LoggedInView.test.tsx          |  6 +++--
+ .../components/structures/RoomView.test.tsx   | 24 +++++++++----------
+ .../views/right_panel/RoomFilesView.tsx       |  1 +
+ .../right_panel/RoomSearchJumpToDate.test.tsx | 17 +++++++++----
+ .../right_panel/RoomSearchJumpToDate.tsx      |  8 +++++--
+ .../views/right_panel/RoomSummaryCardView.tsx |  4 +++-
+ .../components/views/right_panel/UserInfo.tsx |  2 +-
+ .../views/rooms/RoomSearchHeader.tsx          |  8 +++++--
+ .../components/views/spaces/SpacePanel.tsx    | 16 +++++++------
+ apps/web/src/settings/ChatBackgrounds.test.ts |  5 ++--
+ apps/web/src/stores/SearchSessionStore.ts     |  9 ++++---
+ 13 files changed, 65 insertions(+), 39 deletions(-)
+
+diff --git a/apps/desktop/src/electron-main.ts b/apps/desktop/src/electron-main.ts
+index 2f95dff947..d025a91fd0 100644
+--- a/apps/desktop/src/electron-main.ts
++++ b/apps/desktop/src/electron-main.ts
+@@ -25,7 +25,7 @@ import {
+     screen,
+ } from "electron";
+ import * as Sentry from "@sentry/electron/main";
+-import path, { dirname } from "node:path";
++import path from "node:path";
+ import { URL, fileURLToPath } from "node:url";
+ 
+ import "./ipc.js";
+diff --git a/apps/desktop/src/ipc.test.ts b/apps/desktop/src/ipc.test.ts
+index 5bac4fb4d7..8331c39268 100644
+--- a/apps/desktop/src/ipc.test.ts
++++ b/apps/desktop/src/ipc.test.ts
+@@ -6,7 +6,7 @@ Please see LICENSE files in the repository root for full details.
+ */
+ 
+ import { expect, describe, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
+-import { desktopCapturer, type IpcMainInvokeEvent } from "electron";
++import { desktopCapturer } from "electron";
+ 
+ import { getConfig } from "./config.js";
+ import { consumeDisplayMediaCallback } from "./displayMediaCallback.js";
+diff --git a/apps/web/src/components/structures/LoggedInView.test.tsx b/apps/web/src/components/structures/LoggedInView.test.tsx
+index 70af086340..269a0e06ac 100644
+--- a/apps/web/src/components/structures/LoggedInView.test.tsx
++++ b/apps/web/src/components/structures/LoggedInView.test.tsx
+@@ -542,7 +542,9 @@ describe("<LoggedInView />", () => {
+                 await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
+             });
+ 
+-            await waitFor(() => expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(true));
++            await waitFor(() =>
++                expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(true),
++            );
+         });
+     });
+ 
+@@ -633,7 +635,7 @@ describe("<LoggedInView />", () => {
+         };
+ 
+         const getChatBody = (container: HTMLElement): HTMLElement =>
+-            container.querySelector(".mx_MatrixChat") as HTMLElement;
++            container.querySelector<HTMLElement>(".mx_MatrixChat")!;
+ 
+         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
+             mockChatBackgroundSettings({
+diff --git a/apps/web/src/components/structures/RoomView.test.tsx b/apps/web/src/components/structures/RoomView.test.tsx
+index ebd70e3b31..4e07609c7a 100644
+--- a/apps/web/src/components/structures/RoomView.test.tsx
++++ b/apps/web/src/components/structures/RoomView.test.tsx
+@@ -413,7 +413,7 @@ describe("RoomView", () => {
+ 
+             // Once the promise settles, onSearchUpdate fills `previews` and the dropdown row appears.
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("gemini hit")).toBeInTheDocument();
+                 return el;
+             });
+@@ -462,7 +462,7 @@ describe("RoomView", () => {
+             });
+ 
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("older hit")).toBeInTheDocument();
+                 return el;
+             });
+@@ -516,7 +516,7 @@ describe("RoomView", () => {
+             });
+ 
+             await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("gemini hit")).toBeInTheDocument();
+             });
+ 
+@@ -881,7 +881,7 @@ describe("RoomView", () => {
+ 
+             // Wait for the Telegram-style results dropdown to render its rows.
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("newer match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -970,7 +970,7 @@ describe("RoomView", () => {
+             });
+ 
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("older match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -1032,7 +1032,7 @@ describe("RoomView", () => {
+             });
+ 
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("older match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -1106,7 +1106,7 @@ describe("RoomView", () => {
+             });
+ 
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("older match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -1120,7 +1120,7 @@ describe("RoomView", () => {
+             // Now view $newer, return to the list — the anchor must FOLLOW to $newer, not stick on the first-clicked
+             // $older (the original "jumps to first result" bug).
+             const dropdown2 = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("newer match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -1183,7 +1183,7 @@ describe("RoomView", () => {
+             });
+ 
+             const dropdown = await waitFor(() => {
+-                const el = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++                const el = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+                 expect(within(el).getByText("older match")).toBeInTheDocument();
+                 return el;
+             });
+@@ -1448,7 +1448,7 @@ describe("RoomView", () => {
+             // the message — it does NOT end the search. The clear gate excludes it because it equals the durable
+             // stepping target. (Previously this ended the search; the racy guard-clearing that enabled it was the root
+             // of the "resets itself" bug, so the behaviour was intentionally changed.)
+-            const dropdown = container.querySelector(".mx_RoomSearchResults") as HTMLElement;
++            const dropdown = container.querySelector<HTMLElement>(".mx_RoomSearchResults")!;
+             await userEvent.click(within(dropdown).getByText("first"));
+             await flushPromises();
+             expect(roomViewRef.current!.state.search).toBeDefined();
+@@ -2394,7 +2394,7 @@ describe("RoomView", () => {
+             });
+ 
+             // Scope to the results panel: the term now also appears in the top-of-chat search bar input.
+-            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
++            const resultsPanel = container.querySelector<HTMLElement>(".mx_RoomView_searchResultsPanel")!;
+             const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
+             expect(searchResultTile).not.toBeNull();
+ 
+@@ -2467,7 +2467,7 @@ describe("RoomView", () => {
+             const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
+ 
+             // Scope to the results panel: the term now also appears in the top-of-chat search bar input.
+-            const resultsPanel = container.querySelector(".mx_RoomView_searchResultsPanel") as HTMLElement;
++            const resultsPanel = container.querySelector<HTMLElement>(".mx_RoomView_searchResultsPanel")!;
+             const searchResultTile = within(resultsPanel).getByText("search term").closest(".mx_EventTile");
+             expect(searchResultTile).not.toBeNull();
+ 
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+index 389154e463..c31bebf455 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+@@ -141,6 +141,7 @@ export function RoomFilesView({
+                             filterRefs.current[index] = el;
+                         }}
+                         role="option"
++                        aria-selected={category === activeCategory}
+                         selected={category === activeCategory}
+                         onClick={() => vm.toggleCategory(category)}
+                     >
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index 26953731c2..04346ee836 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -20,6 +20,7 @@ import dispatcher from "../../../dispatcher/dispatcher";
+ import { Action } from "../../../dispatcher/actions";
+ import { MatrixClientPeg } from "../../../MatrixClientPeg";
+ import { SDKContextClass } from "../../../contexts/SDKContextClass";
++import { SDKContext } from "../../../contexts/SDKContext";
+ 
+ vi.mock("../../../settings/SettingsStore");
+ vi.mock("../../../contexts/SDKContextClass", () => ({
+@@ -34,6 +35,10 @@ vi.mock("../../../contexts/SDKContextClass", () => ({
+ 
+ describe("RoomSearchJumpToDate", () => {
+     const roomId = "!room:example.org";
++
++    const withSdkContext = ({ children }: { children?: React.ReactNode }): React.ReactElement => (
++        <SDKContext.Provider value={SDKContextClass.instance}>{children}</SDKContext.Provider>
++    );
+     const mockTimestampToEvent = vi.fn();
+ 
+     const setFeatureEnabled = (enabled: boolean): void => {
+@@ -62,7 +67,7 @@ describe("RoomSearchJumpToDate", () => {
+     });
+ 
+     it("renders the calendar trigger when jump-to-date is enabled", () => {
+-        render(<RoomSearchJumpToDate roomId={roomId} />);
++        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+ 
+         expect(screen.getByTestId("search-jump-to-date-button")).toBeInTheDocument();
+     });
+@@ -70,7 +75,7 @@ describe("RoomSearchJumpToDate", () => {
+     it("renders nothing when jump-to-date is disabled", () => {
+         setFeatureEnabled(false);
+ 
+-        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />);
++        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+ 
+         expect(container).toBeEmptyDOMElement();
+     });
+@@ -78,7 +83,7 @@ describe("RoomSearchJumpToDate", () => {
+     it("jumps the current room to the picked date via a quick option", async () => {
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$event", origin_server_ts: 0 });
+ 
+-        render(<RoomSearchJumpToDate roomId={roomId} />);
++        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
+         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
+         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
+ 
+@@ -97,8 +102,10 @@ describe("RoomSearchJumpToDate", () => {
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
+         vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+ 
+-        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+-        rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
++        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />, {
++            wrapper: withSdkContext,
++        });
++        rerender(withSdkContext({ children: <RoomSearchJumpToDate key={roomB} roomId={roomB} /> }));
+ 
+         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
+         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
+index 0deed542bd..ad77ba867f 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.tsx
+@@ -5,7 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import React, { type JSX, useState } from "react";
++import React, { type JSX, useContext, useState } from "react";
+ import { IconButton } from "@vector-im/compound-web";
+ import CalendarIcon from "@vector-im/compound-design-tokens/assets/web/icons/calendar";
+ import {
+@@ -16,6 +16,7 @@ import {
+ 
+ import { _t } from "../../../languageHandler";
+ import { DateSeparatorViewModel } from "../../../viewmodels/room/timeline/DateSeparatorViewModel";
++import { SDKContext } from "../../../contexts/SDKContext";
+ 
+ interface Props {
+     /**
+@@ -37,7 +38,10 @@ interface Props {
+  * MSC3030).
+  */
+ export function RoomSearchJumpToDate({ roomId }: Props): JSX.Element | null {
+-    const vm = useCreateAutoDisposedViewModel(() => new DateSeparatorViewModel({ roomId, ts: Date.now() }));
++    const sdkContext = useContext(SDKContext);
++    const vm = useCreateAutoDisposedViewModel(
++        () => new DateSeparatorViewModel({ roomId, ts: Date.now(), roomViewStore: sdkContext.roomViewStore }),
++    );
+     const { jumpToEnabled } = useViewModel(vm);
+     const [open, setOpen] = useState(false);
+ 
+diff --git a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+index a4848d8add..7788c7cde4 100644
+--- a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+@@ -129,6 +129,8 @@ const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null
+     );
+ };
+ 
++const EMPTY_SENDERS: string[] = [];
++
+ const RoomSummaryCardView: React.FC<IProps> = ({
+     room,
+     permalinkCreator,
+@@ -138,7 +140,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
+     onSearchOrderChange,
+     focusRoomSearch,
+     searchTerm = "",
+-    searchSenders = [],
++    searchSenders = EMPTY_SENDERS,
+     searchOrder = SearchOrderBy.Recent,
+ }) => {
+     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
+diff --git a/apps/web/src/components/views/right_panel/UserInfo.tsx b/apps/web/src/components/views/right_panel/UserInfo.tsx
+index bd90b215be..4248bda805 100644
+--- a/apps/web/src/components/views/right_panel/UserInfo.tsx
++++ b/apps/web/src/components/views/right_panel/UserInfo.tsx
+@@ -202,7 +202,7 @@ const useMemberProfile = (member: Member): Member => {
+         if (!needsProfile) return;
+ 
+         let cancelled = false;
+-        userProfilesStore.getOrFetchProfile(userId).then((profile) => {
++        void userProfilesStore.getOrFetchProfile(userId).then((profile) => {
+             if (cancelled || !profile) return;
+ 
+             const memberWithProfile = new RoomMember("", userId);
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+index c6ec3ff06e..c0d84ec072 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+@@ -11,8 +11,12 @@ import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/searc
+ import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
+ import ListIcon from "@vector-im/compound-design-tokens/assets/web/icons/list-view";
+ import { type Room, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
+-import { Box, Flex } from "@element-hq/web-shared-components";
+-import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
++import {
++    Box,
++    Flex,
++    SearchMatchNavigation,
++    type SearchMatchNavigationViewModel,
++} from "@element-hq/web-shared-components";
+ 
+ import { _t } from "../../../languageHandler";
+ import { Key } from "../../../Keyboard";
+diff --git a/apps/web/src/components/views/spaces/SpacePanel.tsx b/apps/web/src/components/views/spaces/SpacePanel.tsx
+index e51d931d08..4d02e377e4 100644
+--- a/apps/web/src/components/views/spaces/SpacePanel.tsx
++++ b/apps/web/src/components/views/spaces/SpacePanel.tsx
+@@ -367,15 +367,17 @@ const SpacePanel: React.FC = () => {
+     const sdkContext = useContext(SDKContext);
+     const client = sdkContext.client!;
+     const [dragging, setDragging] = useState(false);
+-    const [isPanelCollapsed, setPanelCollapsedState] = useState(() =>
+-        SettingsStore.getValue("Spaces.isPanelCollapsed"),
+-    );
++    const [isPanelCollapsed, setPanelCollapsed] = useState(() => SettingsStore.getValue("Spaces.isPanelCollapsed"));
+     // Remember how the panel was left so that it comes back the same way, as the room list beside it
+     // already does. Expanding it is a deliberate act, not something to undo on every launch.
+-    const setPanelCollapsed = useCallback((collapsed: boolean): void => {
+-        setPanelCollapsedState(collapsed);
+-        SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, collapsed);
+-    }, []);
++    const isFirstRender = useRef(true);
++    useEffect(() => {
++        if (isFirstRender.current) {
++            isFirstRender.current = false;
++            return;
++        }
++        void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, isPanelCollapsed);
++    }, [isPanelCollapsed]);
+     const ref = useRef<HTMLDivElement>(null);
+     useLayoutEffect(() => {
+         if (ref.current) UIStore.instance.trackElementDimensions("SpacePanel", ref.current);
+diff --git a/apps/web/src/settings/ChatBackgrounds.test.ts b/apps/web/src/settings/ChatBackgrounds.test.ts
+index e431b0f10e..36ffac2534 100644
+--- a/apps/web/src/settings/ChatBackgrounds.test.ts
++++ b/apps/web/src/settings/ChatBackgrounds.test.ts
+@@ -114,7 +114,8 @@ describe("ChatBackgrounds", () => {
+         });
+ 
+         it("resolves an mxc URI to the same http url in both themes", () => {
+-            const client = clientWith("https://cdn.example/wall.png");
++            const toHttp = vi.fn().mockReturnValue("https://cdn.example/wall.png");
++            const client = { mxcUrlToHttp: toHttp } as unknown as MatrixClient;
+             const uploaded = {
+                 image: 'url("https://cdn.example/wall.png")',
+                 repeat: "no-repeat",
+@@ -124,7 +125,7 @@ describe("ChatBackgrounds", () => {
+                 light: uploaded,
+                 dark: uploaded,
+             });
+-            expect(client.mxcUrlToHttp).toHaveBeenCalled();
++            expect(toHttp).toHaveBeenCalled();
+         });
+ 
+         it("returns null when the mxc URI cannot be resolved to http", () => {
+diff --git a/apps/web/src/stores/SearchSessionStore.ts b/apps/web/src/stores/SearchSessionStore.ts
+index 97eaa93577..5412252592 100644
+--- a/apps/web/src/stores/SearchSessionStore.ts
++++ b/apps/web/src/stores/SearchSessionStore.ts
+@@ -5,8 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import EventEmitter from "events";
+-import { type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
++import { type ISearchResults, type SearchOrderBy, TypedEventEmitter } from "matrix-js-sdk/src/matrix";
+ 
+ import { type SearchMatch, type SearchResultPreview, type SearchScope } from "../Searching";
+ import defaultDispatcher from "../dispatcher/dispatcher";
+@@ -87,7 +86,11 @@ export interface SearchSession extends SearchSessionParams {
+  * component. This singleton is that owner: {@link RoomView} mirrors it into its render state and re-hydrates from it
+  * after a remount, while {@link RoomSearchNavigationViewModel} reads/writes the cursor here.
+  */
+-export class SearchSessionStore extends EventEmitter {
++type SearchSessionStoreHandlerMap = {
++    [SearchSessionStoreEvent.Update]: () => void;
++};
++
++export class SearchSessionStore extends TypedEventEmitter<SearchSessionStoreEvent, SearchSessionStoreHandlerMap> {
+     private static _instance: SearchSessionStore | null = null;
+ 
+     private session: SearchSession | null = null;
