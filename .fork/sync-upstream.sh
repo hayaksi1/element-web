@@ -67,7 +67,8 @@ Environment: FORK_REMOTE (default gh), FORK_UPSTREAM (default upstream),
              FORK_INTEGRATION_BRANCH (default combined).
 
 Exit codes: 0 ok - 1 error - 2 feature rebase conflict - 3 integration merge
-            conflict - 4 patch failed - 5 verification gate failed.
+            conflict - 4 patch failed - 5 verification gate failed - 6 a
+            contribution branch had drifted from the remote and was left out.
 EOF
 }
 
@@ -105,6 +106,9 @@ STILL_DROPPED="$GIT_COMMON/fork-sync-drops-final"
 # exercises is the dangerous kind: it stays authoritative long after the reason for it
 # has gone, and blinds the guard to a real drop on that path forever.
 ACCEPTED_USED="$GIT_COMMON/fork-sync-accepted-used"
+# Contribution branches whose local ref no longer matches the remote. They are left out
+# of the rebuild rather than merged stale, and the run refuses to push at the end.
+SKIPPED_CONTRIBS="$GIT_COMMON/fork-sync-skipped-contribs"
 # assert_branch_landed runs twice: once per merge, where it can only see that merge's
 # result, and once at the end against the finished tree. RECHECK selects the pass.
 RECHECK=0
@@ -889,6 +893,13 @@ ok "rebased ${#REBASED[@]} feature branch(es)"
 # ------------------------------------------- 4. rebuild the integration branch
 
 restore_rr_worktree
+# What the remote holds right now, read before the rebuild overwrites the local ref.
+# Section 6b grafts the rebuild onto this so the push fast-forwards instead of forcing.
+# The remote-tracking ref is the one that matters - it is what the push has to descend
+# from - and it is current: section 1 fetched "$REMOTE" --prune before any branch was
+# touched, which is why nothing here fetches again.
+PREV_INTEGRATION="$(git rev-parse --verify --quiet "refs/remotes/$REMOTE/$INTEGRATION" \
+                    || git rev-parse --verify --quiet "refs/heads/$INTEGRATION" || true)"
 RESUME_MERGE_KIND=""
 RESUME_MERGE_INDEX=0
 if (( CONTINUE )) && [[ "${PHASE:-}" == merge-* ]]; then
@@ -977,8 +988,70 @@ for i in "${!REBASED[@]}"; do
     skip_done feature "$i" && continue
     merge_one "${REBASED[$i]}" feature "$i"
 done
+# ------------------------------------ contribution branches must match their remote
+# Element's own maintainers push directly to these branches, because each one is the head
+# of an open pull request against element-hq. Merging a local ref that has fallen behind
+# its remote bakes the wrong revision of somebody else's review into the rebuild, and the
+# fork holds no copy of what it missed - it is the one loss here that is unrecoverable
+# from our side. So compare before merging, and leave a drifted branch out rather than
+# merge it stale.
+#
+# No fetch here on purpose: section 1 already ran `git fetch "$REMOTE" --prune`, before
+# the mirror moved and before any branch was rebased, so these remote-tracking refs are
+# the freshest this run will ever have.
+#
+# Direction is the whole point. BEHIND means a maintainer pushed work we do not have and
+# the fix is to take theirs; AHEAD means local commits nobody has published and the fix is
+# to publish or discard them. "They differ" alone tells a human nothing.
+check_contrib_current() {
+    # Two statements, not one: `local a=$1 b=$a` expands every argument before any of the
+    # assignments happen, so b would be built from whatever $a meant in the CALLER. Here
+    # that was the global `branch` the section 3 rebase loop leaves behind, which made
+    # every contribution branch get compared against the last feature branch instead.
+    local branch="$1"
+    local rref="refs/remotes/$REMOTE/$branch" counts ahead behind
+    if ! git show-ref --verify --quiet "$rref"; then
+        warn "  $branch: no $REMOTE counterpart to compare against; merging the local ref"
+        return 0
+    fi
+    [[ "$(git rev-parse "$branch")" == "$(git rev-parse "$rref")" ]] && return 0
+    counts="$(git rev-list --left-right --count "$branch...$rref")"
+    ahead="${counts%%[[:space:]]*}"
+    behind="${counts##*[[:space:]]}"
+    warn "  SKIPPING $branch: it has diverged from $REMOTE/$branch"
+    warn "      $ahead commit(s) only here, $behind commit(s) only on $REMOTE"
+    if (( behind > 0 && ahead == 0 )); then
+        warn "      Someone pushed to the pull request. Take their work:"
+        warn "          git fetch $REMOTE --prune && git branch -f $branch $REMOTE/$branch"
+    elif (( ahead > 0 && behind == 0 )); then
+        warn "      Local commits that were never published. This script never pushes a"
+        warn "      pr/* branch, so publish them yourself or drop them:"
+        warn "          git push $REMOTE $branch                 # if they belong on the PR"
+        warn "          git branch -f $branch $REMOTE/$branch    # if they are local cruft"
+    else
+        warn "      Both sides moved. Reconcile by hand, with a new commit on top -"
+        warn "      never rebase or amend a pr/* head; it is an open PR."
+    fi
+    printf '%s\t%s\t%s\n' "$branch" "$ahead" "$behind" >> "$SKIPPED_CONTRIBS"
+    return 1
+}
+
+: > "$SKIPPED_CONTRIBS"
+log "checking ${#CONTRIBS[@]} contribution branch(es) against $REMOTE"
+for b in "${CONTRIBS[@]}"; do
+    check_contrib_current "$b" || true
+done
+if [[ -s "$SKIPPED_CONTRIBS" ]]; then
+    warn "$(wc -l < "$SKIPPED_CONTRIBS" | tr -d ' ') contribution branch(es) will be left out of this rebuild"
+    warn "The rebuild continues without them so the rest of the run still reports, but"
+    warn "nothing will be pushed - see the end of the run."
+else
+    log "contribution branches: all ${#CONTRIBS[@]} match $REMOTE"
+fi
+
 for i in "${!CONTRIBS[@]}"; do
     skip_done contrib "$i" && continue
+    cut -f1 "$SKIPPED_CONTRIBS" | grep -qxF -- "${CONTRIBS[$i]}" && continue
     merge_one "${CONTRIBS[$i]}" contrib "$i"
 done
 ok "$INTEGRATION rebuilt: $(git rev-parse --short HEAD)"
@@ -1391,7 +1464,96 @@ restore_branch() {
     return 0
 }
 
+# The invariant already holds three ways over: REBASED is filled only from features.txt,
+# validate_manifests dies on a pr/* entry in that file, and CONTRIBS is never handed to a
+# push. None of that is visible from here, though, so an edit to the push list below could
+# start pushing open pull request heads and nothing in the script would object. State the
+# rule where the pushing happens, and let it fail loudly rather than silently.
+assert_no_pr_pushes() {
+    local ref
+    for ref in "$MIRROR" "${REBASED[@]}" "$INTEGRATION"; do
+        case "$ref" in
+            pr/*) die "refusing to push '$ref'. A pr/* branch is the head of an open upstream
+pull request: force-pushing one detaches its review threads and re-fires its CI, and it
+carries commits from Element's maintainers that this fork has no other copy of.
+
+Whatever put it in the push list is the bug. The only inputs are .fork/features.txt and
+the REBASED array; contribution branches belong in .fork/contrib.txt and are merged, never
+pushed." ;;
+        esac
+    done
+}
+assert_no_pr_pushes
+
+# A rebuild that left a branch out is not the thing this fork ships, however green its
+# gates are. Report it at the end rather than at the merge, so one drifted branch does not
+# cost the run everything it would have told us - but never push it.
+if [[ -s "$SKIPPED_CONTRIBS" ]]; then
+    echo >&2
+    printf '%s========== CONTRIBUTION BRANCHES LEFT OUT OF THIS REBUILD ==========%s\n' "$RED" "$RST" >&2
+    while IFS=$'\t' read -r b ahead behind; do
+        [[ -n "$b" ]] || continue
+        printf '  %-48s %s ahead / %s behind %s\n' "$b" "$ahead" "$behind" "$REMOTE" >&2
+    done < "$SKIPPED_CONTRIBS"
+    cat >&2 <<EOF
+
+Each had drifted from $REMOTE, so merging it would have baked a stale revision of an open
+pull request into $INTEGRATION. The per-branch advice is earlier in this log.
+
+$INTEGRATION was built without them and is NOT what the fork ships. Nothing was pushed.
+Reconcile each branch above, then re-run.
+EOF
+    clear_state
+    restore_branch || true
+    exit 6
+fi
+
+# ------------------------------------- 6b. publish combined as a fast-forward
+# The rebuild starts from $MIRROR and shares no tip with what the remote holds, so the
+# push used to need --force-with-lease. Forcing means every previous $INTEGRATION is
+# reachable only from somebody's local reflog. Keep the rebuild's TREE verbatim and give
+# it two parents - what the remote holds now, and the rebuild itself - and the result
+# fast-forwards. The tree is byte-identical either way, so nothing that was built, gated
+# or verified above is affected; only the ancestry changes.
+publish_integration() {
+    local tree new
+    git update-ref refs/fork-sync/rebuild "$(git rev-parse "$INTEGRATION")"
+    if [[ -z "$PREV_INTEGRATION" ]]; then
+        log "no previous $INTEGRATION on $REMOTE or locally; publishing the rebuild as-is"
+        return 0
+    fi
+    if git merge-base --is-ancestor "$PREV_INTEGRATION" "$INTEGRATION"; then
+        log "$INTEGRATION already descends from ${PREV_INTEGRATION:0:10}; no graft needed"
+        return 0
+    fi
+    tree="$(git rev-parse "$INTEGRATION^{tree}")"
+    new="$(git commit-tree "$tree" -p "$PREV_INTEGRATION" -p refs/fork-sync/rebuild \
+        -m "Rebuild $INTEGRATION on $MIRROR $(git rev-parse --short "$MIRROR")" \
+        -m "Same tree as the rebuild, with the previous $INTEGRATION as first parent so the
+branch fast-forwards. $INTEGRATION is still disposable and still built from scratch by
+.fork/sync-upstream.sh; this only keeps the history it replaces reachable.")" \
+        || die "could not create the fast-forward commit for $INTEGRATION"
+    git update-ref "refs/heads/$INTEGRATION" "$new" \
+        || die "could not move $INTEGRATION to the fast-forward commit"
+    # The whole point is that publishing changed the ancestry and nothing else. If the
+    # trees ever differ, something grafted the wrong commit and the push must not happen.
+    if ! git diff --quiet refs/fork-sync/rebuild "$INTEGRATION"; then
+        die "$INTEGRATION does not have the rebuild's tree after grafting. Refusing to push.
+Inspect with:  git diff refs/fork-sync/rebuild $INTEGRATION"
+    fi
+    SYNC_TAG="sync/$(date +%Y%m%d-%H%M)"
+    if git tag "$SYNC_TAG" "$new" 2>/dev/null; then
+        log "tagged $SYNC_TAG"
+    else
+        warn "could not create tag $SYNC_TAG (it probably already exists); carrying on"
+        SYNC_TAG=""
+    fi
+    ok "$INTEGRATION published as a fast-forward from ${PREV_INTEGRATION:0:10}"
+}
+SYNC_TAG=""
+
 if (( NO_PUSH )); then
+    publish_integration
     log "--no-push given; leaving everything local"
 elif (( ! GATES_PASSED )); then
     warn "NOT pushing: verification gates failed. Fix them, then re-run."
@@ -1401,13 +1563,21 @@ elif (( ! GATES_PASSED )); then
     restore_branch || true
     exit 5
 else
+    publish_integration
     log "pushing $MIRROR (fast-forward), feature branches and $INTEGRATION"
     push_failed=0
     git push "$REMOTE" "$MIRROR:$MIRROR" || push_failed=1
     for branch in "${REBASED[@]}"; do
         git push --force-with-lease "$REMOTE" "$branch:$branch" || push_failed=1
     done
-    git push --force-with-lease "$REMOTE" "$INTEGRATION:$INTEGRATION" || push_failed=1
+    # No lease and no force: 6b made this a fast-forward. A rejection here means the
+    # remote moved after section 1 fetched it, and re-running is the right answer.
+    git push "$REMOTE" "$INTEGRATION:$INTEGRATION" || push_failed=1
+    # One tag by name, never --tags: section 1 fetches upstream with --tags, so every
+    # element-hq release tag is in refs/tags and --tags would push the lot to the fork.
+    if [[ -n "$SYNC_TAG" ]]; then
+        git push "$REMOTE" "refs/tags/$SYNC_TAG" || push_failed=1
+    fi
     # Contribution branches are NEVER pushed here: they are open-PR heads.
     if (( push_failed )); then
         clear_state
