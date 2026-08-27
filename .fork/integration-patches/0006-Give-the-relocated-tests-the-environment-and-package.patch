@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
 Date: Thu, 27 Aug 2026 20:19:56 +0300
-Subject: [PATCH 06/10] Give the relocated tests the environment and packages
- they need
+Subject: [PATCH] Give the relocated tests the environment and packages they
+ need
 
 Three of them needed a DOM. apps/web defaults to environment: "node", and
 a file opts in with a per-file pragma; without it, query.test.ts and
@@ -22,7 +22,6 @@ omits the hook the file calls fixes nothing.
 
 Fork-Feature: fork-tooling
 ---
- .fork/sync-upstream.sh                                |  9 ++-------
  .../views/right_panel/RoomFilesView.test.tsx          |  2 +-
  .../views/right_panel/RoomSearchJumpToDate.test.tsx   | 11 +++++------
  .../views/right_panel/RoomSearchOrderToggle.test.tsx  |  2 +-
@@ -32,35 +31,8 @@ Fork-Feature: fork-tooling
  apps/web/src/slash-commands/spoiler.test.ts           |  2 ++
  apps/web/src/toasts/InRoomSearchNudgeToast.test.ts    |  2 ++
  apps/web/src/utils/i18n-helpers.test.ts               |  2 +-
- 10 files changed, 18 insertions(+), 19 deletions(-)
+ 9 files changed, 16 insertions(+), 12 deletions(-)
 
-diff --git a/.fork/sync-upstream.sh b/.fork/sync-upstream.sh
-index 6e13f2e1cd..4d0fbfafe0 100755
---- a/.fork/sync-upstream.sh
-+++ b/.fork/sync-upstream.sh
-@@ -894,8 +894,8 @@ if (( ${#PATCHES[@]} )); then
-     log "applying ${#PATCHES[@]} integration patch(es)"
-     for p in "${PATCHES[@]}"; do
-         log "  $(basename "$p")"
--        if git apply --check "$p" 2>/dev/null; then
--            git apply "$p"
-+        if git apply --index --check "$p" 2>/dev/null; then
-+            git apply --index "$p"
-         elif git apply --3way --check "$p" 2>/dev/null; then
-             git apply --3way "$p"
-         else
-@@ -913,11 +913,6 @@ Regenerate it from the current tree, or delete it if it is obsolete:
- EOF
-             exit 4
-         fi
--        # Stage ONLY what the patch touches. `git add -A` would sweep in any unrelated
--        # untracked file sitting in the tree and publish it.
--        while IFS= read -r pf; do
--            [[ -n "$pf" ]] && git add -- "$pf"
--        done < <(git apply --numstat -z "$p" 2>/dev/null | tr '\0' '\n' | awk 'NR%3==0')
-         git commit --quiet -m "Apply integration patch $(basename "$p")" \
-                             -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
-     done
 diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
 index 6dc9fcbef4..eefd892a27 100644
 --- a/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
