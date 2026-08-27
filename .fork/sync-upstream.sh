@@ -211,7 +211,7 @@ resolve_rr_cache_conflicts() {
         fi
         log "    kept our side of the rerere cache artifact $path"
         resolved=1
-    done < <(git diff --name-only --diff-filter=U || true)
+    done <<< "$(git diff --name-only --diff-filter=U || true)"
     return $(( ! resolved ))
 }
 
@@ -244,7 +244,7 @@ resolve_one_sided_adds() {
         git add -- "$path"
         log "    took the only side that has $path ($code)"
         resolved=1
-    done < <(git status --porcelain | awk '$1=="UA"||$1=="AU"{print $1, $2}')
+    done <<< "$(git status --porcelain | awk '$1=="UA"||$1=="AU"{print $1, $2}')"
     return $(( ! resolved ))
 }
 
@@ -258,7 +258,7 @@ resolve_snapshots() {
         case "$f" in
             *__snapshots__/*.snap|*.snap)
                 git show ":2:$f" > "$f" 2>/dev/null || continue
-                git add -- "$f"
+                git add -- "$f" || die "could not stage $f; another git process holds the index lock"
                 log "    took our $f; regenerate with the test runner if the suite disagrees"
                 SNAPSHOTS_STALE=1
                 resolved=1
@@ -270,13 +270,13 @@ resolve_snapshots() {
                 # branch's - it is at least the newer of the two - and flag the whole set for
                 # regeneration rather than pretend the pixels are settled.
                 git show ":3:$f" > "$f" 2>/dev/null || continue
-                git add -- "$f"
+                git add -- "$f" || die "could not stage $f; another git process holds the index lock"
                 log "    took the branch's $f; every playwright baseline needs regenerating"
                 SNAPSHOTS_STALE=1
                 resolved=1
                 ;;
         esac
-    done < <(git diff --name-only --diff-filter=U)
+    done <<< "$(git diff --name-only --diff-filter=U)"
     return $(( ! resolved ))
 }
 
@@ -298,7 +298,7 @@ resolve_listed_deletions() {
             log "    accepted upstream's deletion of $path (listed in accept-upstream-deletions.txt)"
             resolved=1
         fi
-    done < <(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2}')
+    done <<< "$(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2}')"
     return $(( ! resolved ))
 }
 
@@ -410,7 +410,7 @@ resolve_relocations() {
             conflicted=1
         fi
         rm -rf "$tmp"
-    done < <(git status --porcelain | awk '$1 == "DU" { print $2 }')
+    done <<< "$(git status --porcelain | awk '$1 == "DU" { print $2 }')"
 
     # A modify/delete is a tree conflict and rerere never caches one, which is why this
     # class of conflict used to halt every rebuild forever. Having turned it into a
@@ -426,7 +426,7 @@ resolve_relocations() {
                 log "    rerere replayed a previous resolution for $f"
                 resolved=1
             fi
-        done < <(git diff --name-only --diff-filter=U || true)
+        done <<< "$(git diff --name-only --diff-filter=U || true)"
     fi
     return $(( ! resolved ))
 }
@@ -481,7 +481,7 @@ assert_branch_landed() {
             warn "          $branch changed $f and the merge kept none of it"
             lost=1
         fi
-    done < <(git diff --name-only "$base" "$branch")
+    done <<< "$(git diff --name-only "$base" "$branch")"
 
     (( lost == 0 )) && return 0
 
