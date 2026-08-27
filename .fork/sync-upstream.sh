@@ -263,6 +263,18 @@ resolve_snapshots() {
                 SNAPSHOTS_STALE=1
                 resolved=1
                 ;;
+            */playwright/snapshots/*.png)
+                # A screenshot baseline cannot be merged, and on the integration branch NEITHER
+                # side is right: the combined UI carries every branch's visual change, so any
+                # baseline recorded against one of them alone is stale by construction. Take the
+                # branch's - it is at least the newer of the two - and flag the whole set for
+                # regeneration rather than pretend the pixels are settled.
+                git show ":3:$f" > "$f" 2>/dev/null || continue
+                git add -- "$f"
+                log "    took the branch's $f; every playwright baseline needs regenerating"
+                SNAPSHOTS_STALE=1
+                resolved=1
+                ;;
         esac
     done < <(git diff --name-only --diff-filter=U)
     return $(( ! resolved ))
@@ -936,6 +948,27 @@ Fix each file, then:
 and re-run. Nothing has been pushed."
 }
 assert_no_conflict_markers
+
+# ------------------------------------------- 5c. dead-test-name guard
+
+# A branch that adds a test at the old apps/web/test layout gets pulled into apps/web/src by
+# git's directory-rename detection, which moves the file but keeps its name. The vitest
+# project collects src/**/*.test.{ts,tsx}, so an X-test.ts lands in the right directory under
+# a name nothing runs: present in the tree, counted by every ancestry check, never executed.
+DEAD_TESTS="$(git ls-files -- 'apps/web/src/**-test.ts' 'apps/web/src/**-test.tsx' 2>/dev/null || true)"
+if [[ -n "$DEAD_TESTS" ]]; then
+    echo >&2
+    printf '%s============== TEST FILES NOTHING WILL RUN ==============%s\n' "$RED" "$RST" >&2
+    printf '%s' "$(indent "$DEAD_TESTS")" >&2
+    cat >&2 <<'EOF'
+
+These sit under apps/web/src but keep the old -test suffix, and
+apps/web/vitest.config.ts only collects src/**/*.test.{ts,tsx}. Rename each to
+X.test.ts and fix up the relative imports it carried over from the old layout,
+then add the result to .fork/integration-patches/ so the next rebuild keeps it.
+EOF
+    exit 4
+fi
 
 # ------------------------------------------- 5b. dropped-content report
 
