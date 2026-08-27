@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:54:11 +0300
+Subject: [PATCH] Pin the shared-media panel's own continuation rule
+
+The shared-media redesign suppresses continuations for the File timeline in
+every layout, and says so where it does it: a filtered file list is not a
+conversation, so each row keeps its own avatar and sender. The upstream case
+still asserted that bubble layout lets continuations through, which is the
+behaviour the early return exists to prevent.
+
+The assertion never failed before because the file it lives in sat at a path
+no runner collected. Co-locating the tests is what surfaced it, so this is an
+old contradiction being read for the first time rather than a new regression.
+
+Recorded here so the integration branch is honest about what the fork does.
+The branch that introduced the behaviour still carries the upstream assertion
+and will fail CI there until it takes the same change.
+---
+ .../settings/tabs/user/PreferencesUserSettingsTab.test.tsx}     | 0
+ .../__snapshots__/PreferencesUserSettingsTab.test.tsx.snap}     | 0
+ .../room/timeline/event-tile/EventTileViewModel.test.ts         | 2 +-
+ 3 files changed, 1 insertion(+), 1 deletion(-)
+ rename apps/web/{test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx => src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx} (100%)
+ rename apps/web/{test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap => src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap} (100%)
+
+diff --git a/apps/web/test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx b/apps/web/src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx
+similarity index 100%
+rename from apps/web/test/unit-tests/components/views/settings/tabs/user/PreferencesUserSettingsTab-test.tsx
+rename to apps/web/src/components/views/settings/tabs/user/PreferencesUserSettingsTab.test.tsx
+diff --git a/apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap b/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+similarity index 100%
+rename from apps/web/test/unit-tests/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab-test.tsx.snap
+rename to apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+diff --git a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
+index 379ff8103c..7654c1327a 100644
+--- a/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
++++ b/apps/web/src/viewmodels/room/timeline/event-tile/EventTileViewModel.test.ts
+@@ -300,7 +300,7 @@ describe("EventTileViewModel", () => {
+         );
+ 
+         expect(fileSnapshot.event.isContinuation).toBe(false);
+-        expect(bubbleSnapshot.event.isContinuation).toBe(true);
++        expect(bubbleSnapshot.event.isContinuation).toBe(false);
+     });
+ 
+     it("derives line classes from event type, message type, and media eligibility", () => {
