@@ -15,12 +15,7 @@ import { RoomMember } from "matrix-js-sdk/src/matrix";
 import userEvent from "@testing-library/user-event";
 import { stubClient } from "test-utils";
 
-import {
-    determineAvatarPosition,
-    ReadReceiptGroup,
-    ReadReceiptPerson,
-    readReceiptTooltip,
-} from "./ReadReceiptGroup";
+import { determineAvatarPosition, ReadReceiptGroup, ReadReceiptPerson, readReceiptTooltip } from "./ReadReceiptGroup";
 import * as languageSettings from "../../../i18n/settings";
 import dispatcher from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";
@@ -212,7 +207,7 @@ describe("ReadReceiptGroup", () => {
 
     describe("<ReadReceiptGroup />", () => {
         stubClient();
-        mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
+        vi.mocked(formatDate).mockReturnValue("==MOCK FORMATTED DATE==");
 
         const receipts = ["@alice:example.org", "@bob:example.org", "@carol:example.org"].map((userId) => ({
             userId,

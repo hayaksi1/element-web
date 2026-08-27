@@ -727,7 +727,7 @@ describe("MessageContextMenu quick actions", () => {
         ["React", "React"],
         ["Edit", "Edit"],
     ])("shows the %s option when showQuickActions is set", (_name, label) => {
-        mocked(canEditContent).mockReturnValue(true);
+        vi.mocked(canEditContent).mockReturnValue(true);
         const eventContent = createMessageEventContent("hello");
 
         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true, canReact: true });
@@ -736,7 +736,7 @@ describe("MessageContextMenu quick actions", () => {
     });
 
     it("does not show the quick actions without showQuickActions or a right click", () => {
-        mocked(canEditContent).mockReturnValue(true);
+        vi.mocked(canEditContent).mockReturnValue(true);
         const eventContent = createMessageEventContent("hello");
 
         createMenuWithContent(eventContent, {}, { canSendMessages: true, canReact: true });
@@ -749,7 +749,7 @@ describe("MessageContextMenu quick actions", () => {
     // Copy and quote act on a text selection the user made before right clicking, so they must stay behind
     // `rightClick` rather than riding along with the collapsed quick actions.
     it("does not show copy or quote when only showQuickActions is set", () => {
-        mocked(getSelectedText).mockReturnValue("hello");
+        vi.mocked(getSelectedText).mockReturnValue("hello");
         const eventContent = createMessageEventContent("hello");
 
         createMenuWithContent(eventContent, { showQuickActions: true }, { canSendMessages: true });

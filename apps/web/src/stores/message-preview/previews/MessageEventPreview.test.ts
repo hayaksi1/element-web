@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { vi, describe, it, expect, beforeAll } from "vitest";
 import { RelationType } from "matrix-js-sdk/src/matrix";
 import { mkEvent, stubClient } from "test-utils";
 
@@ -45,7 +45,7 @@ describe("MessageEventPreview", () => {
                 room: "!room:example.com",
                 type: "m.room.message",
             });
-            jest.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
+            vi.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
 
             expect(preview.getTextFor(event)).toBe(`${userId}: Unable to decrypt message`);
         });

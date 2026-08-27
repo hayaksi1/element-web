@@ -135,7 +135,7 @@ describe("MemberListStore", () => {
         });
         // Lazy loading means the client may hold no User for a member at all, which is the only
         // thing that ever populates RoomMember.user.
-        mocked(client.getUser).mockReturnValue(null);
+        vi.mocked(client.getUser).mockReturnValue(null);
 
         const { joined } = await store.loadMemberList(roomId);
         expect(joined.map((m) => m.userId)).toEqual([doris, alice, bob, charlie]);

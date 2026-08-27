@@ -204,7 +204,7 @@ describe("Store", () => {
     let store: Store;
 
     beforeAll(() => {
-        store = Store.initialize(undefined);
+        store = Store.instance ?? Store.initialize(undefined);
     });
 
     beforeEach(() => {

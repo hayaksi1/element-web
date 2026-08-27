@@ -5,9 +5,12 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect } from "vitest";
 import { type IContent } from "matrix-js-sdk/src/matrix";
 
-import { setUpCommandTest } from "./utils";
+import { setUpCommandTest } from "./__mocks__";
 
 describe("/spoiler", () => {
     const roomId = "!room:example.com";

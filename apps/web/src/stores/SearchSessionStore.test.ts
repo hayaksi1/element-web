@@ -5,12 +5,13 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
-import { SearchSessionStore, SearchSessionStoreEvent } from "../../../src/stores/SearchSessionStore";
-import { type SearchMatch, SearchScope } from "../../../src/Searching";
-import defaultDispatcher from "../../../src/dispatcher/dispatcher";
-import { Action } from "../../../src/dispatcher/actions";
+import { SearchSessionStore, SearchSessionStoreEvent } from "./SearchSessionStore";
+import { type SearchMatch, SearchScope } from "../Searching";
+import defaultDispatcher from "../dispatcher/dispatcher";
+import { Action } from "../dispatcher/actions";
 
 const match = (roomId: string, eventId: string): SearchMatch => ({ roomId, eventId });
 
@@ -62,7 +63,7 @@ describe("SearchSessionStore", () => {
         });
 
         it("emits Update when a session starts", () => {
-            const listener = jest.fn();
+            const listener = vi.fn();
             store.on(SearchSessionStoreEvent.Update, listener);
             start();
             expect(listener).toHaveBeenCalledTimes(1);
@@ -94,7 +95,7 @@ describe("SearchSessionStore", () => {
         });
 
         it("is a no-op when there is no active session", () => {
-            const listener = jest.fn();
+            const listener = vi.fn();
             store.on(SearchSessionStoreEvent.Update, listener);
             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
             expect(store.hasActiveSession()).toBe(false);
@@ -130,7 +131,7 @@ describe("SearchSessionStore", () => {
         it("moves the cursor and emits Update", () => {
             start();
             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1"), match("!b:server", "$2")] });
-            const listener = jest.fn();
+            const listener = vi.fn();
             store.on(SearchSessionStoreEvent.Update, listener);
             store.setCurrentMatchIndex(1);
             expect(store.currentMatchIndex).toBe(1);
@@ -190,7 +191,7 @@ describe("SearchSessionStore", () => {
 
         it("does not emit Update when toggled (it is not view state)", () => {
             start();
-            const listener = jest.fn();
+            const listener = vi.fn();
             store.on(SearchSessionStoreEvent.Update, listener);
             store.beginSteppingJump("$e");
             store.consumeSteppingJump();

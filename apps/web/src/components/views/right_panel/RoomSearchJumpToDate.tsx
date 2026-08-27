@@ -5,7 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import React, { type JSX, useState } from "react";
+import React, { type JSX, useContext, useState } from "react";
 import { IconButton } from "@vector-im/compound-web";
 import CalendarIcon from "@vector-im/compound-design-tokens/assets/web/icons/calendar";
 import {
@@ -16,6 +16,7 @@ import {
 
 import { _t } from "../../../languageHandler";
 import { DateSeparatorViewModel } from "../../../viewmodels/room/timeline/DateSeparatorViewModel";
+import { SDKContext } from "../../../contexts/SDKContext";
 
 interface Props {
     /**
@@ -37,7 +38,10 @@ interface Props {
  * MSC3030).
  */
 export function RoomSearchJumpToDate({ roomId }: Props): JSX.Element | null {
-    const vm = useCreateAutoDisposedViewModel(() => new DateSeparatorViewModel({ roomId, ts: Date.now() }));
+    const sdkContext = useContext(SDKContext);
+    const vm = useCreateAutoDisposedViewModel(
+        () => new DateSeparatorViewModel({ roomId, ts: Date.now(), roomViewStore: sdkContext.roomViewStore }),
+    );
     const { jumpToEnabled } = useViewModel(vm);
     const [open, setOpen] = useState(false);
 

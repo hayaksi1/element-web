@@ -5,9 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
+import { describe, it, expect } from "vitest";
 import { MatrixError } from "matrix-js-sdk/src/matrix";
 
-import { getAliasCreationErrorMessage } from "../../../../../src/components/views/room_settings/AliasSettings";
+import { getAliasCreationErrorMessage } from "./AliasSettings";
 
 describe("getAliasCreationErrorMessage", () => {
     it.each([

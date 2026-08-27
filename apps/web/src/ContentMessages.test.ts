@@ -441,7 +441,7 @@ describe("uploadFile", () => {
 
     it("should keep the uploaded file so it does not have to be downloaded again", async () => {
         clearUploadedMedia();
-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
+        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
         const file = new Blob(["hello"]);
 
         await uploadFile(client, "!roomId:server", file);
@@ -452,8 +452,8 @@ describe("uploadFile", () => {
     it("should keep the plaintext of an encrypted upload rather than the ciphertext", async () => {
         clearUploadedMedia();
         vi.spyOn(client.getCrypto()!, "isEncryptionEnabledInRoom").mockResolvedValue(true);
-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
-        mocked(encrypt.encryptAttachment).mockResolvedValue({
+        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/encrypted" });
+        vi.mocked(encrypt.encryptAttachment).mockResolvedValue({
             data: new ArrayBuffer(123),
             info: {} as IEncryptedFile,
         });
