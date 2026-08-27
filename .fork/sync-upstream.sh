@@ -188,16 +188,20 @@ conflicting_files() { git diff --name-only --diff-filter=U || true; }
 # "upstream deleted this for good", take the deletion and move on. Everything else still
 # stops the run and asks a human.
 resolve_listed_deletions() {
-    local path status resolved=0
+    local path resolved=0 allowed
     [[ -f "$DELETIONS_FILE" ]] || return 0
-    while IFS= read -r path status; do
-        [[ "$status" == "DU" || "$status" == "UD" ]] || continue
-        if grep -qxF -- "$path" <(grep -v '^[[:space:]]*#' "$DELETIONS_FILE" | grep -v '^[[:space:]]*$'); then
-            git rm -q --ignore-unmatch -- "$path" 2>/dev/null || git rm -q --cached --ignore-unmatch -- "$path"
+    allowed="$(grep -v '^[[:space:]]*#' "$DELETIONS_FILE" | grep -v '^[[:space:]]*$' || true)"
+    [[ -z "$allowed" ]] && return 1
+    # NB: plain `read -r path`, not `IFS= read` - the latter disables field splitting, so
+    # the whole line lands in $path and nothing ever matches.
+    while read -r path; do
+        [[ -n "$path" ]] || continue
+        if printf '%s\n' "$allowed" | grep -qxF -- "$path"; then
+            git rm -q --force --ignore-unmatch -- "$path"
             log "    accepted upstream's deletion of $path (listed in accept-upstream-deletions.txt)"
             resolved=1
         fi
-    done < <(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2, $1}')
+    done < <(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2}')
     return $(( ! resolved ))
 }
 
