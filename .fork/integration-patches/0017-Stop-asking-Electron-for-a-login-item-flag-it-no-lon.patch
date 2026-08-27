@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:47:21 +0300
+Subject: [PATCH] Stop asking Electron for a login-item flag it no longer has
+
+`openAsHidden` was deprecated in Electron 43 and removed in 44, which this app
+pins, so the property no longer exists on the login-item settings type and the
+desktop type check fails on it. It stopped the lint run at its first step, which
+left every later gate unmeasured rather than passing.
+
+Nothing is lost by dropping it. It had already been a no-op since macOS 13, and
+that is precisely why the minimised behaviour was moved to shouldStartHidden,
+which reads the stored preference alongside wasOpenedAtLogin instead. Windows
+still carries the flag the only way it ever worked there, as a --hidden
+argument.
+---
+ apps/desktop/src/auto-launch.test.ts | 6 +++---
+ apps/desktop/src/auto-launch.ts      | 9 +++++----
+ 2 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/apps/desktop/src/auto-launch.test.ts b/apps/desktop/src/auto-launch.test.ts
+index e1d13bff2f..79466e3651 100644
+--- a/apps/desktop/src/auto-launch.test.ts
++++ b/apps/desktop/src/auto-launch.test.ts
+@@ -110,7 +110,7 @@ describe("AutoLaunch", () => {
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", false);
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: false }),
++                expect.objectContaining({ openAtLogin: true, args: [] }),
+             );
+         });
+ 
+@@ -119,7 +119,7 @@ describe("AutoLaunch", () => {
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", true);
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true, args: ["--hidden"] }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+@@ -336,7 +336,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.migrate();
+ 
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+diff --git a/apps/desktop/src/auto-launch.ts b/apps/desktop/src/auto-launch.ts
+index 666d59f54f..291b115cbe 100644
+--- a/apps/desktop/src/auto-launch.ts
++++ b/apps/desktop/src/auto-launch.ts
+@@ -85,8 +85,9 @@ function linuxDesktopEntry(minimised: boolean): string {
+  * Whether the app should start hidden (minimised to tray) for this launch.
+  *
+  * On Windows/Linux the login item passes `--hidden`, surfaced here as `argsHidden`. On macOS the
+- * native loginItem API cannot pass arguments and `openAsHidden` is a no-op on macOS 13+, so we
+- * instead derive it from `wasOpenedAtLogin` plus the stored minimised preference.
++ * native loginItem API cannot pass arguments and has no minimised flag (`openAsHidden` was a no-op
++ * on macOS 13+ and Electron 44 removed it), so we instead derive it from `wasOpenedAtLogin` plus
++ * the stored minimised preference.
+  */
+ export function shouldStartHidden(argsHidden: boolean): boolean {
+     if (argsHidden) return true;
+@@ -125,7 +126,8 @@ export class AutoLaunch {
+      * On Windows a Squirrel install lives in a versioned `app-x.y.z` directory, so the login item
+      * must point at the stable `Update.exe` (`--processStart`) rather than the versioned executable,
+      * otherwise it breaks on the next update. MSI installs have no `Update.exe`, so there we launch
+-     * the executable directly (its location is stable across updates). `openAsHidden` is macOS-only.
++     * the executable directly (its location is stable across updates). macOS carries no minimised
++     * flag here; {@link shouldStartHidden} derives it from the stored preference instead.
+      *
+      * @param minimised - whether the app should start hidden/minimised.
+      */
+@@ -146,7 +148,6 @@ export class AutoLaunch {
+ 
+         return {
+             openAtLogin: true,
+-            openAsHidden: minimised, // macOS-only, no-op on macOS 13+ (see shouldStartHidden); ignored on Linux
+             args: minimised ? ["--hidden"] : [],
+         };
+     }
