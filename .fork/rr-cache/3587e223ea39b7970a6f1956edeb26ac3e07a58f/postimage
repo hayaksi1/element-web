@@ -222,12 +222,12 @@ describe("<SpacePanel />", () => {
 
         // Restore only these spies: the suite mocks MatrixClientPeg once in beforeAll, so a blanket
         // restoreAllMocks here would log the following tests out.
-        let spies: jest.SpyInstance[] = [];
+        let spies: vi.SpyInstance[] = [];
 
         function mockCollapsedSetting(collapsed: boolean): void {
             const originalGetValue = SettingsStore.getValue;
             spies.push(
-                jest
+                vi
                     .spyOn(SettingsStore, "getValue")
                     .mockImplementation((setting, ...args) =>
                         setting === "Spaces.isPanelCollapsed" ? collapsed : originalGetValue(setting, ...args),
@@ -258,7 +258,7 @@ describe("<SpacePanel />", () => {
 
         it("stores the new state when the panel is toggled", () => {
             mockCollapsedSetting(true);
-            const setValue = jest.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
+            const setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
             spies.push(setValue);
             const { container } = render(<SpacePanel />);
 
