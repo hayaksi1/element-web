@@ -174,7 +174,7 @@ jobs:
                   cat conflicts.tsv
 
             - name: Report the conflicts as one issue
-              if: ${{ steps.detect.outputs.exit_code == '2' || steps.detect.outputs.exit_code == '3' }}
+              if: ${{ steps.detect.outputs.exit_code == '2' || steps.detect.outputs.exit_code == '3' || steps.detect.outputs.exit_code == '4' }}
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
@@ -315,6 +315,7 @@ jobs:
                   ${{ steps.detect.outputs.exit_code != '0'
                       && steps.detect.outputs.exit_code != '2'
                       && steps.detect.outputs.exit_code != '3'
+                      && steps.detect.outputs.exit_code != '4'
                       && steps.detect.outputs.exit_code != '' }}
               run: |
                   echo "::error::sync-upstream.sh --detect exited ${{ steps.detect.outputs.exit_code }} - detect itself failed"
