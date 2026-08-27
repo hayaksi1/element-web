@@ -461,6 +461,19 @@ assert_branch_landed() {
 # Indent a multi-line string by four spaces, without shelling out.
 indent() { local s="${1//$'\n'/$'\n'    }"; printf '    %s\n' "$s"; }
 
+# rerere rewrites .fork/rr-cache while the run is in progress, and that directory is
+# tracked - so by the time the script wants to switch branches or start a rebase, git
+# refuses because the working tree is dirty exactly where the script itself dirtied it.
+# The live cache under .git/rr-cache is the source of truth and is never touched here;
+# the tracked copy is a mirror that export_rr_cache rewrites at the end of the run. So
+# discarding working-tree edits to the mirror before an operation that needs a clean
+# tree loses nothing. Untracked files are left alone - they are new resolutions, they do
+# not block anything, and export_rr_cache will write them out again.
+restore_rr_worktree() {
+    git ls-files --modified -- "$RR_REPO" 2>/dev/null | grep -q . || return 0
+    git checkout --quiet -- "$RR_REPO" 2>/dev/null || true
+}
+
 import_rr_cache() {
     mkdir -p "$RR_LIVE"
     if [[ -d "$RR_REPO" ]]; then
@@ -634,7 +647,6 @@ fi
 # ------------------------------------------------- 2. fast-forward the mirror
 
 log "fast-forwarding $MIRROR to $UPSTREAM/develop"
-git checkout --quiet "$MIRROR"
 
 # `git merge --ff-only` exits 0 with "Already up to date" when the mirror is AHEAD of
 # upstream, so it alone cannot detect a polluted mirror. Check the ahead-count directly.
@@ -659,7 +671,20 @@ Never 'git merge $UPSTREAM/develop' by hand - that is what caused this."
 }
 assert_pristine "before fast-forwarding"
 
-if ! git merge --ff-only "$UPSTREAM/develop"; then
+# Deliberately done without checking the mirror out. The rerere cache is committed under
+# .fork/rr-cache and rerere rewrites it live during the run, so the working tree is
+# routinely dirty there by design - and `git checkout <branch>` refuses to switch when it
+# is. Advancing the ref directly keeps the run working from any starting branch.
+ff_mirror() {
+    git merge-base --is-ancestor "$MIRROR" "$UPSTREAM/develop" || return 1
+    if [[ "$(git symbolic-ref --quiet --short HEAD || true)" == "$MIRROR" ]]; then
+        git merge --ff-only "$UPSTREAM/develop"
+        return
+    fi
+    git update-ref "refs/heads/$MIRROR" "$(git rev-parse "$UPSTREAM/develop")"
+}
+
+if ! ff_mirror; then
     echo >&2
     die "$MIRROR could not fast-forward to $UPSTREAM/develop.
 
@@ -678,7 +703,7 @@ Move each of them to a feat/* branch, then reset the mirror:
 Never 'git merge $UPSTREAM/develop' by hand - that is what caused this."
 fi
 assert_pristine "after fast-forwarding"
-ok "$MIRROR = $(git rev-parse --short HEAD) ($UPSTREAM/develop)"
+ok "$MIRROR = $(git rev-parse --short "$MIRROR") ($UPSTREAM/develop)"
 
 # ------------------------------------------------- 3. rebase feature branches
 
@@ -694,6 +719,7 @@ for i in "${!FEATURES[@]}"; do
         warn "$branch has no commits of its own - already contained in $MIRROR. Skipping."
         continue
     fi
+    restore_rr_worktree
     log "rebasing $branch ($n commit(s)) onto $MIRROR"
     save_state rebase "$i" "$branch"
     if ! git rebase "$MIRROR" "$branch"; then
@@ -728,6 +754,7 @@ ok "rebased ${#REBASED[@]} feature branch(es)"
 
 # ------------------------------------------- 4. rebuild the integration branch
 
+restore_rr_worktree
 RESUME_MERGE_KIND=""
 RESUME_MERGE_INDEX=0
 if (( CONTINUE )) && [[ "${PHASE:-}" == merge-* ]]; then
