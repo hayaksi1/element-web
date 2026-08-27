@@ -191,6 +191,30 @@ conflicting_files() { git diff --name-only --diff-filter=U || true; }
 # other file in this repo. Resolve it to our side and let the `pnpm install` gate rewrite
 # it from the merged package.json files - that is the only authoritative resolution, and
 # it is why the install gate runs before anything is pushed.
+# The rerere cache is committed under .fork/rr-cache so resolutions survive a fresh clone,
+# which also puts it inside every integration merge. Git's rename detection then pairs a
+# deleted file with a preimage - preimages are near-copies of the very files that conflict -
+# and the merge stops on a cache artifact. Our side is authoritative and export_rr_cache
+# rewrites the whole directory at the end of the run, so there is nothing to weigh up.
+resolve_rr_cache_conflicts() {
+    local path resolved=0
+    while read -r path; do
+        [[ -n "$path" ]] || continue
+        case "$path" in
+            .fork/rr-cache/*) ;;
+            *) continue ;;
+        esac
+        if git show ":2:$path" > "$path" 2>/dev/null; then
+            git add -- "$path"
+        else
+            git rm -q --force --ignore-unmatch -- "$path"
+        fi
+        log "    kept our side of the rerere cache artifact $path"
+        resolved=1
+    done < <(git diff --name-only --diff-filter=U || true)
+    return $(( ! resolved ))
+}
+
 resolve_lockfile() {
     local lock="pnpm-lock.yaml"
     git diff --name-only --diff-filter=U | grep -qxF "$lock" || return 1
@@ -785,6 +809,7 @@ merge_one() {
         # MUST run before resolve_listed_deletions: the allowlist would take the
         # deletion and the branch's tests would vanish with it.
         resolve_relocations || true
+        resolve_rr_cache_conflicts || true
         resolve_listed_deletions || true
         resolve_lockfile || true
         resolve_snapshots || true
