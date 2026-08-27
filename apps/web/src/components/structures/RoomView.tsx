@@ -492,10 +492,8 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
     private searchLoadMore: (() => Promise<boolean>) | null = null;
     private messagePanel: TimelinePanel | null = null;
     // Drives the in-timeline "k of N" search match stepper (header arrows). Always present; renders nothing
-    // until it has matches.
-    public readonly searchNavVm = new RoomSearchNavigationViewModel({
-        onActivateMatch: (match: SearchMatch, index: number): void => this.onActivateSearchMatch(match, index),
-    });
+    // until it has matches, and is rebuilt after disposal - so it cannot be readonly.
+    public searchNavVm = this.createSearchNavigationViewModel();
     private roomViewBody = createRef<HTMLDivElement>();
 
     private roomViewStore: RoomViewStore;
@@ -1084,6 +1082,13 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
 
     public componentDidMount(): void {
         this.unmounted = false;
+
+        if (this.searchNavVm.isDisposed) {
+            this.searchNavVm = this.createSearchNavigationViewModel();
+            this.forceUpdate();
+        }
+
+        this.rehydrateSteppedSearch();
 
         this.dispatcherRef = defaultDispatcher.register(this.onAction);
         if (this.context.client) {
@@ -2058,6 +2063,33 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             },
         });
     };
+
+    private createSearchNavigationViewModel(): RoomSearchNavigationViewModel {
+        return new RoomSearchNavigationViewModel({
+            onActivateMatch: (match: SearchMatch, index: number): void => this.onActivateSearchMatch(match, index),
+        });
+    }
+
+    private rehydrateSteppedSearch(): void {
+        const session = SearchSessionStore.instance.getSnapshot();
+        if (!session || SearchSessionStore.instance.focusedMatch === null) return;
+
+        this.setState({
+            search: {
+                searchId: session.searchId,
+                roomId: session.roomId,
+                term: session.term,
+                scope: session.scope,
+                promise: session.promise,
+                abortController: session.abortController,
+                inProgress: session.inProgress,
+                count: session.count,
+                error: session.error,
+                currentMatchIndex: session.currentMatchIndex,
+                highlights: session.highlights,
+            },
+        });
+    }
 
     /**
      * Step the live timeline to a search match. Switches back to the room (live) timeline so the match is
