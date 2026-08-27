@@ -30,6 +30,7 @@ INTEGRATION="${FORK_INTEGRATION_BRANCH:-combined/integration}"
 DRY_RUN=0
 NO_PUSH=0
 LOCKFILE_NEEDS_REGEN=0
+SNAPSHOTS_STALE=0
 CONTINUE=0
 FEATURE_SUBSET=""
 
@@ -196,6 +197,26 @@ resolve_lockfile() {
     log "    took our pnpm-lock.yaml; the install gate will regenerate it"
     LOCKFILE_NEEDS_REGEN=1
     return 0
+}
+
+# Jest/vitest .snap files are DERIVED from the components they render, so a hand-merged
+# snapshot is meaningless - the component is the truth. Resolve to our side and let the
+# test gate be the arbiter: if the merged UI really renders differently, the suite fails
+# and says so, which is the signal we actually want.
+resolve_snapshots() {
+    local f resolved=0
+    while read -r f; do
+        case "$f" in
+            *__snapshots__/*.snap|*.snap)
+                git show ":2:$f" > "$f" 2>/dev/null || continue
+                git add -- "$f"
+                log "    took our $f; regenerate with the test runner if the suite disagrees"
+                SNAPSHOTS_STALE=1
+                resolved=1
+                ;;
+        esac
+    done < <(git diff --name-only --diff-filter=U)
+    return $(( ! resolved ))
 }
 
 # rerere only ever caches CONTENT conflicts. A modify/delete is a tree conflict, so it is
@@ -510,6 +531,7 @@ merge_one() {
     if ! git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch"; then
         resolve_listed_deletions || true
         resolve_lockfile || true
+        resolve_snapshots || true
         local files; files="$(conflicting_files)"
         if [[ -z "$files" ]]; then
             # rerere and/or the deletion list resolved everything; conclude the merge.
@@ -616,6 +638,10 @@ gate() {
     log "gate: $name"
     if "$@"; then ok "  PASS  $name"; else warn "  FAIL  $name"; GATES_PASSED=0; fi
 }
+if (( SNAPSHOTS_STALE )); then
+    warn "snapshots were conflicted and resolved to our side. If the test gate fails on a"
+    warn "snapshot, regenerate rather than hand-editing:  pnpm -C apps/web test -- -u"
+fi
 if (( LOCKFILE_NEEDS_REGEN )); then
     log "pnpm-lock.yaml conflicted during this rebuild; pnpm install will rewrite it"
 fi
