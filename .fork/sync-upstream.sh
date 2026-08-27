@@ -424,8 +424,8 @@ assert_branch_landed() {
             target="$(reloc_target "$f")" || target="$f"
         fi
 
-        after="$(git rev-parse --verify --quiet "HEAD:$target")"
-        before="$(git rev-parse --verify --quiet "$pre:$target")"
+        after="$(git rev-parse --verify --quiet "HEAD:$target" || true)"
+        before="$(git rev-parse --verify --quiet "$pre:$target" || true)"
         if [[ -z "$after" ]]; then
             warn "    LOST: $f is not in the merge result (nor at $target)"
             lost=1
@@ -503,6 +503,10 @@ log "mirror     : $MIRROR   integration: $INTEGRATION"
 if (( DRY_RUN )); then warn "DRY RUN - nothing will be modified or pushed"; fi
 
 PHASE=""; INDEX=0; BRANCH=""
+# Whether we are still before the feature-rebase resume point. Kept separate from
+# CONTINUE: clearing CONTINUE here would also disable the integration-merge resume
+# below, silently turning every --continue into a full rebuild.
+RESUME_REBASE=0
 if (( CONTINUE )); then
     [[ -f "$STATE_FILE" ]] || die "--continue given but no sync is in progress ($STATE_FILE missing)"
     load_state
@@ -529,6 +533,7 @@ if (( CONTINUE )); then
             PHASE=""; INDEX=0
         fi
     fi
+    RESUME_REBASE=1
     log "resuming from phase=${PHASE:-?} branch=${BRANCH:-?}"
     if in_progress_rebase; then
         die "the rebase is still in progress. Finish it first:
@@ -683,7 +688,7 @@ REBASED=()
 for i in "${!FEATURES[@]}"; do
     branch="${FEATURES[$i]}"
     in_subset "$branch" || { log "skipping $branch (not in --features)"; continue; }
-    if (( CONTINUE )) && [[ "${PHASE:-}" == "rebase" ]] && (( i < ${INDEX:-0} )); then
+    if (( RESUME_REBASE )) && [[ "${PHASE:-}" == "rebase" ]] && (( i < ${INDEX:-0} )); then
         REBASED+=("$branch"); continue
     fi
     n="$(git rev-list --count "$MIRROR..$branch")"
@@ -719,7 +724,7 @@ EOF
         exit 2
     fi
     REBASED+=("$branch")
-    CONTINUE=0
+    RESUME_REBASE=0
 done
 ok "rebased ${#REBASED[@]} feature branch(es)"
 
