@@ -894,6 +894,13 @@ if (( ${#PATCHES[@]} )); then
     log "applying ${#PATCHES[@]} integration patch(es)"
     for p in "${PATCHES[@]}"; do
         log "  $(basename "$p")"
+        if grep -qE '^\+\+\+ b/\.fork/' "$p"; then
+            die "integration patch $(basename "$p") changes .fork/ tooling.
+Tooling lives on feat/fork-tooling and is merged, not patched. A patch that carries a
+tooling change conflicts with the branch the moment the tooling moves on.
+Regenerate it without that path:
+    git format-patch -1 <sha> -o $PATCH_DIR -- ':(exclude).fork/*'"
+        fi
         if git apply --index --check "$p" 2>/dev/null; then
             git apply --index "$p"
         elif git apply --3way --check "$p" 2>/dev/null; then
