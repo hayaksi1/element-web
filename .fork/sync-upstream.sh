@@ -32,6 +32,7 @@ NO_PUSH=0
 LOCKFILE_NEEDS_REGEN=0
 SNAPSHOTS_STALE=0
 CONTINUE=0
+DETECT=0
 FEATURE_SUBSET=""
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; BLD=$'\033[1m'; RST=$'\033[0m'
@@ -58,6 +59,13 @@ Usage: .fork/sync-upstream.sh [flags]
   --dry-run           Report what would change. Touches nothing, pushes nothing.
   --no-push           Do all the work locally; never push.
   --continue          Resume after you resolved a conflict by hand.
+  --detect            Rebuild in a throwaway worktree from the remote-tracking refs
+                      and report every branch the publish run would stop on, then
+                      throw the worktree away. Pushes nothing, runs no gate, reads
+                      the rerere cache but never writes it back. Writes
+                      .fork/detect-report.tsv (branch<TAB>path per unresolved
+                      path, empty when clean) and exits with the code the publish
+                      run would have stopped with.
   --features=a,b      Only process these feature branches (comma separated,
                       with or without the feat/ prefix).
   -h, --help          This text.
@@ -77,11 +85,15 @@ for arg in "$@"; do
         --dry-run)     DRY_RUN=1 ;;
         --no-push)     NO_PUSH=1 ;;
         --continue)    CONTINUE=1 ;;
+        --detect)      DETECT=1 ;;
         --features=*)  FEATURE_SUBSET="${arg#*=}" ;;
         -h|--help)     usage; exit 0 ;;
         *)             die "unknown flag: $arg (try --help)" ;;
     esac
 done
+if (( DETECT )) && { (( DRY_RUN + NO_PUSH + CONTINUE )) || [[ -n "$FEATURE_SUBSET" ]]; }; then
+    die "--detect cannot be combined with --dry-run, --no-push, --continue or --features"
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)" || die "not inside a git repository"
 cd "$REPO_ROOT"
@@ -113,6 +125,19 @@ SKIPPED_CONTRIBS="$GIT_COMMON/fork-sync-skipped-contribs"
 # result, and once at the end against the finished tree. RECHECK selects the pass.
 RECHECK=0
 DROPS_SINK="$DROPS_FILE"
+REF_PREFIX="refs/heads"
+if (( DETECT )); then
+    SCRATCH="$(mktemp -d)"
+    STATE_FILE="$SCRATCH/state"
+    DROPS_FILE="$SCRATCH/drops"
+    MISSING_REFS="$SCRATCH/missing-refs"
+    STILL_DROPPED="$SCRATCH/drops-final"
+    ACCEPTED_USED="$SCRATCH/accepted-used"
+    DROPS_SINK="$DROPS_FILE"
+    REF_PREFIX="refs/remotes/$REMOTE"
+    DETECT_REPORT="${FORK_DETECT_REPORT:-$REPO_ROOT/.fork/detect-report.tsv}"
+    rm -f "$DETECT_REPORT"
+fi
 
 # ---------------------------------------------------------------- helpers
 
@@ -125,11 +150,11 @@ read_list() {
         ref="${line#"${line%%[![:space:]]*}"}"
         ref="${ref%"${ref##*[![:space:]]}"}"
         [[ -z "$ref" ]] && continue
-        if git show-ref --verify --quiet "refs/heads/$ref"; then
+        if git show-ref --verify --quiet "$REF_PREFIX/$ref"; then
             printf '%s\n' "$ref"
         else
             printf '%s\n' "$ref" >> "$MISSING_REFS"
-            warn "listed in ${file##*/} but no such local branch, skipping: $ref"
+            warn "listed in ${file##*/} but $REF_PREFIX/$ref does not exist, skipping"
         fi
     done < "$file"
 }
@@ -543,6 +568,47 @@ assert_branch_landed() {
 # Indent a multi-line string by four spaces, without shelling out.
 indent() { local s="${1//$'\n'/$'\n'    }"; printf '    %s\n' "$s"; }
 
+try_merge() {
+    local branch="$1"
+    git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch" && return 0
+    # MUST run before resolve_listed_deletions: the allowlist would take the
+    # deletion and the branch's tests would vanish with it.
+    resolve_relocations || true
+    resolve_rr_cache_conflicts || true
+    resolve_listed_deletions || true
+    resolve_lockfile || true
+    resolve_snapshots || true
+    resolve_one_sided_adds || true
+    [[ -z "$(conflicting_files)" ]] || return 1
+    # rerere and/or the deletion list resolved everything; conclude the merge.
+    git commit --no-edit
+}
+
+apply_patch() {
+    local p="$1"
+    log "  $(basename "$p")"
+    if grep -qE '^\+\+\+ b/\.fork/' "$p"; then
+        die "integration patch $(basename "$p") changes .fork/ tooling.
+Tooling lives on feat/fork-tooling and is merged, not patched. A patch that carries a
+tooling change conflicts with the branch the moment the tooling moves on.
+Regenerate it without that path:
+    git format-patch -1 <sha> -o $PATCH_DIR -- ':(exclude).fork/*'"
+    fi
+    if git apply --index --check "$p" 2>/dev/null; then
+        git apply --index "$p" || return 1
+    elif git apply --3way --check "$p" 2>/dev/null; then
+        git apply --3way "$p" || return 1
+    else
+        return 1
+    fi
+    if git diff --cached --quiet; then
+        log "  already in the tree - nothing to commit"
+        return 0
+    fi
+    git commit --quiet -m "Apply integration patch $(basename "$p")" \
+                        -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
+}
+
 # rerere rewrites .fork/rr-cache while the run is in progress, and that directory is
 # tracked - so by the time the script wants to switch branches or start a rebase, git
 # refuses because the working tree is dirty exactly where the script itself dirtied it.
@@ -674,6 +740,8 @@ then re-run: .fork/sync-upstream.sh --continue"
     git add <resolved files> && git commit --no-edit
 then re-run: .fork/sync-upstream.sh --continue"
     fi
+elif (( DETECT )); then
+    log "detect: this working tree is never touched, so it need not be clean"
 elif (( ! DRY_RUN )); then
     require_clean_tree
     clear_state
@@ -700,6 +768,10 @@ if (( ! DRY_RUN )); then
     audit_rr_cache
 fi
 
+if (( DETECT )); then
+    log "fetching $REMOTE first, so the manifests are checked against what it holds now"
+    git fetch "$REMOTE" --prune
+fi
 mapfile -t FEATURES < <(read_list "$FEATURES_FILE")
 mapfile -t CONTRIBS < <(read_list "$CONTRIB_FILE")
 
@@ -780,6 +852,124 @@ if (( DRY_RUN )); then
     log "  would apply ${#patches[@]} integration patch(es)"
     ok "dry run complete - nothing was changed"
     exit 0
+fi
+
+if (( DETECT )); then
+    DETECT_BASE="$(git rev-parse "$UPSTREAM/develop")"
+    DETECT_WT="${REPO_ROOT}-detect"
+    RR_BEFORE="$(find "$RR_LIVE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)"
+    detect_cleanup() {
+        local d
+        cd "$REPO_ROOT" || return 0
+        if git worktree list --porcelain | grep -qxF "worktree $DETECT_WT"; then
+            git worktree remove --force "$DETECT_WT" || warn "could not remove $DETECT_WT; remove it by hand"
+        fi
+        git worktree prune
+        while IFS= read -r d; do
+            [[ -n "$d" ]] || continue
+            printf '%s\n' "$RR_BEFORE" | grep -qxF -- "$d" || rm -rf -- "$d"
+        done <<< "$(find "$RR_LIVE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)"
+        rm -rf -- "$SCRATCH"
+    }
+    trap 'detect_cleanup; [[ -n "${FORK_SYNC_TMP:-}" ]] && rm -f "$FORK_SYNC_TMP"' EXIT
+
+    if [[ -e "$DETECT_WT" ]]; then
+        git worktree remove --force "$DETECT_WT" 2>/dev/null \
+            || die "$DETECT_WT exists and is not a worktree of this repository. Remove it, then re-run."
+    fi
+    git worktree prune
+    log "detect: base $UPSTREAM/develop = ${DETECT_BASE:0:10}"
+    log "detect: building in a throwaway worktree at $DETECT_WT"
+    git worktree add --quiet --detach "$DETECT_WT" "$DETECT_BASE"
+    cd "$DETECT_WT"
+
+    FOUND=()
+    FIRST_STOP=0
+    record() {
+        local name="$1" code="$2" files="${3:-}" f
+        if (( FIRST_STOP == 0 )); then FIRST_STOP="$code"; fi
+        if [[ -z "$files" ]]; then
+            FOUND+=("$name"$'\t')
+            return 0
+        fi
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && FOUND+=("$name"$'\t'"$f")
+        done <<< "$files"
+        return 0
+    }
+
+    REBASED_TIPS=()
+    for branch in "${FEATURES[@]}"; do
+        ref="$REMOTE/$branch"
+        n="$(git rev-list --count "$DETECT_BASE..$ref")"
+        if [[ "$n" == "0" ]]; then
+            log "  $branch - already contained in $UPSTREAM/develop, nothing to rebase"
+            continue
+        fi
+        log "  rebasing feature $branch ($n commit(s)) onto $UPSTREAM/develop"
+        git checkout --quiet --detach "$ref"
+        if git rebase --quiet "$DETECT_BASE"; then
+            REBASED_TIPS+=("$branch"$'\t'"$(git rev-parse HEAD)")
+        else
+            files="$(conflicting_files)"
+            warn "  REBASE CONFLICT in $branch"
+            [[ -n "$files" ]] && warn "$(indent "$files")"
+            record "$branch" 2 "$files"
+            git rebase --abort
+        fi
+    done
+
+    git checkout --quiet --detach "$DETECT_BASE"
+    detect_merge() {
+        local branch="$1" ref="$2" n files
+        n="$(git rev-list --count "HEAD..$ref")"
+        if [[ "$n" == "0" ]]; then
+            log "  $branch - already contained, nothing to merge"
+            return 0
+        fi
+        log "  merging $branch ($n commit(s))"
+        if try_merge "$ref"; then return 0; fi
+        files="$(conflicting_files)"
+        warn "  MERGE CONFLICT in $branch"
+        [[ -n "$files" ]] && warn "$(indent "$files")"
+        record "$branch" 3 "$files"
+        git merge --abort || git reset --quiet --hard
+        [[ -z "$(git status --porcelain)" ]] \
+            || die "the throwaway worktree is dirty after aborting the merge of $branch; every verdict after it would be built on that"
+    }
+    for entry in "${REBASED_TIPS[@]}"; do
+        detect_merge "${entry%%$'\t'*}" "${entry#*$'\t'}"
+    done
+    for branch in "${CONTRIBS[@]}"; do
+        detect_merge "$branch" "$REMOTE/$branch"
+    done
+
+    shopt -s nullglob
+    PATCHES=("$PATCH_DIR"/*.patch)
+    shopt -u nullglob
+    for p in "${PATCHES[@]}"; do
+        if apply_patch "$p"; then continue; fi
+        files="$(git apply --check "$p" 2>&1 | sed -n -e 's/^error: patch failed: \(.*\):[0-9][0-9]*$/\1/p' \
+                                                      -e 's/^error: \(.*\): patch does not apply$/\1/p' | LC_ALL=C sort -u)"
+        warn "  PATCH WOULD NOT APPLY: $(basename "$p")"
+        [[ -n "$files" ]] && warn "$(indent "$files")"
+        record "integration-patches/$(basename "$p")" 4 "$files"
+        git reset --quiet --hard
+    done
+
+    cd "$REPO_ROOT"
+    if (( ${#FOUND[@]} )); then
+        printf '%s\n' "${FOUND[@]}" | LC_ALL=C sort -u > "$DETECT_REPORT"
+    else
+        : > "$DETECT_REPORT"
+    fi
+    log "detect: report written to $DETECT_REPORT"
+    if (( FIRST_STOP == 0 )); then
+        ok "detect: clean - every branch and every patch would apply"
+        exit 0
+    fi
+    warn "detect: $(cut -f1 "$DETECT_REPORT" | LC_ALL=C sort -u | wc -l | tr -d ' ') branch(es)/patch(es) would stop the publish run (exit $FIRST_STOP)"
+    exit "$FIRST_STOP"
 fi
 
 # ------------------------------------------------- 2. fast-forward the mirror
@@ -926,23 +1116,8 @@ merge_one() {
     local mbase mpre
     mpre="$(git rev-parse HEAD)"
     mbase="$(git merge-base HEAD "$branch")"
-    if ! git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch"; then
-        # MUST run before resolve_listed_deletions: the allowlist would take the
-        # deletion and the branch's tests would vanish with it.
-        resolve_relocations || true
-        resolve_rr_cache_conflicts || true
-        resolve_listed_deletions || true
-        resolve_lockfile || true
-        resolve_snapshots || true
-        resolve_one_sided_adds || true
+    if ! try_merge "$branch"; then
         local files; files="$(conflicting_files)"
-        if [[ -z "$files" ]]; then
-            # rerere and/or the deletion list resolved everything; conclude the merge.
-            if git commit --no-edit; then
-                assert_branch_landed "$branch" "$mbase" "$mpre"
-                return 0
-            fi
-        fi
         export_rr_cache
         echo >&2
         printf '%s============== INTEGRATION MERGE CONFLICT ==============%s\n' "$RED" "$RST" >&2
@@ -1064,19 +1239,7 @@ shopt -u nullglob
 if (( ${#PATCHES[@]} )); then
     log "applying ${#PATCHES[@]} integration patch(es)"
     for p in "${PATCHES[@]}"; do
-        log "  $(basename "$p")"
-        if grep -qE '^\+\+\+ b/\.fork/' "$p"; then
-            die "integration patch $(basename "$p") changes .fork/ tooling.
-Tooling lives on feat/fork-tooling and is merged, not patched. A patch that carries a
-tooling change conflicts with the branch the moment the tooling moves on.
-Regenerate it without that path:
-    git format-patch -1 <sha> -o $PATCH_DIR -- ':(exclude).fork/*'"
-        fi
-        if git apply --index --check "$p" 2>/dev/null; then
-            git apply --index "$p"
-        elif git apply --3way --check "$p" 2>/dev/null; then
-            git apply --3way "$p"
-        else
+        if ! apply_patch "$p"; then
             export_rr_cache
             printf '%s[fork-sync]%s %sERROR:%s %s\n' "$BLD" "$RST" "$RED" "$RST" \
                 "integration patch failed to apply: $p" >&2
@@ -1091,12 +1254,6 @@ Regenerate it from the current tree, or delete it if it is obsolete:
 EOF
             exit 4
         fi
-        if git diff --cached --quiet; then
-            log "  already in the tree - nothing to commit"
-            continue
-        fi
-        git commit --quiet -m "Apply integration patch $(basename "$p")" \
-                            -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
     done
     ok "integration patches applied"
 else
