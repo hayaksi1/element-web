@@ -1243,7 +1243,33 @@ fi
 if (( LOCKFILE_NEEDS_REGEN )); then
     log "pnpm-lock.yaml conflicted during this rebuild; pnpm install will rewrite it"
 fi
-gate "pnpm install"   pnpm install
+# The lockfile is the one file a rebuild reliably invalidates: merging ninety-odd
+# branches can change dependencies or, as here, the patchedDependencies set, and a frozen
+# install then refuses on a config mismatch. Shipping a pre-generated lockfile in a patch
+# only moves the problem - it goes stale the next time the workspace moves. Let pnpm write
+# it, which is the only supported way, and commit what it wrote.
+gate_install() {
+    log "gate: pnpm install"
+    if pnpm install --frozen-lockfile; then
+        ok "  PASS  pnpm install"
+        return
+    fi
+    warn "  frozen install refused the lockfile; letting pnpm rewrite it"
+    if ! pnpm install --no-frozen-lockfile; then
+        warn "  FAIL  pnpm install"
+        GATES_PASSED=0
+        return
+    fi
+    if ! git diff --quiet -- pnpm-lock.yaml; then
+        git add -- pnpm-lock.yaml
+        git commit --quiet -m "Regenerate the lockfile for the rebuilt workspace" \
+            -m "The rebuild changed what the workspace declares, so the committed lockfile no
+longer matched and a frozen install refused it. Written by pnpm, never by hand."
+        log "  lockfile regenerated and committed"
+    fi
+    ok "  PASS  pnpm install"
+}
+gate_install
 gate "pnpm lint"      pnpm lint
 gate "pnpm test:unit" pnpm test:unit
 
