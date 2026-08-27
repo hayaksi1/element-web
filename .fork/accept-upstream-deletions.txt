@@ -23,3 +23,17 @@ apps/web/src/components/views/rooms/RoomSublist.tsx
 # RoomSearchHeader + RoomSearchResults; upstream still ships the old component, so every
 # rebuild re-offers it. Its stylesheet is likewise dropped from _components.pcss.
 apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
+
+# Superseded by upstream's own DM-avatar work. The branch rewired the component; upstream
+# now resolves the fallback through Avatar.avatarUrlForRoom -> avatarMxcForRoom ->
+# getAvatarFallbackMember(), and the view model already listens on RoomStateEvent.Members
+# and RoomStateEvent.Update. The branch's Avatar.ts and Avatar.test.ts landed byte-identical,
+# so the helper and its fallback tests survive; only the component wiring is obsolete.
+apps/web/src/components/views/avatars/RoomAvatar.tsx
+apps/web/src/components/views/avatars/RoomAvatar.test.tsx
+
+# The branch's UTF-8 BOM test reaches the tree by another route: our side already carried
+# the migrated, colocated file including the byte-order-mark case and its
+# [0xef, 0xbb, 0xbf] assertion, so this merge legitimately has nothing left to add.
+# Verified present at apps/web/src/utils/exportUtils/PlainTextExport.test.ts.
+apps/web/src/utils/exportUtils/PlainTextExport.test.ts
