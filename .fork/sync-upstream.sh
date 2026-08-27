@@ -753,7 +753,7 @@ for i in "${!FEATURES[@]}"; do
         printf '%s================ REBASE CONFLICT ================%s\n' "$RED" "$RST" >&2
         printf 'branch : %s\n' "$branch" >&2
         printf 'onto   : %s (%s)\n' "$MIRROR" "$(git rev-parse --short "$MIRROR")" >&2
-        printf 'files  :\n%s' "$(indent "$files")" >&2
+        printf 'files  :\n%s\n' "$(indent "$files")" >&2
         cat >&2 <<EOF
 
 Resolve it INSIDE this rebase - the context is small and focused. Keep upstream's
@@ -826,7 +826,7 @@ merge_one() {
         echo >&2
         printf '%s============== INTEGRATION MERGE CONFLICT ==============%s\n' "$RED" "$RST" >&2
         printf 'branch : %s  (%s)\n' "$branch" "$kind" >&2
-        printf 'files  :\n%s' "$(indent "$files")" >&2
+        printf 'files  :\n%s\n' "$(indent "$files")" >&2
         if [[ "$kind" == contrib ]]; then
             cat >&2 <<'NOTE'
 
