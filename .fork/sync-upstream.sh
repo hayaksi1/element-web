@@ -121,8 +121,38 @@ in_subset() {
     return 1
 }
 
-save_state() { printf 'PHASE=%s\nINDEX=%s\nBRANCH=%s\n' "$1" "$2" "${3:-}" > "$STATE_FILE"; }
+# State is written as strict KEY=VALUE and read back with a parser, never `source`:
+# a branch name may legally contain ';' or '$', which sourcing would execute.
+# The originating flags are persisted too, so a bare --continue cannot silently turn a
+# --no-push or --features run into a full push of every branch.
+save_state() {
+    { printf 'PHASE=%s\n' "$1"
+      printf 'INDEX=%s\n' "$2"
+      printf 'BRANCH=%s\n' "${3:-}"
+      printf 'NO_PUSH=%s\n' "$NO_PUSH"
+      printf 'SUBSET=%s\n' "$FEATURE_SUBSET"
+      printf 'MIRROR_SHA=%s\n' "$(git rev-parse "$MIRROR" 2>/dev/null || echo unknown)"
+    } > "$STATE_FILE"
+}
 clear_state() { rm -f "$STATE_FILE"; }
+
+load_state() {
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        key="${line%%=*}"; value="${line#*=}"
+        case "$key" in
+            PHASE)      ST_PHASE="$value" ;;
+            INDEX)      ST_INDEX="$value" ;;
+            BRANCH)     ST_BRANCH="$value" ;;
+            NO_PUSH)    ST_NO_PUSH="$value" ;;
+            SUBSET)     ST_SUBSET="$value" ;;
+            MIRROR_SHA) ST_MIRROR_SHA="$value" ;;
+            *) warn "ignoring unrecognised state key: $key" ;;
+        esac
+    done < "$STATE_FILE"
+    [[ "${ST_INDEX:-0}" =~ ^[0-9]+$ ]] || die "corrupt state: INDEX is not a number"
+    [[ "${ST_NO_PUSH:-0}" =~ ^[01]$ ]] || die "corrupt state: NO_PUSH is not 0 or 1"
+}
 
 require_clean_tree() {
     # Untracked files are fine (they survive checkouts); staged/unstaged changes are not.
@@ -134,13 +164,20 @@ require_clean_tree() {
     for op in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
         # Written as if/fi, not `[[ ]] && die`: the latter makes the loop return 1 on its
         # last iteration, which under `set -e` can abort before the rebase check below.
-        if [[ -e "$GIT_COMMON/$op" ]]; then
+        if [[ -e "$(op_path "$op")" ]]; then
             die "a $op operation is in progress. Finish or abort it first."
         fi
     done
-    if [[ -d "$GIT_COMMON/rebase-merge" || -d "$GIT_COMMON/rebase-apply" ]]; then
+    if in_progress_rebase; then
         die "a rebase is in progress. Finish it and re-run with --continue, or 'git rebase --abort'."
     fi
+}
+
+# MERGE_HEAD and the rebase directories are PER-WORKTREE state. Resolving them against
+# --git-common-dir misses them entirely in a linked worktree, so ask git for the path.
+op_path() { git rev-parse --git-path "$1"; }
+in_progress_rebase() {
+    [[ -d "$(op_path rebase-merge)" || -d "$(op_path rebase-apply)" ]]
 }
 
 conflicting_files() { git diff --name-only --diff-filter=U || true; }
@@ -152,7 +189,10 @@ import_rr_cache() {
     mkdir -p "$RR_LIVE"
     if [[ -d "$RR_REPO" ]]; then
         # -T copies the CONTENTS, so we never nest rr-cache/rr-cache.
-        cp -rT "$RR_REPO" "$RR_LIVE" 2>/dev/null || true
+        if ! cp -rT "$RR_REPO" "$RR_LIVE"; then
+            warn "could not import the shared rerere cache; conflicts you already solved"
+            warn "will have to be solved again this run."
+        fi
         local n; n="$(find "$RR_LIVE" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
         log "rerere: imported shared cache ($n recorded resolutions)"
     fi
@@ -161,7 +201,11 @@ import_rr_cache() {
 export_rr_cache() {
     [[ -d "$RR_LIVE" ]] || return 0
     mkdir -p "$RR_REPO"
-    cp -rT "$RR_LIVE" "$RR_REPO" 2>/dev/null || true
+    if ! cp -rT "$RR_LIVE" "$RR_REPO"; then
+        warn "FAILED to export the rerere cache to .fork/rr-cache. Resolutions recorded"
+        warn "this run are NOT saved and will have to be redone next time."
+        return 1
+    fi
     touch "$RR_REPO/.gitkeep"
     local n; n="$(find "$RR_REPO" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
     log "rerere: exported cache back to .fork/rr-cache ($n resolutions)"
@@ -179,35 +223,95 @@ log "remote     : $REMOTE   upstream: $UPSTREAM"
 log "mirror     : $MIRROR   integration: $INTEGRATION"
 if (( DRY_RUN )); then warn "DRY RUN - nothing will be modified or pushed"; fi
 
+PHASE=""; INDEX=0; BRANCH=""
 if (( CONTINUE )); then
     [[ -f "$STATE_FILE" ]] || die "--continue given but no sync is in progress ($STATE_FILE missing)"
-    # shellcheck disable=SC1090
-    source "$STATE_FILE"
+    load_state
+    PHASE="${ST_PHASE:-}"; INDEX="${ST_INDEX:-0}"; BRANCH="${ST_BRANCH:-}"
+    # Restore the flags the interrupted run started with. Without this a bare --continue
+    # would push a run that began as --no-push, or widen a --features subset.
+    if [[ "${ST_NO_PUSH:-0}" == "1" ]] && (( ! NO_PUSH )); then
+        NO_PUSH=1
+        log "restoring --no-push from the interrupted run"
+    fi
+    if [[ -n "${ST_SUBSET:-}" && -z "$FEATURE_SUBSET" ]]; then
+        FEATURE_SUBSET="${ST_SUBSET}"
+        log "restoring --features=$FEATURE_SUBSET from the interrupted run"
+    fi
+    # If upstream moved since the run we are resuming, the branches we would skip were
+    # rebased onto a mirror that no longer exists. Redo them rather than shipping a
+    # half-stale rebuild.
+    if [[ -n "${ST_MIRROR_SHA:-}" && "$ST_MIRROR_SHA" != "unknown" ]]; then
+        current_mirror="$(git rev-parse "$MIRROR" 2>/dev/null || echo unknown)"
+        if [[ "$current_mirror" != "$ST_MIRROR_SHA" ]]; then
+            warn "$MIRROR moved since the interrupted run (${ST_MIRROR_SHA:0:10} -> ${current_mirror:0:10})."
+            warn "Discarding the resume point and redoing every branch, so nothing is left"
+            warn "rebased onto the old mirror."
+            PHASE=""; INDEX=0
+        fi
+    fi
     log "resuming from phase=${PHASE:-?} branch=${BRANCH:-?}"
-    if [[ -d "$GIT_COMMON/rebase-merge" || -d "$GIT_COMMON/rebase-apply" ]]; then
+    if in_progress_rebase; then
         die "the rebase is still in progress. Finish it first:
     git add <resolved files> && git rebase --continue
 then re-run: .fork/sync-upstream.sh --continue"
     fi
-    if [[ -e "$GIT_COMMON/MERGE_HEAD" ]]; then
+    if [[ -e "$(op_path MERGE_HEAD)" ]]; then
         die "the merge is still in progress. Finish it first:
     git add <resolved files> && git commit --no-edit
 then re-run: .fork/sync-upstream.sh --continue"
     fi
-else
+elif (( ! DRY_RUN )); then
     require_clean_tree
     clear_state
+else
+    # --dry-run promises to touch nothing. In particular it must NOT clear the state of a
+    # sync that is paused waiting for --continue.
+    if [[ -f "$STATE_FILE" ]]; then
+        warn "a sync is paused awaiting --continue; this dry run leaves it alone"
+    fi
 fi
 
 ORIGINAL_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [[ "$ORIGINAL_BRANCH" == "HEAD" ]] && die "detached HEAD. Check out a branch first."
 
-git config rerere.enabled true
-git config rerere.autoUpdate true
-import_rr_cache
+if (( ! DRY_RUN )); then
+    git config rerere.enabled true
+    git config rerere.autoUpdate true
+    import_rr_cache
+fi
 
 mapfile -t FEATURES < <(read_list "$FEATURES_FILE")
 mapfile -t CONTRIBS < <(read_list "$CONTRIB_FILE")
+# Validate the manifests before acting on them. A pr/* branch that ends up in features.txt
+# would be rebased and force-pushed, which destroys an open pull request -- so that is a
+# hard error, not a warning.
+validate_manifests() {
+    local b other seen_dupe=0
+    local -A seen=()
+    for b in "${FEATURES[@]}"; do
+        case "$b" in
+            pr/*) die "'$b' is in .fork/features.txt, but pr/* branches back open upstream
+pull requests and must never be rebased or force-pushed. Move it to .fork/contrib.txt." ;;
+        esac
+        [[ "$b" == "$MIRROR" ]] && die "'$b' is the mirror branch; it cannot also be a feature."
+        [[ "$b" == "$INTEGRATION" ]] && die "'$b' is the integration branch; it cannot also be a feature."
+        [[ -n "${seen[$b]:-}" ]] && { warn "duplicate in features.txt: $b"; seen_dupe=1; }
+        seen[$b]=1
+    done
+    for b in "${CONTRIBS[@]}"; do
+        [[ "$b" == "$MIRROR" ]] && die "'$b' is the mirror branch; it cannot also be a contribution branch."
+        [[ "$b" == "$INTEGRATION" ]] && die "'$b' is the integration branch; it cannot also be a contribution branch."
+        for other in "${FEATURES[@]}"; do
+            [[ "$b" == "$other" ]] && die "'$b' is listed in BOTH features.txt and contrib.txt.
+It would be rebased and force-pushed as a feature. Pick one list."
+        done
+    done
+    (( seen_dupe )) && warn "duplicates are merged twice; the second merge is a no-op but wastes time"
+    return 0
+}
+validate_manifests
+
 log "features (rebased): ${#FEATURES[@]}   contrib (merged as-is): ${#CONTRIBS[@]}"
 if (( ${#FEATURES[@]} + ${#CONTRIBS[@]} == 0 )); then
     die "nothing to do: both .fork/features.txt and .fork/contrib.txt are empty"
@@ -249,6 +353,30 @@ fi
 
 log "fast-forwarding $MIRROR to $UPSTREAM/develop"
 git checkout --quiet "$MIRROR"
+
+# `git merge --ff-only` exits 0 with "Already up to date" when the mirror is AHEAD of
+# upstream, so it alone cannot detect a polluted mirror. Check the ahead-count directly.
+assert_pristine() {
+    local when="$1" ahead
+    ahead="$(git rev-list --count "$UPSTREAM/develop..$MIRROR")"
+    [[ "$ahead" == "0" ]] && return 0
+    echo >&2
+    die "$MIRROR carries $ahead commit(s) that $UPSTREAM/develop does not have ($when).
+
+It is a PRISTINE MIRROR and must never carry fork commits. Offending commits:
+
+$(git log --oneline --no-merges "$UPSTREAM/develop..$MIRROR" | head -40 | sed 's/^/    /')
+
+Move each of them to a feat/* branch, then reset the mirror:
+
+    git branch feat/<slug> $MIRROR          # if they belong to a new feature
+    git branch -f $MIRROR $UPSTREAM/develop
+    git push --force-with-lease $REMOTE $MIRROR
+
+Never 'git merge $UPSTREAM/develop' by hand - that is what caused this."
+}
+assert_pristine "before fast-forwarding"
+
 if ! git merge --ff-only "$UPSTREAM/develop"; then
     echo >&2
     die "$MIRROR could not fast-forward to $UPSTREAM/develop.
@@ -267,6 +395,7 @@ Move each of them to a feat/* branch, then reset the mirror:
 
 Never 'git merge $UPSTREAM/develop' by hand - that is what caused this."
 fi
+assert_pristine "after fast-forwarding"
 ok "$MIRROR = $(git rev-parse --short HEAD) ($UPSTREAM/develop)"
 
 # ------------------------------------------------- 3. rebase feature branches
@@ -424,7 +553,11 @@ Regenerate it from the current tree, or delete it if it is obsolete:
 EOF
             exit 4
         fi
-        git add -A
+        # Stage ONLY what the patch touches. `git add -A` would sweep in any unrelated
+        # untracked file sitting in the tree and publish it.
+        while IFS= read -r pf; do
+            [[ -n "$pf" ]] && git add -- "$pf"
+        done < <(git apply --numstat -z "$p" 2>/dev/null | tr '\0' '\n' | awk 'NR%3==0')
         git commit --quiet -m "Apply integration patch $(basename "$p")" \
                             -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
     done
@@ -451,24 +584,48 @@ if (( GATES_PASSED )); then ok "all verification gates passed"; else warn "one o
 
 # ------------------------------------------------- 7. push
 
+restore_branch() {
+    if ! git checkout --quiet "$ORIGINAL_BRANCH" 2>/dev/null; then
+        warn "could not return to '$ORIGINAL_BRANCH'; you are on $(git rev-parse --abbrev-ref HEAD)."
+        warn "Nothing is lost - '$INTEGRATION' holds the rebuild. Check 'git status'."
+        return 1
+    fi
+    return 0
+}
+
 if (( NO_PUSH )); then
     log "--no-push given; leaving everything local"
 elif (( ! GATES_PASSED )); then
     warn "NOT pushing: verification gates failed. Fix them, then re-run."
     warn "Nothing was pushed, so the remote is untouched."
+    warn "'$INTEGRATION' still holds the rebuild so you can debug it."
     clear_state
+    restore_branch || true
     exit 5
 else
     log "pushing $MIRROR (fast-forward), feature branches and $INTEGRATION"
-    git push "$REMOTE" "$MIRROR:$MIRROR"
+    push_failed=0
+    git push "$REMOTE" "$MIRROR:$MIRROR" || push_failed=1
     for branch in "${REBASED[@]}"; do
-        git push --force-with-lease "$REMOTE" "$branch:$branch"
+        git push --force-with-lease "$REMOTE" "$branch:$branch" || push_failed=1
     done
-    git push --force-with-lease "$REMOTE" "$INTEGRATION:$INTEGRATION"
+    git push --force-with-lease "$REMOTE" "$INTEGRATION:$INTEGRATION" || push_failed=1
     # Contribution branches are NEVER pushed here: they are open-PR heads.
+    if (( push_failed )); then
+        clear_state
+        restore_branch || true
+        die "one or more pushes FAILED. Some refs may have been updated and others not.
+Re-run the script - it is idempotent - or inspect with:
+    git for-each-ref --format='%(refname:short) %(objectname:short)' refs/heads
+    git ls-remote $REMOTE"
+    fi
     ok "pushed"
 fi
 
 clear_state
-git checkout --quiet "$ORIGINAL_BRANCH" 2>/dev/null || true
-ok "sync complete - $INTEGRATION = $(git rev-parse --short "$INTEGRATION")"
+INTEGRATION_SHA="$(git rev-parse --short "$INTEGRATION")"
+if restore_branch; then
+    ok "sync complete - $INTEGRATION = $INTEGRATION_SHA"
+else
+    ok "sync finished - $INTEGRATION = $INTEGRATION_SHA (see the warning above about your current branch)"
+fi
