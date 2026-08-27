@@ -1,4 +1,7 @@
-# Paths where upstream DELETED the file and a contribution branch still modifies it.
+# Paths in a modify/delete conflict where the DELETION is the correct answer.
+#
+# Either direction: upstream deleted a file a branch still edits, or the fork deliberately
+# replaced an upstream component and a rebuild keeps re-offering it.
 #
 # git rerere records content conflicts only. A modify/delete is a TREE conflict, so it
 # is never cached and would stop every single rebuild forever. Listing a path here tells
@@ -15,3 +18,8 @@
 # list is gone; pr/desktop-smooth-scroll's change to it has nothing left to apply to.
 # The smooth-scroll setting itself still lands via that branch's other files.
 apps/web/src/components/views/rooms/RoomSublist.tsx
+
+# Deleted by the fork's search work (26c7c763ad). The aux panel was replaced by
+# RoomSearchHeader + RoomSearchResults; upstream still ships the old component, so every
+# rebuild re-offers it. Its stylesheet is likewise dropped from _components.pcss.
+apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
