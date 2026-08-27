@@ -152,6 +152,46 @@ It never auto-resolves with `-X ours`/`-X theirs`, and it pushes nothing unless
 
 Other flags: `--no-push`, `--features=a,b` to work on a subset.
 
+## Detect and publish
+
+The sync runs as two jobs rather than one, because the two questions have very different
+costs. _Does everything still merge?_ is cheap. _Does everything still build and pass?_
+is not.
+
+|        | Detect                      | Publish                                  |
+| ------ | --------------------------- | ---------------------------------------- |
+| Runs   | nightly                     | twice a week, or on demand               |
+| Does   | the real accumulating merge | the same, plus patches, guards and gates |
+| Pushes | `develop` only              | `develop`, `feat/*`, `combined`          |
+| Costs  | a few minutes of merging    | an install, a lint and two test suites   |
+
+```bash
+.fork/sync-upstream.sh --detect      # merge everything, report, touch nothing else
+```
+
+Detect merges in a throwaway worktree, so it never disturbs your checkout. It reads the
+rerere cache and **never writes it**: a job running unattended must not record a
+resolution nobody reviewed. On a conflict it records the branch, aborts that one merge and
+carries on to the next, so one broken branch cannot hide every branch behind it — which
+means its verdict for later branches is conditional on the ones it skipped, and the issue
+says so.
+
+It deliberately does **not** use `git merge-tree`. That would be a proxy for an operation
+we already own, and it cannot replay rerere or the relocation resolver — so it reports
+conflicts on branches that merge perfectly well. Measured: one search branch shows sixteen
+conflicting paths against `develop` and merges clean in the real run.
+
+Both jobs report into a **single** issue titled `Sync conflicts`, rewritten each run,
+commented on only when the set of conflicts actually changes, closed when it empties and
+reopened rather than duplicated. A conflict leaves detect's badge green: it is the job's
+expected output, and a red badge every night is one nobody reads. Detect goes red only
+when detect itself breaks.
+
+`.fork/detect-report.tsv` is the machine-readable result — one `branch<TAB>path` line per
+unresolved path, written even when the run is clean, so "nothing conflicted" and "the run
+never got that far" cannot be confused. It is run output, not tooling: it is gitignored and
+must never be committed.
+
 ## Adding a branch
 
 ```bash
