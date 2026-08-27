@@ -15,3 +15,8 @@
 
 # Example (already handled by rename detection, shown for format only):
 # apps/web/test/viewmodels/message-body/TextualBodyViewModel-test.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/body/TextualBodyViewModel.test.ts
+
+# Upstream moved this one into a notifications/ subdirectory as well as renaming it, so the
+# co-location transform guesses apps/web/src/stores/RoomNotificationStateStore.test.ts and
+# rename detection does not pair them either.
+apps/web/test/unit-tests/stores/RoomNotificationStateStore-test.ts -> apps/web/src/stores/notifications/RoomNotificationStateStore.test.ts
