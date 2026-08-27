@@ -1,0 +1,11 @@
+# Fork-local feature branches, in merge order.
+#
+# These are REBASED onto develop on every sync and force-pushed with --force-with-lease.
+# Only put a branch here if it is fork-local: upstream declined it, or never saw it.
+# A branch backing an OPEN upstream pull request must go in contrib.txt instead --
+# rebasing it would rewrite the PR head.
+#
+# One branch per line. Order matters: it is the merge order into combined/integration.
+# Blank lines and # comments are ignored.
+
+feat/fork-tooling
