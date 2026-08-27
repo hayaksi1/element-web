@@ -90,6 +90,7 @@ RR_REPO="$REPO_ROOT/.fork/rr-cache"
 FEATURES_FILE="$REPO_ROOT/.fork/features.txt"
 CONTRIB_FILE="$REPO_ROOT/.fork/contrib.txt"
 PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
+DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
 
 # ---------------------------------------------------------------- helpers
 
@@ -181,6 +182,24 @@ in_progress_rebase() {
 }
 
 conflicting_files() { git diff --name-only --diff-filter=U || true; }
+
+# rerere only ever caches CONTENT conflicts. A modify/delete is a tree conflict, so it is
+# never replayed and would halt every rebuild forever. For paths explicitly listed as
+# "upstream deleted this for good", take the deletion and move on. Everything else still
+# stops the run and asks a human.
+resolve_listed_deletions() {
+    local path status resolved=0
+    [[ -f "$DELETIONS_FILE" ]] || return 0
+    while IFS= read -r path status; do
+        [[ "$status" == "DU" || "$status" == "UD" ]] || continue
+        if grep -qxF -- "$path" <(grep -v '^[[:space:]]*#' "$DELETIONS_FILE" | grep -v '^[[:space:]]*$'); then
+            git rm -q --ignore-unmatch -- "$path" 2>/dev/null || git rm -q --cached --ignore-unmatch -- "$path"
+            log "    accepted upstream's deletion of $path (listed in accept-upstream-deletions.txt)"
+            resolved=1
+        fi
+    done < <(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2, $1}')
+    return $(( ! resolved ))
+}
 
 # Indent a multi-line string by four spaces, without shelling out.
 indent() { local s="${1//$'\n'/$'\n'    }"; printf '    %s\n' "$s"; }
@@ -470,9 +489,10 @@ merge_one() {
     log "  merging $kind $branch ($n commit(s))"
     save_state "merge-$kind" "$idx" "$branch"
     if ! git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch"; then
+        resolve_listed_deletions || true
         local files; files="$(conflicting_files)"
         if [[ -z "$files" ]]; then
-            # rerere resolved everything; just conclude the merge.
+            # rerere and/or the deletion list resolved everything; conclude the merge.
             git commit --no-edit && return 0
         fi
         export_rr_cache
