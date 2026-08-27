@@ -95,6 +95,11 @@ PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
 DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
 RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
 DROPS_FILE="$GIT_COMMON/fork-sync-drops"
+# A manifest entry with no local branch used to warn and carry on, which builds combined
+# from a subset and can still pass every gate and push. Silence is the wrong response to
+# "one of the ninety-three is not here".
+MISSING_REFS="$GIT_COMMON/fork-sync-missing-refs"
+rm -f "$MISSING_REFS"
 STILL_DROPPED="$GIT_COMMON/fork-sync-drops-final"
 # Which allowlist entries actually silenced something this run. An exemption nobody
 # exercises is the dangerous kind: it stays authoritative long after the reason for it
@@ -119,6 +124,7 @@ read_list() {
         if git show-ref --verify --quiet "refs/heads/$ref"; then
             printf '%s\n' "$ref"
         else
+            printf '%s\n' "$ref" >> "$MISSING_REFS"
             warn "listed in ${file##*/} but no such local branch, skipping: $ref"
         fi
     done < "$file"
@@ -674,6 +680,20 @@ fi
 
 mapfile -t FEATURES < <(read_list "$FEATURES_FILE")
 mapfile -t CONTRIBS < <(read_list "$CONTRIB_FILE")
+
+# Refuse to rebuild from a subset. A branch listed in a manifest but absent locally used
+# to warn and carry on, which produces a combined missing that branch's work entirely -
+# and it can still pass every gate and be pushed, because nothing downstream knows the
+# branch was meant to be there. On a runner this is one failed fetch away.
+if [[ -s "$MISSING_REFS" ]]; then
+    warn "MANIFEST REFS WITH NO LOCAL BRANCH:"
+    warn "$(indent "$(sort -u "$MISSING_REFS")")"
+    die "refusing to rebuild $INTEGRATION without them. Building from a subset silently
+drops that branch's work and still passes the gates. Fetch the missing refs (a runner
+needs them materialised as local branches), or take the branch out of its manifest if it
+is genuinely gone."
+fi
+log "manifests: ${#FEATURES[@]} feature + ${#CONTRIBS[@]} contrib branch(es), all present"
 # Validate the manifests before acting on them. A pr/* branch that ends up in features.txt
 # would be rebased and force-pushed, which destroys an open pull request -- so that is a
 # hard error, not a warning.
