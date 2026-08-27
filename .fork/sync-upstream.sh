@@ -93,6 +93,7 @@ FEATURES_FILE="$REPO_ROOT/.fork/features.txt"
 CONTRIB_FILE="$REPO_ROOT/.fork/contrib.txt"
 PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
 DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
+RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
 
 # ---------------------------------------------------------------- helpers
 
@@ -262,6 +263,202 @@ resolve_listed_deletions() {
         fi
     done < <(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2}')
     return $(( ! resolved ))
+}
+
+# ---------------------------------------------------------------- relocations
+# Upstream co-located its test suite: apps/web/test/unit-tests/X/Y-test.tsx became
+# apps/web/src/X/Y.test.tsx, and the original was deleted. A contribution branch that
+# touches the old path therefore hits a modify/delete: our side (upstream) deleted it,
+# their side (the branch) modified it. Taking the deletion -- which is what
+# resolve_listed_deletions does -- lands the branch's SOURCE change and silently drops
+# its TESTS. That has already happened three times (pr/search-top-bar's Searching and
+# RoomView suites, pr/message-hover-actions' EventTileActionBarViewModel suite).
+#
+# So: find where the file went, three-way merge the branch's version into it, and if
+# that does not apply cleanly leave it CONFLICTED for a human. Never drop silently.
+
+RELOC_MAP=""            # cached "old<TAB>new" pairs for the merge in progress
+RELOC_MAP_BASE=""       # the merge base $RELOC_MAP was built against
+
+build_reloc_map() {
+    local base="$1"
+    [[ "$base" == "$RELOC_MAP_BASE" && -n "$RELOC_MAP_BASE" ]] && return 0
+    RELOC_MAP_BASE="$base"
+    # .fork is excluded deliberately. The committed rerere cache stores preimages, which
+    # are near-copies of the very files that conflict; git's rename detection cheerfully
+    # pairs a deleted test file with an rr-cache preimage, and following that would merge
+    # the branch's tests into the conflict cache instead of into the test suite.
+    RELOC_MAP="$(git diff -M50% -l0 --name-status --diff-filter=R "$base" HEAD \
+                     -- . ':(exclude).fork/*' 2>/dev/null | cut -f2,3 || true)"
+}
+
+# Resolve an old path to its current home. Three sources, most authoritative first.
+reloc_target() {
+    local old="$1" new=""
+    # 1. an explicit override, for moves no algorithm can derive.
+    if [[ -f "$RELOCATIONS_FILE" ]]; then
+        new="$(sed 's/#.*//' "$RELOCATIONS_FILE" | awk -F'->' -v k="$old" '
+            { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2) }
+            $1 == k && $2 != "" { print $2; exit }')"
+        [[ -n "$new" ]] && { printf '%s\n' "$new"; return 0; }
+    fi
+    # 2. what git says upstream actually did. This is the only source that copes with a
+    #    file that moved directory as well as filename (131 of the 554 real relocations
+    #    did, e.g. test/viewmodels/message-body/TextualBodyViewModel-test.tsx ->
+    #    src/viewmodels/room/timeline/event-tile/body/TextualBodyViewModel.test.ts).
+    new="$(printf '%s\n' "$RELOC_MAP" | awk -F'\t' -v k="$old" '$1 == k { print $2; exit }')"
+    [[ -n "$new" ]] && { printf '%s\n' "$new"; return 0; }
+    # 3. the deterministic co-location transform, for when similarity detection misses
+    #    (it matched 423 of the 554 real relocations on its own).
+    new="$(printf '%s\n' "$old" | sed -E '
+        s|^apps/web/test/unit-tests/|apps/web/src/|
+        s|^apps/web/test/|apps/web/src/|
+        s|-test\.(tsx?)(\.snap)?$|.test.\1\2|')"
+    [[ "$new" != "$old" && -n "$new" ]] && { printf '%s\n' "$new"; return 0; }
+    return 1
+}
+
+resolve_relocations() {
+    local old new base resolved=0 conflicted=0
+    local base_sha ours_sha theirs_sha mode rc tmp
+    base="$(git merge-base HEAD MERGE_HEAD 2>/dev/null)" || return 1
+    build_reloc_map "$base"
+
+    while read -r old; do
+        [[ -n "$old" ]] || continue
+        new="$(reloc_target "$old")" || continue
+        [[ "$new" == "$old" ]] && continue
+        # The target has to be present in the merge result, else there is nothing to
+        # merge into and the deletion allowlist should get its turn.
+        git cat-file -e ":0:$new" 2>/dev/null || continue
+        base_sha="$(git rev-parse --verify --quiet ":1:$old")"   || continue
+        theirs_sha="$(git rev-parse --verify --quiet ":3:$old")" || continue
+        ours_sha="$(git rev-parse --verify --quiet ":0:$new")"   || continue
+        mode="$(git ls-files --stage -- "$new" | awk '{ print $1; exit }')"
+        [[ -n "$mode" ]] || mode=100644
+
+        tmp="$(mktemp -d)" || continue
+        git cat-file blob "$base_sha"   > "$tmp/base"   || { rm -rf "$tmp"; continue; }
+        git cat-file blob "$theirs_sha" > "$tmp/theirs" || { rm -rf "$tmp"; continue; }
+        git cat-file blob "$ours_sha"   > "$tmp/merged" || { rm -rf "$tmp"; continue; }
+
+        git merge-file \
+            -L "${INTEGRATION##*/}:$new" -L "merge base:$old" -L "branch:$old" \
+            "$tmp/merged" "$tmp/base" "$tmp/theirs" >/dev/null 2>&1
+        rc=$?
+        if (( rc < 0 )); then
+            warn "    could not three-way merge $old into $new; leaving it conflicted"
+            rm -rf "$tmp"; continue
+        fi
+
+        mkdir -p "$(dirname -- "$new")"
+        cat "$tmp/merged" > "$new"
+        git rm -q --force --ignore-unmatch -- "$old"
+
+        if (( rc == 0 )); then
+            git add -- "$new"
+            log "    relocated $old -> $new (clean three-way merge)"
+            resolved=1
+        else
+            # Stage a genuine unmerged entry so `git diff --diff-filter=U` sees it and
+            # merge_one halts. Writing markers and `git add`-ing them would commit them,
+            # which is precisely the failure the conflict-marker guard exists to catch.
+            git rm -q --cached --force --ignore-unmatch -- "$new"
+            printf '%s %s %s\t%s\n' "$mode" "$base_sha"   1 "$new" >  "$tmp/idx"
+            printf '%s %s %s\t%s\n' "$mode" "$ours_sha"   2 "$new" >> "$tmp/idx"
+            printf '%s %s %s\t%s\n' "$mode" "$theirs_sha" 3 "$new" >> "$tmp/idx"
+            git update-index --index-info < "$tmp/idx"
+            warn "    relocated $old -> $new but it CONFLICTS; resolve $new by hand"
+            conflicted=1
+        fi
+        rm -rf "$tmp"
+    done < <(git status --porcelain | awk '$1 == "DU" { print $2 }')
+
+    # A modify/delete is a tree conflict and rerere never caches one, which is why this
+    # class of conflict used to halt every rebuild forever. Having turned it into a
+    # content conflict, ask rerere to record it -- and to replay it if this same
+    # conflict was resolved on a previous run.
+    if (( conflicted )); then
+        git rerere 2>/dev/null || true
+        local f
+        while read -r f; do
+            [[ -n "$f" ]] || continue
+            if [[ -f "$f" ]] && ! grep -q '^<<<<<<< ' "$f"; then
+                git add -- "$f"
+                log "    rerere replayed a previous resolution for $f"
+                resolved=1
+            fi
+        done < <(git diff --name-only --diff-filter=U || true)
+    fi
+    return $(( ! resolved ))
+}
+
+# ------------------------------------------------------------- landing guard
+# The relocation conflicts are raised LOUDLY by git and resolved by a human. That is
+# where the three known drops actually came from: the conflict was resolved by taking
+# upstream's side, and once the merge is committed the loss is invisible -
+# `git merge-base --is-ancestor` still says the branch is in, because it is; only its
+# content is gone.
+#
+# So assert it after the fact. For every file the branch changed, compare the blob in
+# the merge result against the blob our side had going in. If they are identical while
+# the branch's own version differed, the merge took nothing from the branch for that
+# file and the run stops. This is pure SHA comparison -- no content scanning.
+assert_branch_landed() {
+    local branch="$1" base="$2" pre="$3"   # pre = first parent, i.e. our side going in
+    local f target lost=0
+    local before after theirs
+
+    while read -r f; do
+        [[ -n "$f" ]] || continue
+        case "$f" in
+            pnpm-lock.yaml) continue ;;    # regenerated by the install gate
+        esac
+        theirs="$(git rev-parse --verify --quiet "$branch:$f")" || continue
+        # Unchanged on the branch relative to the base? Then there is nothing to land.
+        [[ "$theirs" == "$(git rev-parse --verify --quiet "$base:$f")" ]] && continue
+
+        target="$f"
+        if ! git rev-parse --verify --quiet "HEAD:$target" >/dev/null 2>&1; then
+            target="$(reloc_target "$f")" || target="$f"
+        fi
+
+        after="$(git rev-parse --verify --quiet "HEAD:$target")"
+        before="$(git rev-parse --verify --quiet "$pre:$target")"
+        if [[ -z "$after" ]]; then
+            warn "    LOST: $f is not in the merge result (nor at $target)"
+            lost=1
+        elif [[ "$after" == "$before" ]]; then
+            warn "    LOST: $target is byte-identical to our pre-merge version;"
+            warn "          $branch changed $f and the merge kept none of it"
+            lost=1
+        fi
+    done < <(git diff --name-only "$base" "$branch")
+
+    (( lost == 0 )) && return 0
+
+    export_rr_cache
+    echo >&2
+    printf '%s============== MERGE DROPPED BRANCH CONTENT ==============%s\n' "$RED" "$RST" >&2
+    cat >&2 <<EOF
+branch : $branch
+
+The merge committed cleanly but the files above came out exactly as our side had
+them, so $branch contributed nothing to them. This is almost always a conflict
+resolved to upstream's side by mistake. It is how pr/search-top-bar's Searching and
+RoomView suites and pr/message-hover-actions' EventTileActionBarViewModel suite were
+lost -- each is still an ancestor of the integration branch, so an ancestry check
+cannot see it.
+
+Re-do this merge and keep both sides, then:
+
+    .fork/sync-upstream.sh --continue
+
+If the drop is deliberate (upstream superseded the branch's approach), record the
+path in .fork/relocations.txt or drop the branch from its manifest, and re-run.
+EOF
+    exit 4
 }
 
 # Indent a multi-line string by four spaces, without shelling out.
@@ -551,7 +748,13 @@ merge_one() {
     fi
     log "  merging $kind $branch ($n commit(s))"
     save_state "merge-$kind" "$idx" "$branch"
+    local mbase mpre
+    mpre="$(git rev-parse HEAD)"
+    mbase="$(git merge-base HEAD "$branch")"
     if ! git merge --no-ff --no-edit -m "Merge $branch into ${INTEGRATION##*/}" "$branch"; then
+        # MUST run before resolve_listed_deletions: the allowlist would take the
+        # deletion and the branch's tests would vanish with it.
+        resolve_relocations || true
         resolve_listed_deletions || true
         resolve_lockfile || true
         resolve_snapshots || true
@@ -559,7 +762,10 @@ merge_one() {
         local files; files="$(conflicting_files)"
         if [[ -z "$files" ]]; then
             # rerere and/or the deletion list resolved everything; conclude the merge.
-            git commit --no-edit && return 0
+            if git commit --no-edit; then
+                assert_branch_landed "$branch" "$mbase" "$mpre"
+                return 0
+            fi
         fi
         export_rr_cache
         echo >&2
@@ -587,6 +793,7 @@ To give up on this run entirely:
 EOF
         exit 3
     fi
+    assert_branch_landed "$branch" "$mbase" "$mpre"
     return 0
 }
 
