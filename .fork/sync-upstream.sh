@@ -1070,6 +1070,48 @@ if check_duplicate_snapshot_keys; then
     log "snapshot keys: no duplicates"
 fi
 
+# ------------------------------------------- 5a2. jest-idiom sweep
+
+# Upstream moved these suites to vitest by relocating them, so any branch that predates
+# the move still writes jest. Wherever such a branch merges, the jest call arrives with
+# it and the file only fails on the runner. This used to be two hand-written patches,
+# which had to be regenerated every time a merge produced slightly different context and
+# conflicted the moment a cached resolution improved. A sweep does not care about context.
+#
+# Scope is deliberately narrow: files the runner actually collects, that already import
+# vitest. A suite that has not migrated keeps jest, which is correct there.
+sweep_jest_idioms() {
+    local f swept=0 files
+    files="$(git ls-files -- 'apps/web/src/**/*.test.ts' 'apps/web/src/**/*.test.tsx' || true)"
+    [[ -n "$files" ]] || return 0
+    while IFS= read -r f; do
+        [[ -n "$f" && -f "$f" ]] || continue
+        grep -q 'from "vitest"' "$f" || continue
+        grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f" || continue
+        perl -0777 -i -pe '
+            # the type first, so the call rewrite below cannot turn it into vi.SpyInstance,
+            # which vitest does not export.
+            s/\bjest\.SpyInstance\b/MockInstance/g;
+            # `jest` and `.spyOn(...)` are written on separate lines often enough that a
+            # jest\. pattern misses them entirely.
+            s/\bjest\b(?=\s*\n\s*\.)/vi/g;
+            s/\bjest\./vi./g;
+        ' "$f"
+        if grep -q '\bMockInstance\b' "$f" && ! grep -qE 'import \{[^}]*MockInstance[^}]*\} from "vitest";' "$f"; then
+            perl -0777 -i -pe 's/(import \{[^}]*?)(\s*\} from "vitest";)/$1, type MockInstance$2/' "$f"
+        fi
+        git add -- "$f" || die "could not stage $f"
+        swept=$((swept + 1))
+    done <<< "$files"
+    (( swept == 0 )) && { log "jest sweep: nothing left to convert"; return 0; }
+    log "jest sweep: converted $swept file(s) the merges brought in with jest idioms"
+    git commit --quiet -m "Convert the merged-in jest idioms to vitest" \
+        -m "Branches predating upstream's move to vitest still write jest, and the call
+arrives wherever they merge. Converted for the suites the runner collects; the
+unmigrated ones keep jest, which is correct there."
+}
+sweep_jest_idioms
+
 # ------------------------------------------- 5b2. cached-resolution audit
 
 # A postimage IS the merge result for its conflict, replayed verbatim on every rebuild
