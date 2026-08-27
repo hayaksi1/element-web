@@ -894,8 +894,8 @@ if (( ${#PATCHES[@]} )); then
     log "applying ${#PATCHES[@]} integration patch(es)"
     for p in "${PATCHES[@]}"; do
         log "  $(basename "$p")"
-        if git apply --check "$p" 2>/dev/null; then
-            git apply "$p"
+        if git apply --index --check "$p" 2>/dev/null; then
+            git apply --index "$p"
         elif git apply --3way --check "$p" 2>/dev/null; then
             git apply --3way "$p"
         else
@@ -913,11 +913,6 @@ Regenerate it from the current tree, or delete it if it is obsolete:
 EOF
             exit 4
         fi
-        # Stage ONLY what the patch touches. `git add -A` would sweep in any unrelated
-        # untracked file sitting in the tree and publish it.
-        while IFS= read -r pf; do
-            [[ -n "$pf" ]] && git add -- "$pf"
-        done < <(git apply --numstat -z "$p" 2>/dev/null | tr '\0' '\n' | awk 'NR%3==0')
         git commit --quiet -m "Apply integration patch $(basename "$p")" \
                             -m "Cross-feature fix that belongs to no single branch. Source: .fork/integration-patches/$(basename "$p")"
     done
