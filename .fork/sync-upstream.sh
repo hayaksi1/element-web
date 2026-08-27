@@ -654,6 +654,25 @@ fi
 
 export_rr_cache
 
+# ------------------------------------------- 5a. conflict-marker guard
+
+# `git add` will happily stage a file that still contains conflict markers, and `git
+# commit` will happily record it. A half-resolved file then rides into the build looking
+# like a normal commit. Refuse to go any further if one is present.
+assert_no_conflict_markers() {
+    local hits
+    hits="$(git grep -l -E '^(<{7}|={7}|>{7})( |$)' -- \
+              ':(exclude).fork/rr-cache' ':(exclude)*.snap' 2>/dev/null || true)"
+    [[ -z "$hits" ]] && { log "conflict markers: none"; return 0; }
+    warn "CONFLICT MARKERS are committed in:"
+    warn "$(indent "$hits")"
+    die "refusing to continue. A merge was concluded while a file was still unresolved.
+Fix each file, then:
+    git add <files> && git commit --amend --no-edit
+and re-run. Nothing has been pushed."
+}
+assert_no_conflict_markers
+
 # ------------------------------------------- 5b. snapshot sanity
 
 # A merged .snap can end up defining the same exports[...] key twice. Jest evaluates the
