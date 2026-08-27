@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:56:47 +0300
+Subject: [PATCH] Reflow two restored suites to satisfy the formatter
+
+The restored fork cases were written against the formatter's older line
+budget, so oxfmt rejects them where the surrounding file passes. Cosmetic
+only, kept apart from the lint fixes it arrived with.
+
+The four documentation files and the storybook stylesheet the formatter also
+rejects are left alone: they were already failing before any of this work and
+folding them in would bury the change.
+---
+ apps/desktop/src/auto-launch.test.ts                        | 4 +---
+ .../src/viewmodels/room/EventTileActionBarViewModel.test.ts | 6 +++---
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/apps/desktop/src/auto-launch.test.ts b/apps/desktop/src/auto-launch.test.ts
+index 79466e3651..c023bb16d3 100644
+--- a/apps/desktop/src/auto-launch.test.ts
++++ b/apps/desktop/src/auto-launch.test.ts
+@@ -109,9 +109,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.setState("enabled");
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", false);
+-            expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, args: [] }),
+-            );
++            expect(setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: true, args: [] }));
+         });
+ 
+         it("enables auto-launch minimised (hidden) at login", async () => {
+diff --git a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
+index fe341470e0..6c834099ed 100644
+--- a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
++++ b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
+@@ -806,9 +806,9 @@ describe("EventTileActionBarViewModel", () => {
+ 
+             // The view model watches the setting, so flipping it must repopulate the bar without a remount.
+             compactMessageActions = false;
+-            const [, , onChange] = vi.mocked(SettingsStore.watchSetting).mock.calls.find(
+-                ([name]) => name === "compactMessageActions",
+-            )!;
++            const [, , onChange] = vi
++                .mocked(SettingsStore.watchSetting)
++                .mock.calls.find(([name]) => name === "compactMessageActions")!;
+             onChange("compactMessageActions", null, SettingLevel.ACCOUNT, false, false);
+ 
+             expect(vm.getSnapshot().actions).toContain(ActionBarAction.Reply);
