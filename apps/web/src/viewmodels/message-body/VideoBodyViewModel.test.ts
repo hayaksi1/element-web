@@ -20,6 +20,7 @@ import { mediaFromContent } from "../../customisations/Media";
 import { BLURHASH_FIELD } from "../../utils/image-media";
 import { type MediaEventHelper } from "../../utils/MediaEventHelper";
 import { VideoBodyViewModel } from "./VideoBodyViewModel";
+import { DecryptError, DownloadError } from "../../utils/DecryptFile";
 
 vi.mock("../../customisations/Media", () => ({
     mediaFromContent: vi.fn(),
@@ -283,7 +284,49 @@ describe("VideoBodyViewModel", () => {
         await flushPromises();
 
         expect(vm.getSnapshot().state).toBe(VideoBodyViewState.ERROR);
-        expect(vm.getSnapshot().errorLabel).toBeTruthy();
+        expect(vm.getSnapshot().errorLabel).toBe("Error decrypting video");
+    });
+
+    it("reports a download failure as a download error rather than a decryption error", async () => {
+        const vm = createVm({
+            mxEvent: createEvent({
+                content: {
+                    file: { url: "mxc://server/encrypted-video" },
+                },
+            }),
+            mediaEventHelper: createMediaEventHelper({
+                encrypted: true,
+                thumbnailUrl: Promise.reject(new DownloadError(new Error("network is unreachable"))),
+            }),
+            mediaVisible: true,
+        });
+        vm.loadInitialMediaIfVisible();
+
+        await flushPromises();
+
+        expect(vm.getSnapshot().state).toBe(VideoBodyViewState.ERROR);
+        expect(vm.getSnapshot().errorLabel).toBe("Error downloading video");
+    });
+
+    it("still reports a decryption failure as a decryption error", async () => {
+        const vm = createVm({
+            mxEvent: createEvent({
+                content: {
+                    file: { url: "mxc://server/encrypted-video" },
+                },
+            }),
+            mediaEventHelper: createMediaEventHelper({
+                encrypted: true,
+                thumbnailUrl: Promise.reject(new DecryptError(new Error("bad key"))),
+            }),
+            mediaVisible: true,
+        });
+        vm.loadInitialMediaIfVisible();
+
+        await flushPromises();
+
+        expect(vm.getSnapshot().state).toBe(VideoBodyViewState.ERROR);
+        expect(vm.getSnapshot().errorLabel).toBe("Error decrypting video");
     });
 
     it("loads the encrypted source on play when only a placeholder url is present", async () => {
