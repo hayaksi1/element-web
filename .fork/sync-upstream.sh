@@ -661,8 +661,10 @@ export_rr_cache
 # like a normal commit. Refuse to go any further if one is present.
 assert_no_conflict_markers() {
     local hits
-    hits="$(git grep -l -E '^(<{7}|={7}|>{7})( |$)' -- \
-              ':(exclude).fork/rr-cache' ':(exclude)*.snap' 2>/dev/null || true)"
+    # Only <<<<<<< and >>>>>>> are reliable: a bare ======= line is also how people
+    # underline a heading in a doc comment (upstream's ScalarMessaging.ts does exactly
+    # that), so matching it alone produces false positives.
+    hits="$(git grep -l -E '^(<{7}|>{7}) ' -- ':(exclude).fork/rr-cache' 2>/dev/null || true)"
     [[ -z "$hits" ]] && { log "conflict markers: none"; return 0; }
     warn "CONFLICT MARKERS are committed in:"
     warn "$(indent "$hits")"
