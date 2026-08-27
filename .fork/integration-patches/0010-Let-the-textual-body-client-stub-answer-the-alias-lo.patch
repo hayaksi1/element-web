@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:28:53 +0300
+Subject: [PATCH 10/10] Let the textual-body client stub answer the alias
+ lookup
+
+Rendering a room-alias pill resolves the target through findRoomByAlias,
+which asks the client for its visible rooms rather than all of them. This
+stub is an explicit method list rather than a full fake, so it only
+answered the older call and the pill threw mid-render. Pointing both at
+the same pair of rooms keeps the two answers consistent, which is what the
+shared client fixtures already do.
+---
+ .../src/components/views/messages/TextualBodyFactory.test.tsx    | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx b/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
+index bf3ac2d824..1c97b6f6d4 100644
+--- a/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
++++ b/apps/web/src/components/views/messages/TextualBodyFactory.test.tsx
+@@ -93,6 +93,7 @@ describe("<TextualBody />", () => {
+                 return null;
+             },
+             getRooms: () => [defaultRoom, otherRoom],
++            getVisibleRooms: () => [defaultRoom, otherRoom],
+             getAccountData: (): MatrixEvent | undefined => undefined,
+             isGuest: () => false,
+             mxcUrlToHttp: (s: string) => s,
