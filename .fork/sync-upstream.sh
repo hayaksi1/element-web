@@ -381,6 +381,24 @@ resolve_relocations() {
         [[ -n "$old" ]] || continue
         new="$(reloc_target "$old")" || continue
         [[ "$new" == "$old" ]] && continue
+        # Two runners collect tests, and between them they leave a dead zone: jest takes
+        # apps/web/test/**/*-test.*, vitest takes apps/web/src/**/*.test.*, so a file that
+        # is in src with a -test name, or in test with a .test name, is collected by
+        # neither. Landing fork work there loses it silently - it neither fails nor runs.
+        # The co-location transform cannot produce those shapes, but relocations.txt is
+        # free text and git's rename detection returns whatever it finds.
+        case "$new" in
+            apps/web/src/*-test.ts|apps/web/src/*-test.tsx|apps/web/test/*.test.ts|apps/web/test/*.test.tsx)
+                die "relocation would land $old at $new, which no test runner collects.
+jest takes apps/web/test/**/*-test.*; vitest takes apps/web/src/**/*.test.*. A file in
+between is silently never run. Fix the mapping in .fork/relocations.txt." ;;
+        esac
+        # A rename pair whose extension changes is git guessing across file types: the
+        # same detection window paired a .pcss stylesheet with a .ts helper at -M50%.
+        if [[ "${old##*.}" != "${new##*.}" ]]; then
+            warn "    ignoring rename $old -> $new: different file types, almost certainly a false pair"
+            continue
+        fi
         # The target has to be present in the merge result, else there is nothing to
         # merge into and the deletion allowlist should get its turn.
         git cat-file -e ":0:$new" 2>/dev/null || continue
@@ -1309,6 +1327,56 @@ gate "lint:style"     pnpm -r lint:style
 gate "lint:workflows" pnpm lint:workflows
 gate "lint:knip"      pnpm lint:knip
 gate "pnpm test:unit" pnpm test:unit
+
+# There are two runners. vitest collects apps/web/src/**/*.test.*; jest collects
+# apps/web/test/**/*-test.* - 191 files, including seventeen fork regression suites
+# attached to pr/* branches. The root test:unit script runs vitest only, so none of that
+# has ever been able to block a sync. Upstream gates it in its own job; we did not.
+KNOWN_JEST_FAILURES="$REPO_ROOT/.fork/known-jest-failures.txt"
+gate_jest() {
+    local out json failed unknown
+    log "gate: jest (apps/web)"
+    out="$(mktemp)"; json="$(mktemp)"
+    if ( cd "$REPO_ROOT/apps/web" && TZ=UTC NODE_OPTIONS=--max_old_space_size=8192 \
+            pnpm exec jest --ci --maxWorkers=50% --json --outputFile="$json" ) >"$out" 2>&1; then
+        ok "  PASS  jest"
+        rm -f "$out" "$json"; return
+    fi
+    # Pass only if every failing test is named in the allowlist. One unlisted failure
+    # stops the push, so this cannot quietly absorb a second, real regression.
+    failed="$(python3 - "$json" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+for f in d.get("testResults", []):
+    for a in f.get("assertionResults", []):
+        if a.get("status") == "failed":
+            print(" > ".join(a.get("ancestorTitles", []) + [a.get("title", "")]))
+PYEOF
+)"
+    if [[ -z "$failed" ]]; then
+        warn "  FAIL  jest (could not read which tests failed; treating as a real failure)"
+        indent "$(tail -30 "$out")" >&2
+        GATES_PASSED=0; rm -f "$out" "$json"; return
+    fi
+    unknown=""
+    while IFS= read -r t; do
+        [[ -n "$t" ]] || continue
+        grep -qxF -- "$t" "$KNOWN_JEST_FAILURES" 2>/dev/null || unknown+="$t"$'\n'
+    done <<< "$failed"
+    if [[ -n "$unknown" ]]; then
+        warn "  FAIL  jest: failing test(s) not in .fork/known-jest-failures.txt:"
+        warn "$(indent "${unknown%$'\n'}")"
+        GATES_PASSED=0
+    else
+        warn "  TOLERATED  jest: $(printf '%s\n' "$failed" | grep -c .) known upstream failure(s)"
+        warn "$(indent "$failed")"
+        warn "      Each is listed with its evidence in .fork/known-jest-failures.txt."
+        TOLERATED+="jest "
+    fi
+    rm -f "$out" "$json"
+}
+gate_jest
 
 if (( GATES_PASSED )); then ok "all verification gates passed"; else warn "one or more gates FAILED"; fi
 

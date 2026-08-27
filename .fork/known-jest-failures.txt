@@ -1,0 +1,17 @@
+# Jest tests that fail for reasons that are not ours.
+#
+# One exact test name per line, as jest reports it ("Suite > test name"). The gate passes
+# only if EVERY failing test is listed here; a single unlisted failure still stops the
+# push. That is deliberately stricter than a "the errors are somebody else's" predicate,
+# which can absorb a second, real failure without anyone noticing.
+#
+# Each line needs the evidence that it is not ours, or it should not be here.
+
+# The failing assertion and its whole test are byte-identical to upstream; the fork's only
+# change to that file is an appended "page up and down" describe block declared 287 lines
+# later, and the test fails identically with that block skipped. Substituting upstream's
+# own SpotlightDialog.tsx reproduces it unchanged, so the fork's keyboard-navigation change
+# is not the cause either. It is an upstream result-ordering drift its own test has not
+# caught up with: the first row is the DM room ("Chat with Alice") where the test expects
+# the member entry.
+Spotlight Dialog > show non-matching query members with DMs if they are present in the server search results
