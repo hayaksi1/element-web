@@ -1145,10 +1145,17 @@ sweep_jest_idioms() {
         if grep -q '\bMockInstance\b' "$f" && ! grep -qE 'import \{[^}]*MockInstance[^}]*\} from "vitest";' "$f"; then
             perl -0777 -i -pe 's/(import \{[^}]*?)(\s*\} from "vitest";)/$1, type MockInstance$2/' "$f"
         fi
+        # grep matching is not the same as the rewrite changing anything: a bare
+        # "@types/jest" in an import matches the word and has nothing to convert. Count
+        # and stage only what actually moved, or the commit below runs on an empty index.
+        if git diff --quiet -- "$f"; then continue; fi
         git add -- "$f" || die "could not stage $f"
         swept=$((swept + 1))
     done <<< "$files"
-    (( swept == 0 )) && { log "jest sweep: nothing left to convert"; return 0; }
+    if (( swept == 0 )) || git diff --cached --quiet; then
+        log "jest sweep: nothing left to convert"
+        return 0
+    fi
     log "jest sweep: converted $swept file(s) the merges brought in with jest idioms"
     git commit --quiet -m "Convert the merged-in jest idioms to vitest" \
         -m "Branches predating upstream's move to vitest still write jest, and the call
