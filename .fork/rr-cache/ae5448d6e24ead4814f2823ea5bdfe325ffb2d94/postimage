@@ -905,7 +905,6 @@ describe("RoomView", () => {
     });
 
     describe("message search", () => {
-<<<<<<<
         const stubElementHover = (el: Element): (() => void) => {
             const original = HTMLElement.prototype.matches;
             const spy = vi.spyOn(HTMLElement.prototype, "matches").mockImplementation(function (
@@ -917,9 +916,8 @@ describe("RoomView", () => {
             });
             return () => spy.mockRestore();
         };
-=======
         it("should clear the search results when the search box is emptied", async () => {
-            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            room.getMyMembership = vi.fn().mockReturnValue(KnownMembership.Join);
 
             const roomViewRef = createRef<RoomView>();
             const { container } = await mountRoomView(roomViewRef);
@@ -956,7 +954,7 @@ describe("RoomView", () => {
         });
 
         it("should leave the caret in the search box when it is emptied", async () => {
-            room.getMyMembership = jest.fn().mockReturnValue(KnownMembership.Join);
+            room.getMyMembership = vi.fn().mockReturnValue(KnownMembership.Join);
 
             const roomViewRef = createRef<RoomView>();
             await mountRoomView(roomViewRef);
@@ -995,7 +993,6 @@ describe("RoomView", () => {
                 searchBox.remove();
             }
         });
->>>>>>>
 
         it("should close search results when edit is clicked", async () => {
             room.getMyMembership = vi.fn().mockReturnValue(KnownMembership.Join);

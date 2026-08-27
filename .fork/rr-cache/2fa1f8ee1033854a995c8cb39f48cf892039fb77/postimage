@@ -184,8 +184,8 @@ describe("notifications", () => {
                 // The predecessor's highlights are folded into this room's badge, so they have to be
                 // cleared from here or the user is left with a count they cannot reach
                 oldRoom.setUnreadNotificationCount(NotificationCountType.Highlight, 3);
-                jest.spyOn(room, "findPredecessor").mockReturnValue({ roomId: OLD_ROOM_ID });
-                jest.spyOn(client, "getRoom").mockImplementation((roomId) => (roomId === OLD_ROOM_ID ? oldRoom : null));
+                vi.spyOn(room, "findPredecessor").mockReturnValue({ roomId: OLD_ROOM_ID });
+                vi.spyOn(client, "getRoom").mockImplementation((roomId) => (roomId === OLD_ROOM_ID ? oldRoom : null));
             });
 
             it("marks the replaced room as read too", async () => {

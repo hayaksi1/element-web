@@ -60,8 +60,8 @@ describe("PlainTextExport", () => {
         stubRoom.currentState = {
             getSentinelMember: () => null,
         } as unknown as typeof stubRoom.currentState;
-        stubRoom.getLiveTimeline = jest.fn().mockReturnValue({ getEvents: () => [message, threadRoot] });
-        stubRoom.getThreads = jest.fn().mockReturnValue([
+        stubRoom.getLiveTimeline = vi.fn().mockReturnValue({ getEvents: () => [message, threadRoot] });
+        stubRoom.getThreads = vi.fn().mockReturnValue([
             {
                 liveTimeline: { getEvents: () => [threadRoot, threadReply] },
             },
