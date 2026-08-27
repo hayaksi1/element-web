@@ -62,12 +62,6 @@ Please see LICENSE files in the repository root for full details.
         }
     }
 
-    &:hover {
-        .mx_EventTile_avatar {
-            border-color: $eventbubble-bg-hover;
-        }
-    }
-
     /* For replies */
     .mx_EventTile {
         padding-top: 0;
@@ -84,10 +78,12 @@ Please see LICENSE files in the repository root for full details.
         border-radius: 4px;
     }
 
-    &:hover,
+    /* Selected (permalinked event) and the tile whose action menu is open always keep the band: it is
+       the only cue saying which event the menu acts on, and with the hover band gated off below there
+       is otherwise nothing. The group layout marks `actionBarFocused` for the same reason
+       (_EventTile.pcss). A focused search-stepping match bands for the same reason. */
     &.mx_EventTile_selected,
-    /* Focused search-stepping match: give the bubble the same subtle band as the
-       selected/hover state so the active match is distinguishable in bubble layout too. */
+    &.mx_EventTile_actionBarFocused,
     &.mx_EventTile_searchHighlightActive {
         &::before {
             background: $eventbubble-bg-hover;
@@ -101,6 +97,23 @@ Please see LICENSE files in the repository root for full details.
     }
 
     /* Position the main event sender; reply senders own their alignment. */
+
+    /* The hover band is suppressed under `compactMessageActions` (see LoggedInView): hovering a message
+       then reveals the options button alone, with no full-width highlight. */
+    .mx_MatrixChat_wrapper:not(.mx_MatrixChat_compactMessageActions) &:hover {
+        &::before {
+            background: $eventbubble-bg-hover;
+        }
+
+        .mx_EventTile_avatar {
+            border-color: $eventbubble-bg-hover;
+
+            img {
+                box-shadow: 0 0 0 3px $eventbubble-bg-hover;
+            }
+        }
+    }
+
     > .mx_DisambiguatedProfile,
     .mx_EventTile_senderDetails > .mx_DisambiguatedProfile {
         position: relative;
