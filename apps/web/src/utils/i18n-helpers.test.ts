@@ -10,7 +10,8 @@ Please see LICENSE files in the repository root for full details.
 
 import { describe, it, expect, vi } from "vitest";
 import { Room } from "matrix-js-sdk/src/matrix";
-import { stubClient } from "test-utils";
+import { KnownMembership } from "matrix-js-sdk/src/types";
+import { mkMembership, stubClient } from "test-utils";
 
 import { roomContextDetails } from "./i18n-helpers";
 import DMRoomMap from "./DMRoomMap";
@@ -54,5 +55,38 @@ describe("roomContextDetails", () => {
         const res = roomContextDetails(room);
         expect(res!.details).toMatchInlineSnapshot(`"Alpha and one other"`);
         expect(res!.ariaLabel).toMatchInlineSnapshot(`"In Alpha and one other space."`);
+    });
+
+    describe("for a DM", () => {
+        const me = client.getSafeUserId();
+        const partner = "@partner:server";
+        const parted = "@parted:server";
+        const dm = new Room("!dm:server", client, me);
+        dm.currentState.setStateEvents([
+            mkMembership({ room: dm.roomId, user: me, mship: KnownMembership.Join, event: true }),
+            mkMembership({ room: dm.roomId, user: partner, mship: KnownMembership.Join, event: true }),
+        ]);
+
+        beforeEach(() => {
+            vi.spyOn(SDKContextClass.instance.spaceStore, "getKnownParents").mockReturnValue(new Set());
+        });
+
+        it("should show the partner's user ID while they are in the room", () => {
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(partner);
+            expect(roomContextDetails(dm)!.details).toBe(partner);
+        });
+
+        it("should not show the user ID of a partner who was never seen in the room", () => {
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+            expect(roomContextDetails(dm)!.details).not.toBe(parted);
+        });
+
+        it("should not show the user ID of a partner who has left the room", () => {
+            dm.currentState.setStateEvents([
+                mkMembership({ room: dm.roomId, user: parted, mship: KnownMembership.Leave, event: true }),
+            ]);
+            vi.spyOn(DMRoomMap.shared(), "getUserIdForRoomId").mockReturnValue(parted);
+            expect(roomContextDetails(dm)!.details).not.toBe(parted);
+        });
     });
 });
