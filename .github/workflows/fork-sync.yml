@@ -1,11 +1,11 @@
 name: Fork sync
 
 # Rebuilds the fork against upstream:
-#   develop --ff-only-> upstream/develop, feat/* rebased, combined/integration rebuilt.
+#   develop --ff-only-> upstream/develop, feat/* rebased, combined rebuilt.
 #
 # NOTE: scheduled workflows only ever run from the repository's DEFAULT branch. `develop`
 # is a pristine mirror of upstream and must never carry this file, so the default branch
-# must be set to `combined/integration` in Settings -> General -> Default branch.
+# must be set to `combined` in Settings -> General -> Default branch.
 
 on:
     schedule:
@@ -34,7 +34,7 @@ jobs:
             - name: Check out the integration branch with full history
               uses: actions/checkout@v4
               with:
-                  ref: combined/integration
+                  ref: combined
                   fetch-depth: 0
                   persist-credentials: true
 
