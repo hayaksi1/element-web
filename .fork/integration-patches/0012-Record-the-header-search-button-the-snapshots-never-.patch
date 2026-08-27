@@ -1,0 +1,655 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:34:53 +0300
+Subject: [PATCH] Record the header search button the snapshots never learned
+ about
+
+The fork adds a search button to the room header and a search bar above the
+timeline, and updated the two snapshots that render them. Both updates were
+lost in the merge and the committed files came through byte-identical to
+upstream, which left RoomView and RoomHeader failing on a tree where nothing
+about the components themselves was wrong.
+
+This class hides from a line-set comparison: a snapshot's added lines are
+markup fragments that recur elsewhere in the same file, so every added line is
+still found and the file reads as intact. Comparing the blob against upstream
+is what catches it.
+---
+ .../__snapshots__/RoomView.test.tsx.snap      | 232 +++++++++++++++---
+ .../__snapshots__/RoomHeader.test.tsx.snap    |  38 ++-
+ 2 files changed, 226 insertions(+), 44 deletions(-)
+
+diff --git a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
+index 1ea6083cf8..7e3e7675a5 100644
+--- a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
++++ b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
+@@ -1181,6 +1181,32 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -1195,7 +1221,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1222,7 +1248,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1237,7 +1263,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1264,7 +1290,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1294,7 +1320,7 @@ exports[`RoomView > should hide the composer when hideComposer=true 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -1736,6 +1762,32 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -1750,7 +1802,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1777,7 +1829,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -1792,7 +1844,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1819,7 +1871,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -1849,7 +1901,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -1916,7 +1968,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+               >
+                 <svg
+                   aria-label="Messages in this room are not end-to-end encrypted"
+-                  aria-labelledby="react-use-id-6"
++                  aria-labelledby="react-use-id-7"
+                   class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                   color="var(--cpd-color-icon-info-primary)"
+                   fill="currentColor"
+@@ -2103,7 +2155,7 @@ exports[`RoomView > should hide the pinned message banner when hidePinnedMessage
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-7"
++                  aria-labelledby="react-use-id-8"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -2221,6 +2273,32 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2235,7 +2313,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2262,7 +2340,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2277,7 +2355,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2304,7 +2382,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2334,7 +2412,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile mx_FacePile_toggled"
+               role="button"
+               tabindex="0"
+@@ -2401,7 +2479,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+               >
+                 <svg
+                   aria-label="Messages in this room are not end-to-end encrypted"
+-                  aria-labelledby="react-use-id-6"
++                  aria-labelledby="react-use-id-7"
+                   class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                   color="var(--cpd-color-icon-info-primary)"
+                   fill="currentColor"
+@@ -2588,7 +2666,7 @@ exports[`RoomView > should hide the right panel when hideRightPanel=true 1`] = `
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-7"
++                  aria-labelledby="react-use-id-8"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -2706,6 +2784,32 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-1"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2720,7 +2824,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-1"
++                aria-labelledby="react-use-id-2"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2747,7 +2851,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2762,7 +2866,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2789,7 +2893,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -2819,7 +2923,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-5"
++              aria-labelledby="react-use-id-6"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -2945,6 +3049,32 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               </div>
+             </div>
+           </button>
++          <button
++            aria-label="Search"
++            aria-labelledby="react-use-id-2"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
+           <button
+             aria-disabled="false"
+             aria-label="Video call"
+@@ -2959,7 +3089,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-2"
++                aria-labelledby="react-use-id-3"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -2986,7 +3116,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+               style="--cpd-icon-button-size: 100%;"
+             >
+               <svg
+-                aria-labelledby="react-use-id-3"
++                aria-labelledby="react-use-id-4"
+                 fill="currentColor"
+                 height="1em"
+                 viewBox="0 0 24 24"
+@@ -3001,7 +3131,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-4"
++            aria-labelledby="react-use-id-5"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3028,7 +3158,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-5"
++            aria-labelledby="react-use-id-6"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3058,7 +3188,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-6"
++              aria-labelledby="react-use-id-7"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -3127,7 +3257,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+                   tabindex="0"
+                 >
+                   <div
+-                    aria-labelledby="react-use-id-7"
++                    aria-labelledby="react-use-id-8"
+                     class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                     data-testid="e2e-icon"
+                     style="width: 12px; height: 12px;"
+@@ -3322,7 +3452,7 @@ exports[`RoomView > should not display the timeline when the room encryption is
+                 </div>
+                 <button
+                   aria-label="Attachment"
+-                  aria-labelledby="react-use-id-8"
++                  aria-labelledby="react-use-id-9"
+                   class="_icon-button_1215g_8"
+                   data-kind="primary"
+                   role="button"
+@@ -3471,13 +3601,39 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+             </div>
+           </button>
+           <button
+-            aria-label="Chat"
++            aria-label="Search"
+             aria-labelledby="react-use-id-1"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+             style="--cpd-icon-button-size: 32px;"
+             tabindex="0"
++          >
++            <div
++              class="_indicator-icon_147l5_17"
++              style="--cpd-icon-button-size: 100%;"
++            >
++              <svg
++                fill="currentColor"
++                height="1em"
++                viewBox="0 0 24 24"
++                width="1em"
++                xmlns="http://www.w3.org/2000/svg"
++              >
++                <path
++                  d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++                />
++              </svg>
++            </div>
++          </button>
++          <button
++            aria-label="Chat"
++            aria-labelledby="react-use-id-2"
++            class="_icon-button_1215g_8"
++            data-kind="primary"
++            role="button"
++            style="--cpd-icon-button-size: 32px;"
++            tabindex="0"
+           >
+             <div
+               class="_indicator-icon_147l5_17"
+@@ -3499,7 +3655,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           </button>
+           <button
+             aria-label="Threads"
+-            aria-labelledby="react-use-id-2"
++            aria-labelledby="react-use-id-3"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3526,7 +3682,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           </button>
+           <button
+             aria-label="Room info"
+-            aria-labelledby="react-use-id-3"
++            aria-labelledby="react-use-id-4"
+             class="_icon-button_1215g_8"
+             data-kind="primary"
+             role="button"
+@@ -3556,7 +3712,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+           >
+             <div
+               aria-label="0 members"
+-              aria-labelledby="react-use-id-4"
++              aria-labelledby="react-use-id-5"
+               class="mx_AccessibleButton mx_FacePile"
+               role="button"
+               tabindex="0"
+@@ -3642,7 +3798,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                 </p>
+               </div>
+               <button
+-                aria-labelledby="react-use-id-5"
++                aria-labelledby="react-use-id-6"
+                 class="_icon-button_1215g_8"
+                 data-kind="secondary"
+                 data-testid="base-card-close-button"
+@@ -3702,7 +3858,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                   >
+                     <svg
+                       aria-label="Messages in this room are not end-to-end encrypted"
+-                      aria-labelledby="react-use-id-6"
++                      aria-labelledby="react-use-id-7"
+                       class="mx_E2EIcon mx_MessageComposer_e2eIcon"
+                       color="var(--cpd-color-icon-info-primary)"
+                       fill="currentColor"
+@@ -3889,7 +4045,7 @@ exports[`RoomView > video rooms > should render joined video room view 1`] = `
+                     </div>
+                     <button
+                       aria-label="Attachment"
+-                      aria-labelledby="react-use-id-7"
++                      aria-labelledby="react-use-id-8"
+                       class="_icon-button_1215g_8"
+                       data-kind="primary"
+                       role="button"
+diff --git a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap b/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
+index f8c86405fd..fb30beb9cd 100644
+--- a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
++++ b/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
+@@ -43,6 +43,32 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         </div>
+       </div>
+     </button>
++    <button
++      aria-label="Search"
++      aria-labelledby="react-use-id-1"
++      class="_icon-button_1215g_8"
++      data-kind="primary"
++      role="button"
++      style="--cpd-icon-button-size: 32px;"
++      tabindex="0"
++    >
++      <div
++        class="_indicator-icon_147l5_17"
++        style="--cpd-icon-button-size: 100%;"
++      >
++        <svg
++          fill="currentColor"
++          height="1em"
++          viewBox="0 0 24 24"
++          width="1em"
++          xmlns="http://www.w3.org/2000/svg"
++        >
++          <path
++            d="M15.05 16.463a7.5 7.5 0 1 1 1.414-1.414l3.243 3.244a1 1 0 0 1-1.414 1.414zM16 10.5a5.5 5.5 0 1 0-11 0 5.5 5.5 0 0 0 11 0"
++          />
++        </svg>
++      </div>
++    </button>
+     <button
+       aria-disabled="false"
+       aria-expanded="false"
+@@ -51,7 +77,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       data-state="closed"
+-      id="radix-react-use-id-1"
++      id="radix-react-use-id-2"
+       role="button"
+       style="--cpd-icon-button-size: 32px;"
+       tabindex="0"
+@@ -62,7 +88,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         style="--cpd-icon-button-size: 100%;"
+       >
+         <svg
+-          aria-labelledby="react-use-id-2"
++          aria-labelledby="react-use-id-3"
+           fill="currentColor"
+           height="1em"
+           viewBox="0 0 24 24"
+@@ -83,7 +109,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       data-state="closed"
+-      id="radix-react-use-id-3"
++      id="radix-react-use-id-4"
+       role="button"
+       style="--cpd-icon-button-size: 32px;"
+       tabindex="0"
+@@ -94,7 +120,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+         style="--cpd-icon-button-size: 100%;"
+       >
+         <svg
+-          aria-labelledby="react-use-id-4"
++          aria-labelledby="react-use-id-5"
+           fill="currentColor"
+           height="1em"
+           viewBox="0 0 24 24"
+@@ -109,7 +135,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+     </button>
+     <button
+       aria-label="Threads"
+-      aria-labelledby="react-use-id-5"
++      aria-labelledby="react-use-id-6"
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       role="button"
+@@ -136,7 +162,7 @@ exports[`RoomHeader > dm > does not show the face pile for DMs 1`] = `
+     </button>
+     <button
+       aria-label="Room info"
+-      aria-labelledby="react-use-id-6"
++      aria-labelledby="react-use-id-7"
+       class="_icon-button_1215g_8"
+       data-kind="primary"
+       role="button"
