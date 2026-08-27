@@ -5,21 +5,25 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import SettingsStore from "../../../src/settings/SettingsStore";
-import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "../../../src/utils/scrollBehavior";
+// @vitest-environment happy-dom
 
-jest.mock("../../../src/settings/SettingsStore");
+import { vi, describe, it, expect, beforeEach } from "vitest";
+
+import SettingsStore from "../settings/SettingsStore";
+import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";
+
+vi.mock("../settings/SettingsStore");
 
 describe("scrollBehavior", () => {
-    const mockedGetValue = jest.mocked(SettingsStore.getValue);
+    const mockedGetValue = vi.mocked(SettingsStore.getValue);
 
     /** Set up matchMedia so that (prefers-reduced-motion: reduce) returns `matches`. */
     const mockMatchMedia = (matches: boolean): void => {
-        globalThis.matchMedia = jest.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
+        globalThis.matchMedia = vi.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
     };
 
     beforeEach(() => {
-        jest.resetAllMocks();
+        vi.resetAllMocks();
         mockedGetValue.mockReturnValue(false);
         mockMatchMedia(false);
     });

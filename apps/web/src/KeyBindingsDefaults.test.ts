@@ -5,22 +5,26 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { defaultBindingsProvider } from "../../src/KeyBindingsDefaults";
-import SettingsStore from "../../src/settings/SettingsStore";
-import { KeyBindingAction } from "../../src/accessibility/KeyboardShortcuts";
-import { type KeyBinding } from "../../src/KeyBindingsManager";
-import { Key } from "../../src/Keyboard";
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, afterEach } from "vitest";
+
+import { defaultBindingsProvider } from "./KeyBindingsDefaults";
+import SettingsStore from "./settings/SettingsStore";
+import { KeyBindingAction } from "./accessibility/KeyboardShortcuts";
+import { type KeyBinding } from "./KeyBindingsManager";
+import { Key } from "./Keyboard";
 
 const searchBinding = (bindings: KeyBinding[]): KeyBinding | undefined =>
     bindings.find((b) => b.action === KeyBindingAction.SearchInRoom);
 
 describe("defaultBindingsProvider.getRoomBindings", () => {
     afterEach(() => {
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     it("registers the Ctrl/Cmd+F room-search binding when ctrlFForSearch is enabled", () => {
-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
+        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
 
         const binding = searchBinding(defaultBindingsProvider.getRoomBindings());
 
@@ -29,7 +33,7 @@ describe("defaultBindingsProvider.getRoomBindings", () => {
     });
 
     it("omits the room-search binding when ctrlFForSearch is disabled", () => {
-        jest.spyOn(SettingsStore, "getValue").mockReturnValue(false);
+        vi.spyOn(SettingsStore, "getValue").mockReturnValue(false);
 
         expect(searchBinding(defaultBindingsProvider.getRoomBindings())).toBeUndefined();
     });
