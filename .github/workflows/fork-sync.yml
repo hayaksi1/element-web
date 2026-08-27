@@ -148,14 +148,30 @@ jobs:
                           "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
                   } > issue-body.md
 
+                  # The job summary always works. An issue does not: a fork has Issues
+                  # disabled by default, and losing the whole conflict report to
+                  # "Resource not accessible by integration" is a worse outcome than not
+                  # having a tracking issue. So write the summary first, then try the
+                  # issue as a bonus and never fail the step over it.
+                  {
+                      printf '## %s\n\n' "$title"
+                      cat issue-body.md
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" != "true" ]; then
+                      echo "::warning::Issues are disabled on this repository - conflict reported in the job summary only."
+                      exit 0
+                  fi
+
                   existing="$(gh issue list --state open --search "\"$title\" in:title" \
-                              --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+                              --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
                   if [ -n "$existing" ]; then
-                      gh issue comment "$existing" --body-file issue-body.md
-                      echo "updated issue #$existing"
+                      gh issue comment "$existing" --body-file issue-body.md \
+                        || echo "::warning::could not comment on issue #$existing"
                   else
                       gh issue create --title "$title" --body-file issue-body.md --label "fork-sync" 2>/dev/null \
-                        || gh issue create --title "$title" --body-file issue-body.md
+                        || gh issue create --title "$title" --body-file issue-body.md \
+                        || echo "::warning::could not open an issue - conflict is in the job summary"
                   fi
 
             - name: Close stale conflict issues on a clean run
