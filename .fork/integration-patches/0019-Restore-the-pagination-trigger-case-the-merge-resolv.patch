@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:52:17 +0300
+Subject: [PATCH] Restore the pagination-trigger case the merge resolved away
+
+The dropped case is the only coverage of onLoadMoreReady, the callback
+through which the kept-mounted search view hands its pagination function
+up to the visible results dropdown. That contract is live on both sides,
+so losing the test left a fork-only seam between two components guarded by
+nothing.
+
+Ported to the colocated path and the vitest idiom the rest of the file now
+uses. Verified load-bearing rather than merely present: registering null
+in place of the function turns it red on the type of the registered value.
+---
+ ...er.test.tsx => BotCommandProvider.test.ts} |  0
+ .../structures/RoomSearchView.test.tsx        | 49 +++++++++++++++++++
+ 2 files changed, 49 insertions(+)
+ rename apps/web/src/autocomplete/{BotCommandProvider.test.tsx => BotCommandProvider.test.ts} (100%)
+
+diff --git a/apps/web/src/autocomplete/BotCommandProvider.test.tsx b/apps/web/src/autocomplete/BotCommandProvider.test.ts
+similarity index 100%
+rename from apps/web/src/autocomplete/BotCommandProvider.test.tsx
+rename to apps/web/src/autocomplete/BotCommandProvider.test.ts
+diff --git a/apps/web/src/components/structures/RoomSearchView.test.tsx b/apps/web/src/components/structures/RoomSearchView.test.tsx
+index dc56d08f2c..cc989b46f7 100644
+--- a/apps/web/src/components/structures/RoomSearchView.test.tsx
++++ b/apps/web/src/components/structures/RoomSearchView.test.tsx
+@@ -261,6 +261,55 @@ describe("<RoomSearchView/>", () => {
+         expect(screen.queryByRole("progressbar")).toBeFalsy();
+     });
+ 
++    it("registers a pagination trigger (onLoadMoreReady) that calls searchPagination", async () => {
++        const searchResults: ISearchResults = {
++            results: [
++                SearchResult.fromJson(
++                    {
++                        rank: 1,
++                        result: {
++                            room_id: room.roomId,
++                            event_id: "$1",
++                            sender: client.getSafeUserId(),
++                            origin_server_ts: 1,
++                            content: { body: "PaginationProbe", msgtype: "m.text" },
++                            type: EventType.RoomMessage,
++                        },
++                        context: { profile_info: {}, events_before: [], events_after: [] },
++                    },
++                    eventMapper,
++                ),
++            ],
++            highlights: [],
++            next_batch: "next_batch",
++            count: 5,
++        };
++        vi.mocked(searchPagination).mockResolvedValue({ ...searchResults, next_batch: undefined });
++
++        let loadMore: (() => Promise<boolean>) | null = null;
++
++        render(
++            <RoomSearchView
++                inProgress={false}
++                term="search term"
++                scope={SearchScope.All}
++                promise={Promise.resolve(searchResults)}
++                className="someClass"
++                onUpdate={vi.fn()}
++                onLoadMoreReady={(fn) => {
++                    loadMore = fn;
++                }}
++            />,
++            clientAndSDKContextRenderOptions(client, sdkContext),
++        );
++
++        await screen.findByText("PaginationProbe");
++        expect(typeof loadMore).toBe("function");
++
++        await loadMore!();
++        expect(searchPagination).toHaveBeenCalled();
++    });
++
+     // oxlint-disable-next-line vitest/expect-expect
+     it("should handle resolutions after unmounting sanely", async () => {
+         const deferred = Promise.withResolvers<ISearchResults>();
