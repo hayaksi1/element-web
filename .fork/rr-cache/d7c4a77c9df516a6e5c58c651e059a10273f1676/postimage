@@ -185,6 +185,8 @@ describe("ipcCall: callDisplayMediaCallback", () => {
         await callIpc("callDisplayMediaCallback", 14, [{}]);
 
         expect(send).toHaveBeenCalledWith("ipcReply", { id: 14, reply: null });
+    });
+});
 
 describe("setThemeColor", () => {
     let handler: (ev: unknown, color: unknown) => void;

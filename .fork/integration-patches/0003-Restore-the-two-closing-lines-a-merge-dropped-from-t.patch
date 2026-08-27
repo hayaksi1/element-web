@@ -1,0 +1,38 @@
+From b3a43438fff46ebb95ca8c7d200fab17a6439199 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 20:03:28 +0300
+Subject: [PATCH 3/5] Restore the two closing lines a merge dropped from the
+ desktop IPC tests
+
+The merged file did not parse: an it() block opened at line 182 was never
+closed, and describe("setThemeColor") began immediately after it, so oxfmt
+could not format the file and oxlint reported "Expected } but found EOF".
+Both source branches are individually valid - one carries the setThemeColor
+tests, the others the displayMedia tests - and the resolution lost the two
+lines that closed the test and its enclosing describe.
+
+There were no conflict markers left behind, which is why the marker guard
+passed it. Five setThemeColor tests and two displayMedia tests were sitting
+inside a file no runner could load.
+
+Fork-Feature: fork-tooling
+---
+ apps/desktop/src/ipc.test.ts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/apps/desktop/src/ipc.test.ts b/apps/desktop/src/ipc.test.ts
+index 2e749e533d..76a4c5b4a4 100644
+--- a/apps/desktop/src/ipc.test.ts
++++ b/apps/desktop/src/ipc.test.ts
+@@ -185,6 +185,8 @@ describe("ipcCall: callDisplayMediaCallback", () => {
+         await callIpc("callDisplayMediaCallback", 14, [{}]);
+ 
+         expect(send).toHaveBeenCalledWith("ipcReply", { id: 14, reply: null });
++    });
++});
+ 
+ describe("setThemeColor", () => {
+     let handler: (ev: unknown, color: unknown) => void;
+-- 
+2.52.0
+
