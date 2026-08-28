@@ -584,6 +584,39 @@ try_merge() {
     git commit --no-edit
 }
 
+# rerere must not run inside the apply. git apply --3way holds the index for the whole
+# operation, and rerere.autoUpdate makes rerere try to stage its replay from within it -
+# so the two deadlock, git dies on index.lock instead of on the conflict, and the apply
+# rolls the index back leaving nothing to salvage. Disabling rerere for the apply turns
+# that crash into an ordinary conflict, which this then resolves afterwards the way
+# try_merge does - but only when EVERY unmerged path came out clean. A patch that
+# "applies" with markers still in it is the worst outcome available: the marker guard
+# runs later in the run, and the file would already be staged.
+accept_rerere_resolution() {
+    local p="$1" f conflicted accepted=0
+    # Collected BEFORE git rerere runs. autoUpdate means rerere stages what it replays, so
+    # asking for unmerged paths afterwards returns nothing whether it resolved everything
+    # or was never able to resolve anything - the two are indistinguishable at that point.
+    conflicted="$(git diff --name-only --diff-filter=U)"
+    [[ -n "$conflicted" ]] || return 1
+    git rerere 2>/dev/null || true
+    while read -r f; do
+        [[ -n "$f" ]] || continue
+        if [[ -f "$f" ]] && ! grep -q '^<<<<<<< ' "$f"; then
+            git add -- "$f"
+            log "    rerere replayed a previous resolution for $f"
+            accepted=1
+        else
+            warn "    $f is STILL conflicted after $(basename "$p")"
+            return 1
+        fi
+    done <<< "$conflicted"
+    (( accepted )) || return 1
+    git diff --name-only --diff-filter=U | grep -q . && return 1
+    warn "  $(basename "$p") did not apply cleanly; rerere resolved it. Review the result."
+    return 0
+}
+
 apply_patch() {
     local p="$1"
     log "  $(basename "$p")"
@@ -596,8 +629,8 @@ Regenerate it without that path:
     fi
     if git apply --index --check "$p" 2>/dev/null; then
         git apply --index "$p" || return 1
-    elif git apply --3way --check "$p" 2>/dev/null; then
-        git apply --3way "$p" || return 1
+    elif git -c rerere.enabled=false apply --3way --check "$p" 2>/dev/null; then
+        git -c rerere.enabled=false apply --3way "$p" || accept_rerere_resolution "$p" || return 1
     else
         return 1
     fi
