@@ -440,7 +440,11 @@ describe("uploadFile", () => {
     });
 
     it("should keep the uploaded file so it does not have to be downloaded again", async () => {
+<<<<<<<
+        clearUploadedMedia();
+=======
         clearUploadedMediaCache();
+>>>>>>>
         vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/plain" });
         const file = new Blob(["hello"]);
 

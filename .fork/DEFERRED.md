@@ -12,7 +12,7 @@ between two files that are the same test suite in different worlds.
 
 For these five, the merge took **upstream's relocated version**. Upstream's own cases are
 therefore intact, but any case the fork branch had added to that file is currently absent
-from `combined`:
+from `master`:
 
 | File (upstream path)                                                     | Branch version      | Cases in the branch copy |
 | ------------------------------------------------------------------------ | ------------------- | ------------------------ |
@@ -34,13 +34,13 @@ git show $(git merge-base develop pr/search-top-bar):apps/web/test/unit-tests/co
 diff -u /tmp/base.tsx /tmp/fork.tsx        # exactly the fork's additions
 ```
 
-Port them onto the feature branch that owns the behaviour, never onto `combined` - the
+Port them onto the feature branch that owns the behaviour, never onto `master` - the
 next rebuild discards anything committed only there.
 
 ## Not yet run
 
 - The verification gates (`pnpm install`, `pnpm lint`, `pnpm test:unit`) have not been run
-  against a complete `combined`. The rebuild is not finished.
+  against a complete `master`. The rebuild is not finished.
 - No Playwright/e2e run.
 - No desktop packaged build.
 

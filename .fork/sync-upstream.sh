@@ -6,7 +6,7 @@
 #   feat/*               fork-local features, REBASED onto develop  (.fork/features.txt)
 #   pr/*                 upstream contribution branches, MERGED as-is, never rewritten
 #                                                          (.fork/contrib.txt)
-#   combined develop + every feat/* + every pr/*, rebuilt from scratch
+#   master               develop + every feat/* + every pr/*, rebuilt from scratch
 #
 # See .fork/README.md for the why. Run --help for flags.
 
@@ -25,7 +25,7 @@ trap '[[ -n "${FORK_SYNC_TMP:-}" ]] && rm -f "$FORK_SYNC_TMP"' EXIT
 REMOTE="${FORK_REMOTE:-gh}"
 UPSTREAM="${FORK_UPSTREAM:-upstream}"
 MIRROR="${FORK_MIRROR_BRANCH:-develop}"
-INTEGRATION="${FORK_INTEGRATION_BRANCH:-combined}"
+INTEGRATION="${FORK_INTEGRATION_BRANCH:-master}"
 
 DRY_RUN=0
 NO_PUSH=0
@@ -52,7 +52,7 @@ Rebuild this fork against upstream.
   feat/*               fork-local features, REBASED onto develop  (.fork/features.txt)
   pr/*                 upstream contribution branches, MERGED as-is, never rewritten
                                                          (.fork/contrib.txt)
-  combined develop + every feat/* + every pr/*, rebuilt from scratch
+  master               develop + every feat/* + every pr/*, rebuilt from scratch
 
 Usage: .fork/sync-upstream.sh [flags]
 
@@ -72,7 +72,7 @@ Usage: .fork/sync-upstream.sh [flags]
 
 Environment: FORK_REMOTE (default gh), FORK_UPSTREAM (default upstream),
              FORK_MIRROR_BRANCH (default develop),
-             FORK_INTEGRATION_BRANCH (default combined).
+             FORK_INTEGRATION_BRANCH (default master).
 
 Exit codes: 0 ok - 1 error - 2 feature rebase conflict - 3 integration merge
             conflict - 4 patch failed - 5 verification gate failed - 6 a
@@ -108,9 +108,9 @@ PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
 DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
 RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
 DROPS_FILE="$GIT_COMMON/fork-sync-drops"
-# A manifest entry with no local branch used to warn and carry on, which builds combined
-# from a subset and can still pass every gate and push. Silence is the wrong response to
-# "one of the ninety-three is not here".
+# A manifest entry with no local branch used to warn and carry on, which builds the
+# integration branch from a subset and can still pass every gate and push. Silence is
+# the wrong response to "one of the ninety-three is not here".
 MISSING_REFS="$GIT_COMMON/fork-sync-missing-refs"
 rm -f "$MISSING_REFS"
 STILL_DROPPED="$GIT_COMMON/fork-sync-drops-final"
@@ -309,7 +309,7 @@ resolve_snapshots() {
                 ;;
             */playwright/snapshots/*.png)
                 # A screenshot baseline cannot be merged, and on the integration branch NEITHER
-                # side is right: the combined UI carries every branch's visual change, so any
+                # side is right: the integrated UI carries every branch's visual change, so any
                 # baseline recorded against one of them alone is stale by construction. Take the
                 # branch's - it is at least the newer of the two - and flag the whole set for
                 # regeneration rather than pretend the pixels are settled.
@@ -584,6 +584,39 @@ try_merge() {
     git commit --no-edit
 }
 
+# rerere must not run inside the apply. git apply --3way holds the index for the whole
+# operation, and rerere.autoUpdate makes rerere try to stage its replay from within it -
+# so the two deadlock, git dies on index.lock instead of on the conflict, and the apply
+# rolls the index back leaving nothing to salvage. Disabling rerere for the apply turns
+# that crash into an ordinary conflict, which this then resolves afterwards the way
+# try_merge does - but only when EVERY unmerged path came out clean. A patch that
+# "applies" with markers still in it is the worst outcome available: the marker guard
+# runs later in the run, and the file would already be staged.
+accept_rerere_resolution() {
+    local p="$1" f conflicted accepted=0
+    # Collected BEFORE git rerere runs. autoUpdate means rerere stages what it replays, so
+    # asking for unmerged paths afterwards returns nothing whether it resolved everything
+    # or was never able to resolve anything - the two are indistinguishable at that point.
+    conflicted="$(git diff --name-only --diff-filter=U)"
+    [[ -n "$conflicted" ]] || return 1
+    git rerere 2>/dev/null || true
+    while read -r f; do
+        [[ -n "$f" ]] || continue
+        if [[ -f "$f" ]] && ! grep -q '^<<<<<<< ' "$f"; then
+            git add -- "$f"
+            log "    rerere replayed a previous resolution for $f"
+            accepted=1
+        else
+            warn "    $f is STILL conflicted after $(basename "$p")"
+            return 1
+        fi
+    done <<< "$conflicted"
+    (( accepted )) || return 1
+    git diff --name-only --diff-filter=U | grep -q . && return 1
+    warn "  $(basename "$p") did not apply cleanly; rerere resolved it. Review the result."
+    return 0
+}
+
 apply_patch() {
     local p="$1"
     log "  $(basename "$p")"
@@ -596,8 +629,8 @@ Regenerate it without that path:
     fi
     if git apply --index --check "$p" 2>/dev/null; then
         git apply --index "$p" || return 1
-    elif git apply --3way --check "$p" 2>/dev/null; then
-        git apply --3way "$p" || return 1
+    elif git -c rerere.enabled=false apply --3way --check "$p" 2>/dev/null; then
+        git -c rerere.enabled=false apply --3way "$p" || accept_rerere_resolution "$p" || return 1
     else
         return 1
     fi
@@ -776,9 +809,9 @@ mapfile -t FEATURES < <(read_list "$FEATURES_FILE")
 mapfile -t CONTRIBS < <(read_list "$CONTRIB_FILE")
 
 # Refuse to rebuild from a subset. A branch listed in a manifest but absent locally used
-# to warn and carry on, which produces a combined missing that branch's work entirely -
-# and it can still pass every gate and be pushed, because nothing downstream knows the
-# branch was meant to be there. On a runner this is one failed fetch away.
+# to warn and carry on, which produces an integration branch missing that branch's work
+# entirely - and it can still pass every gate and be pushed, because nothing downstream
+# knows the branch was meant to be there. On a runner this is one failed fetch away.
 if [[ -s "$MISSING_REFS" ]]; then
     warn "MANIFEST REFS WITH NO LOCAL BRANCH:"
     warn "$(indent "$(sort -u "$MISSING_REFS")")"
@@ -1665,7 +1698,7 @@ EOF
     exit 6
 fi
 
-# ------------------------------------- 6b. publish combined as a fast-forward
+# --------------------------------------- 6b. publish master as a fast-forward
 # The rebuild starts from $MIRROR and shares no tip with what the remote holds, so the
 # push used to need --force-with-lease. Forcing means every previous $INTEGRATION is
 # reachable only from somebody's local reflog. Keep the rebuild's TREE verbatim and give
