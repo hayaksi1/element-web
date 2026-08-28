@@ -1,7 +1,7 @@
 # Upstream contribution branches, in merge order.
 #
 # These back pull requests against element-hq/element-web. They are MERGED into
-# combined as-is and are NEVER rebased, amended or pushed by the sync
+# master as-is and are NEVER rebased, amended or pushed by the sync
 # script -- rewriting one detaches its review threads and re-fires its CI.
 #
 # Do NOT list a branch whose PR was already MERGED upstream. Upstream squash-merges,
