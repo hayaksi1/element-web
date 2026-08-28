@@ -39,6 +39,7 @@ import { withMatrixClientHOC, type MatrixClientProps } from "../../../contexts/M
 import RoomContext from "../../../contexts/RoomContext";
 import { ComposerType } from "../../../dispatcher/payloads/ComposerInsertPayload";
 import { getSlashCommand, isSlashCommand, runSlashCommand, shouldSendAnyway } from "../../../editor/commands";
+import { isBotCommandText } from "../../../slash-commands/botCommands";
 import { KeyBindingAction } from "../../../accessibility/KeyboardShortcuts";
 import { PosthogAnalytics } from "../../../PosthogAnalytics";
 import { editorRoomKey, editorStateKey } from "../../../Editing";
@@ -331,7 +332,9 @@ class EditMessageComposer extends React.Component<IEditMessageComposerProps, ISt
                     } else {
                         shouldSend = false;
                     }
-                } else {
+                } else if (!isBotCommandText(this.getRoom(), commandText)) {
+                    // See the matching comment in SendMessageComposer: commands a bot in the room
+                    // has advertised are not ours to question.
                     const sendAnyway = await shouldSendAnyway(commandText);
                     // re-focus the composer after QuestionDialog is closed
                     dis.dispatch({
