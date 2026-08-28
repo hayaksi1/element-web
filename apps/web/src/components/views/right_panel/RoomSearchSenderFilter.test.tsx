@@ -5,27 +5,29 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
-import { mocked } from "jest-mock";
-import { render, screen } from "jest-matrix-react";
+import { render, screen } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
 import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
 
-import { RoomSearchSenderFilter } from "../../../../../src/components/views/right_panel/RoomSearchSenderFilter";
-import { stubClient } from "../../../../test-utils";
+import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter";
+import { stubClient } from "test-utils";
 
 const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
 
 describe("RoomSearchSenderFilter", () => {
     const buildRoom = (members: RoomMember[]): Room => {
-        const client = mocked(stubClient());
+        const client = vi.mocked(stubClient());
         const room = new Room("!r:server", client, "@me:server");
-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
         return room;
     };
 
     afterEach(() => {
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     it("renders the filter trigger when the room has other members", () => {
@@ -33,7 +35,7 @@ describe("RoomSearchSenderFilter", () => {
             <RoomSearchSenderFilter
                 room={buildRoom([member("@alice:server", "Alice")])}
                 senders={[]}
-                onSearchSendersChange={jest.fn()}
+                onSearchSendersChange={vi.fn()}
             />,
         );
 
@@ -45,7 +47,7 @@ describe("RoomSearchSenderFilter", () => {
             <RoomSearchSenderFilter
                 room={buildRoom([member("@me:server", "Me")])}
                 senders={[]}
-                onSearchSendersChange={jest.fn()}
+                onSearchSendersChange={vi.fn()}
             />,
         );
 
@@ -53,7 +55,7 @@ describe("RoomSearchSenderFilter", () => {
     });
 
     it("selecting a member adds them to the sender filter", async () => {
-        const onChange = jest.fn();
+        const onChange = vi.fn();
         render(
             <RoomSearchSenderFilter
                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
@@ -69,7 +71,7 @@ describe("RoomSearchSenderFilter", () => {
     });
 
     it("toggling an already-selected member off removes them", async () => {
-        const onChange = jest.fn();
+        const onChange = vi.fn();
         render(
             <RoomSearchSenderFilter
                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
@@ -113,7 +115,7 @@ describe("RoomSearchSenderFilter", () => {
             <RoomSearchSenderFilter
                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
                 senders={["@alice:server", "@bob:server"]}
-                onSearchSendersChange={jest.fn()}
+                onSearchSendersChange={vi.fn()}
             />,
         );
 
@@ -121,7 +123,7 @@ describe("RoomSearchSenderFilter", () => {
     });
 
     it("clears all selected senders via the clear action", async () => {
-        const onChange = jest.fn();
+        const onChange = vi.fn();
         render(
             <RoomSearchSenderFilter
                 room={buildRoom([member("@alice:server", "Alice")])}

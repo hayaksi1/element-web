@@ -367,13 +367,13 @@ describe("RoomListViewModel", () => {
             });
 
             // Open the room at the top of the list.
-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
+            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
             dispatcher.dispatch({ action: Action.ActiveRoomChanged, newRoomId: "!room1:server" });
             await flushPromises();
             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
 
             // Reading it demotes it in the store, but sticky keeps it where the user is looking.
-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
                 spaceId: "home",
                 sections: [{ tag: CHATS_TAG, rooms: [room2, room3, room1] }],
             });
@@ -386,7 +386,7 @@ describe("RoomListViewModel", () => {
 
             // Moving to the next room down has to fall back to the store's order, in which the room
             // being left is last. Reusing the pinned order would record room2 at index 1.
-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
+            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
             dispatcher.dispatch({
                 action: Action.ActiveRoomChanged,
                 oldRoomId: "!room1:server",
@@ -401,7 +401,7 @@ describe("RoomListViewModel", () => {
             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
 
             // So when room2 is read in turn, the still-unread room3 does not jump above it.
-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
                 spaceId: "home",
                 sections: [{ tag: CHATS_TAG, rooms: [room3, room2, room1] }],
             });

@@ -120,7 +120,7 @@ describe("BasicMessageComposer", () => {
     });
 
     it("should resolve emoji shortcodes once they are closed", async () => {
-        jest.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
+        vi.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
             return settingName === "MessageComposerInput.autoReplaceEmoji";
         });
         userEvent.setup();
@@ -155,7 +155,7 @@ describe("BasicMessageComposer", () => {
     });
 
     it("should leave emoji shortcodes alone when replacement is switched off", async () => {
-        jest.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
+        vi.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
         userEvent.setup();
         const model = new EditorModel([], pc, renderer);
         render(<BasicMessageComposer model={model} room={room} />, {

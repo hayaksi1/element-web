@@ -5,18 +5,21 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
-import { render, screen, fireEvent } from "jest-matrix-react";
+import { render, screen, fireEvent } from "test-utils-rtl";
 
-import { RoomFilesView } from "../../../../../src/components/views/right_panel/RoomFilesView";
-import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "../../../../test-utils";
-import { SDKContextClass } from "../../../../../src/contexts/SDKContextClass";
-import { RightPanelPhases } from "../../../../../src/stores/right-panel/RightPanelStorePhases";
+import { RoomFilesView } from "./RoomFilesView";
+import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "test-utils";
+import { SDKContextClass } from "../../../contexts/SDKContextClass";
+import { RightPanelPhases } from "../../../stores/right-panel/RightPanelStorePhases";
 
 // Stub TimelinePanel so we can capture the `eventFilter` predicate it is handed without rendering a real timeline.
 let mockLastTimelineProps: { eventFilter?: (ev: MatrixEvent) => boolean } = {};
-jest.mock("../../../../../src/components/structures/TimelinePanel", () => ({
+vi.mock("../../structures/TimelinePanel", () => ({
     __esModule: true,
     default: (props: { eventFilter?: (ev: MatrixEvent) => boolean }) => {
         mockLastTimelineProps = props;
@@ -37,11 +40,11 @@ const renderView = (): void => {
     render(
         <RoomFilesView
             timelineSet={{} as never}
-            onPaginationRequest={jest.fn()}
+            onPaginationRequest={vi.fn()}
             empty={<div />}
-            onClose={jest.fn()}
+            onClose={vi.fn()}
             isRoomEncrypted={false}
-            onMeasurement={jest.fn()}
+            onMeasurement={vi.fn()}
         />,
         // The card reads the right panel store off the SDK context.
         clientAndSDKContextRenderOptions(SDKContextClass.instance.client!, SDKContextClass.instance),
@@ -52,7 +55,7 @@ describe("RoomFilesView", () => {
     beforeEach(() => {
         // Restored here rather than in an afterEach so it lands after React Testing Library has unmounted the
         // previous render, never in the middle of one.
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
         stubClient();
         mockLastTimelineProps = {};
     });
@@ -76,7 +79,7 @@ describe("RoomFilesView", () => {
     });
 
     it("offers a back button when the right panel has a card to go back to", () => {
-        jest.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
+        vi.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
             { phase: RightPanelPhases.RoomSummary, state: {} },
             { phase: RightPanelPhases.FilePanel, state: {} },
         ]);
