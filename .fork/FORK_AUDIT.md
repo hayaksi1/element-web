@@ -349,7 +349,7 @@ The model you proposed is right, with three amendments:
 
 1. **Two namespaces, not one.** `pr/*` (upstream contribution, never rewritten) and
    `feat/*` (fork-local, rebased every sync). `.fork/features.txt` lists only `feat/*`.
-2. **`combined` must merge both** — your build needs the open-PR work too, so
+2. **`master` must merge both** — your build needs the open-PR work too, so
    the script merges `feat/*` from `features.txt` and then the `pr/*` branches listed in
    a second file, `.fork/contrib.txt`, without ever rewriting them.
 3. **Deleting the 49 merged-PR branches is a prerequisite**, not cleanup. While they exist

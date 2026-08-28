@@ -29,14 +29,14 @@ upstream/develop ──► develop            pristine mirror. ff-only. Nobody c
                        ├── pr/<x>               open upstream PR. MERGED, never rewritten.
                        └── pr/<y>
                              ↓
-                     combined = develop + every feat/* + every pr/*
+                       master = develop + every feat/* + every pr/*
 ```
 
 `develop` is a mirror. It is advanced only with `git merge --ff-only upstream/develop`,
 which by construction cannot conflict. If that command ever fails, someone committed to
 the trunk and the script stops and tells you how to fix it.
 
-`combined` is what you build and deploy, and it is **disposable**: thrown away
+`master` is what you build and deploy, and it is **disposable**: thrown away
 and rebuilt from scratch on every sync. Nothing may live only there.
 
 ## Why two lists instead of one
@@ -106,13 +106,13 @@ from scratch.
 
 Some fixes belong to no single branch: a test that only fails when feature A and feature B
 are both present, a snapshot that only moves once every branch is merged. They cannot live
-on a feature branch, and a commit made directly on `combined` is destroyed by
+on a feature branch, and a commit made directly on `master` is destroyed by
 the next rebuild.
 
 So they are exported as patches:
 
 ```bash
-# after committing the fix on combined
+# after committing the fix on master
 git format-patch -1 -o .fork/integration-patches/
 git checkout feat/fork-tooling
 git add .fork/integration-patches && git commit -m "Carry <fix> across rebuilds"
@@ -162,7 +162,7 @@ is not.
 | ------ | --------------------------- | ---------------------------------------- |
 | Runs   | nightly                     | twice a week, or on demand               |
 | Does   | the real accumulating merge | the same, plus patches, guards and gates |
-| Pushes | `develop` only              | `develop`, `feat/*`, `combined`          |
+| Pushes | `develop` only              | `develop`, `feat/*`, `master`            |
 | Costs  | a few minutes of merging    | an install, a lint and two test suites   |
 
 ```bash
