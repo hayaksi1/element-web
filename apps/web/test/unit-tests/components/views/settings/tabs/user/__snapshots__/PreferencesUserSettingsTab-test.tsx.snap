@@ -1297,7 +1297,6 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_container_udcm8_10"
                     >
                       <input
-                        checked=""
                         class="_input_udcm8_24"
                         disabled=""
                         id="mx_SettingsFlag_gs5uWEzYzZrS"
@@ -1317,6 +1316,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       for="mx_SettingsFlag_gs5uWEzYzZrS"
                     >
                       Show chat effects (animations when receiving e.g. confetti)
+                      Disable smooth scrolling (reduces motion)
                     </label>
                   </div>
                 </div>
