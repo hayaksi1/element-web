@@ -21,7 +21,7 @@ name: Fork detect
 #
 # NOTE: scheduled workflows only ever run from the repository's DEFAULT branch.
 # `develop` is a pristine mirror of upstream and must never carry this file, so the
-# default branch must stay `combined` in Settings -> General -> Default branch.
+# default branch must stay `master` in Settings -> General -> Default branch.
 
 on:
     schedule:
@@ -52,7 +52,7 @@ jobs:
             - name: Check out the integration branch with full history
               uses: actions/checkout@v4
               with:
-                  ref: combined
+                  ref: master
                   fetch-depth: 0
                   persist-credentials: true
 
@@ -225,7 +225,7 @@ jobs:
                       printf 'Do not use `-X ours` or `-X theirs`.\n\n'
                       printf 'Once resolved, commit the rerere cache so none of this has to be resolved again:\n'
                       printf '```bash\ngit switch feat/fork-tooling\ngit add .fork/rr-cache\ngit commit -m "Record conflict resolutions from this sync"\ngit push gh feat/fork-tooling\n```\n\n'
-                      printf '%s\n\n' "The branch matters: \`combined\` is rebuilt from scratch every sync, so a cache committed there is deleted by the next run and the same conflicts return forever."
+                      printf '%s\n\n' "The branch matters: \`master\` is rebuilt from scratch every sync, so a cache committed there is deleted by the next run and the same conflicts return forever."
                       printf '<sub>Last updated by run [%s](%s/%s/actions/runs/%s)</sub>\n' \
                           "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
                       printf '\n<!-- fork-detect-fingerprint: %s -->\n' "$fingerprint"
