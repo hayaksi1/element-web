@@ -5,14 +5,14 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { type ISearchResults } from "matrix-js-sdk/src/matrix";
 
-import {
-    RoomSearchNavigationViewModel,
-    type RoomSearchNavigationProps,
-} from "../../../src/viewmodels/search/RoomSearchNavigationViewModel";
-import { type SearchMatch, SearchScope } from "../../../src/Searching";
-import { SearchSessionStore } from "../../../src/stores/SearchSessionStore";
+import { RoomSearchNavigationViewModel, type RoomSearchNavigationProps } from "./RoomSearchNavigationViewModel";
+import { type SearchMatch, SearchScope } from "../../Searching";
+import { SearchSessionStore } from "../../stores/SearchSessionStore";
 
 describe("RoomSearchNavigationViewModel", () => {
     const matchA: SearchMatch = { roomId: "!r:e", eventId: "$a" };
@@ -54,12 +54,12 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("starts empty with both arrows disabled", () => {
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         expect(vm.getSnapshot()).toEqual({ current: 0, total: 0, canPrevious: false, canNext: false });
     });
 
     it("reflects the store's total and enables both arrows once matches are set", () => {
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         setMatches([matchA, matchB, matchC]);
         expect(vm.getSnapshot()).toEqual({ current: 0, total: 3, canPrevious: true, canNext: true });
     });
@@ -67,12 +67,12 @@ describe("RoomSearchNavigationViewModel", () => {
     it("hydrates its snapshot from an already-populated store on construction", () => {
         setMatches([matchA, matchB, matchC]);
         store.setCurrentMatchIndex(1);
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         expect(vm.getSnapshot()).toEqual({ current: 2, total: 3, canPrevious: true, canNext: true });
     });
 
     it("activates the first match on next() from the empty cursor and marks a stepping jump", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         setMatches([matchA, matchB, matchC]);
         vm.next();
@@ -83,7 +83,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("steps forward through every match", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         setMatches([matchA, matchB, matchC]);
         vm.next();
@@ -94,7 +94,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("wraps from the last match back to the first on next()", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         setMatches([matchA, matchB, matchC]);
         vm.next();
@@ -107,7 +107,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("wraps to the last match on previous() from the empty cursor", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         setMatches([matchA, matchB]);
         vm.previous();
@@ -116,7 +116,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("wraps from the first match to the last on previous()", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         setMatches([matchA, matchB, matchC]);
         vm.next();
@@ -127,7 +127,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("resets the cursor when the store gets a fresh result set", () => {
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         setMatches([matchA, matchB, matchC]);
         vm.next();
         vm.next();
@@ -136,7 +136,7 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("does nothing when stepping with no matches", () => {
-        const onActivateMatch = jest.fn();
+        const onActivateMatch = vi.fn();
         const vm = makeVm({ onActivateMatch });
         vm.next();
         vm.previous();
@@ -145,14 +145,14 @@ describe("RoomSearchNavigationViewModel", () => {
     });
 
     it("reacts to an external store cursor change", () => {
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         setMatches([matchA, matchB, matchC]);
         store.setCurrentMatchIndex(2);
         expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: true });
     });
 
     it("stops reacting to the store once disposed", () => {
-        const vm = makeVm({ onActivateMatch: jest.fn() });
+        const vm = makeVm({ onActivateMatch: vi.fn() });
         setMatches([matchA, matchB]);
         vm.dispose();
         store.setCurrentMatchIndex(1);

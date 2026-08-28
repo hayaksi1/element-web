@@ -5,6 +5,9 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect } from "vitest";
 import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -14,8 +17,8 @@ import {
     eventMatchesCategory,
     eventMatchesFileSearch,
     buildFileEventFilter,
-} from "../../../src/utils/FileCategory";
-import { mkEvent } from "../../test-utils";
+} from "./FileCategory";
+import { mkEvent } from "test-utils";
 
 const ROOM = "!room:server";
 const USER = "@me:server";
