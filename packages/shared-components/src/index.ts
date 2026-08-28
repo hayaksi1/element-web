@@ -18,6 +18,7 @@ export * from "./core/roving";
 export * from "./room/composer/Banner";
 export * from "./room/composer/UploadButton";
 export * from "./room/composer/MessageComposerUrlPreview/index.ts";
+export * from "./room/search/SearchMatchNavigation";
 export * from "./crypto/SasEmoji";
 export * from "./menus/UserMenu";
 export * from "./notifications/NotificationBadgeView";
