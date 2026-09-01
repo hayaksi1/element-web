@@ -5,21 +5,23 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "jest-matrix-react";
-import { mocked } from "jest-mock";
+import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 
-import { ChatBackgroundPanel } from "../../../../../src/components/views/settings/ChatBackgroundPanel";
-import MatrixClientContext from "../../../../../src/contexts/MatrixClientContext";
-import { stubClient } from "../../../../test-utils";
-import SettingsStore from "../../../../../src/settings/SettingsStore";
-import { SettingLevel } from "../../../../../src/settings/SettingLevel";
+import { ChatBackgroundPanel } from "./ChatBackgroundPanel";
+import MatrixClientContext from "../../../contexts/MatrixClientContext";
+import { stubClient } from "test-utils";
+import SettingsStore from "../../../settings/SettingsStore";
+import { SettingLevel } from "../../../settings/SettingLevel";
 
 describe("<ChatBackgroundPanel />", () => {
     let client: MatrixClient;
     let settings: Record<string, unknown>;
-    let setValueSpy: jest.SpyInstance;
+    let setValueSpy: MockInstance;
 
     beforeEach(() => {
         client = stubClient();
@@ -28,18 +30,18 @@ describe("<ChatBackgroundPanel />", () => {
             "RoomView.backgroundOpacity": 1,
         };
         const realGetValue = SettingsStore.getValue.bind(SettingsStore);
-        jest.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
+        vi.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
             name in settings
                 ? settings[name]
                 : (realGetValue as (...args: unknown[]) => unknown)(name, ...rest)) as typeof SettingsStore.getValue);
-        setValueSpy = jest
+        setValueSpy = vi
             .spyOn(SettingsStore, "setValue")
             .mockImplementation(async (name: string, _roomId, _level, value: unknown) => {
                 settings[name] = value;
             });
     });
 
-    afterEach(() => jest.restoreAllMocks());
+    afterEach(() => vi.restoreAllMocks());
 
     const renderPanel = (): ReturnType<typeof render> =>
         render(
@@ -165,7 +167,7 @@ describe("<ChatBackgroundPanel />", () => {
     });
 
     it("uploads a custom image and stores its mxc uri", async () => {
-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
         renderPanel();
         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
@@ -182,7 +184,7 @@ describe("<ChatBackgroundPanel />", () => {
     });
 
     it("shows an error when the upload fails", async () => {
-        mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
+        vi.mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
         renderPanel();
         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
@@ -202,7 +204,7 @@ describe("<ChatBackgroundPanel />", () => {
     });
 
     it("keeps the uploaded image in the rail after switching to a preset", async () => {
-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
         renderPanel();
         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
