@@ -59,6 +59,7 @@ describe("<SendMessageComposer/>", () => {
         isPeeking: false,
         showRightPanel: true,
         searchHeaderActive: false,
+        fullSizeThreadViewEnabled: false,
         joining: false,
         atEndOfLiveTimeline: true,
         showTopUnreadMessagesBar: false,

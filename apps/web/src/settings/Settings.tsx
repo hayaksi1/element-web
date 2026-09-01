@@ -347,6 +347,7 @@ export interface Settings {
     "Images.size": IBaseSetting<ImageSize>;
     "showChatEffects": IBaseSetting<boolean>;
     "Accessibility.disableSmoothScrolling": IBaseSetting<boolean>;
+    "Threads.fullSizeView": IBaseSetting<boolean>;
     "Performance.addSendMessageTimingMetadata": IBaseSetting<boolean>;
     "Widgets.pinned": IBaseSetting<{ [widgetId: string]: boolean }>;
     "Widgets.layout": IBaseSetting<ILayoutSettings | null>;
@@ -1325,6 +1326,12 @@ export const SETTINGS: Settings = {
     "Accessibility.disableSmoothScrolling": {
         supportedLevels: LEVELS_ACCOUNT_SETTINGS,
         displayName: _td("settings|preferences|disable_smooth_scrolling"),
+        default: false,
+    },
+    "Threads.fullSizeView": {
+        supportedLevels: LEVELS_ACCOUNT_SETTINGS,
+        displayName: _td("settings|preferences|threads_full_size_view"),
+        description: _td("settings|preferences|threads_full_size_view_description"),
         default: false,
     },
     "Performance.addSendMessageTimingMetadata": {
