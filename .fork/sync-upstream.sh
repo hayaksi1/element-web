@@ -288,7 +288,7 @@ resolve_one_sided_adds() {
         git add -- "$path"
         log "    took the only side that has $path ($code)"
         resolved=1
-    done <<< "$(git status --porcelain | awk '$1=="UA"||$1=="AU"{print $1, $2}')"
+    done <<< "$(unmerged_kinds | awk '$1=="UA"||$1=="AU"{print $1, $2}')"
     return $(( ! resolved ))
 }
 
@@ -324,6 +324,25 @@ resolve_snapshots() {
     return $(( ! resolved ))
 }
 
+# The kind of each unmerged path, read from the index stages rather than parsed out of
+# `git status` text: stage 1 is the base, 2 ours, 3 theirs. Printed as the two-letter
+# status code callers already match on (DU: deleted by us, UD: deleted by them, UA/AU:
+# added on one side, AA: added on both, UU: modified on both).
+unmerged_kinds() {
+    local path stages
+    while IFS= read -r -d '' path; do
+        stages="$(git ls-files -u -z -- "$path" | tr '\0' '\n' | awk '{ print $3 }' | sort -u | tr -d '\n')"
+        case "$stages" in
+            13)  printf 'DU %s\n' "$path" ;;
+            12)  printf 'UD %s\n' "$path" ;;
+            3)   printf 'UA %s\n' "$path" ;;
+            2)   printf 'AU %s\n' "$path" ;;
+            23)  printf 'AA %s\n' "$path" ;;
+            123) printf 'UU %s\n' "$path" ;;
+        esac
+    done < <(git diff --name-only -z --diff-filter=U)
+}
+
 # rerere only ever caches CONTENT conflicts. A modify/delete is a tree conflict, so it is
 # never replayed and would halt every rebuild forever. For paths explicitly listed as
 # "upstream deleted this for good", take the deletion and move on. Everything else still
@@ -342,7 +361,7 @@ resolve_listed_deletions() {
             log "    accepted upstream's deletion of $path (listed in accept-upstream-deletions.txt)"
             resolved=1
         fi
-    done <<< "$(git status --porcelain | awk '$1=="DU"||$1=="UD"{print $2}')"
+    done <<< "$(unmerged_kinds | awk '$1=="DU"||$1=="UD"{print $2}')"
     return $(( ! resolved ))
 }
 
@@ -472,7 +491,7 @@ between is silently never run. Fix the mapping in .fork/relocations.txt." ;;
             conflicted=1
         fi
         rm -rf "$tmp"
-    done <<< "$(git status --porcelain | awk '$1 == "DU" { print $2 }')"
+    done <<< "$(unmerged_kinds | awk '$1 == "DU" { print $2 }')"
 
     # A modify/delete is a tree conflict and rerere never caches one, which is why this
     # class of conflict used to halt every rebuild forever. Having turned it into a
