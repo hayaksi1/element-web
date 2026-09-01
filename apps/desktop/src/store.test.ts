@@ -13,10 +13,15 @@ import Store, { SafeStorageDecryptionError } from "./store.js";
 
 // In-memory ElectronStore replacement so the tests don't touch the filesystem or real config.
 const backing = new Map<string, unknown>();
+/** Options the Store passed to the ElectronStore constructor, captured by the mock below. */
+let storeOptions: { schema: Record<string, Record<string, unknown>> } | undefined;
 vi.mock("electron-store", () => {
     // No constructor: the options ElectronStore is handed are irrelevant to this fake, so an empty
     // one would exist only to swallow them — which oxlint's no-useless-constructor rejects.
     class MockElectronStore {
+        public constructor(options: { schema: Record<string, Record<string, unknown>> }) {
+            storeOptions = options;
+        }
         public get(key: string, defaultValue?: unknown): unknown {
             return backing.has(key) ? backing.get(key) : defaultValue;
         }
@@ -191,6 +196,50 @@ describe("Store secret encryption (safeStorage)", () => {
             expect(backing.get("safeStorageBackendOverride")).toBe(true);
             expect(backing.has("safeStorageBackendMigrate")).toBe(false);
             expect(app.relaunch).toHaveBeenCalled();
+        });
+    });
+});
+
+describe("Store", () => {
+    let store: Store;
+
+    beforeAll(() => {
+        store = Store.initialize(undefined);
+    });
+
+    beforeEach(() => {
+        backing.clear();
+    });
+
+    describe("shouldWarnBeforeExit", () => {
+        it("should default to not warning on macOS, where ⌘Q quits immediately by convention", () => {
+            vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+            expect(store.shouldWarnBeforeExit()).toBe(false);
+        });
+
+        it.each(["win32", "linux"] as const)("should default to warning on %s", (platform) => {
+            vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+            expect(store.shouldWarnBeforeExit()).toBe(true);
+        });
+
+        it("should honour an explicit opt-in over the macOS default", () => {
+            vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+            store.set("warnBeforeExit", true);
+            expect(store.shouldWarnBeforeExit()).toBe(true);
+        });
+
+        it.each(["win32", "linux"] as const)("should honour an explicit opt-out on %s", (platform) => {
+            vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+            store.set("warnBeforeExit", false);
+            expect(store.shouldWarnBeforeExit()).toBe(false);
+        });
+
+        it("should not declare a schema default, which conf would write to disk on first run", () => {
+            // A schema default is persisted to electron-config.json when the store is first created,
+            // which would make the platform default indistinguishable from a user's explicit choice.
+            expect(storeOptions!.schema.warnBeforeExit).not.toHaveProperty("default");
+            // Sanity check that the assertion above can fail: other keys do declare defaults.
+            expect(storeOptions!.schema.minimizeToTray).toHaveProperty("default", true);
         });
     });
 });
