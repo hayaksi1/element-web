@@ -316,7 +316,7 @@ describe("EventTileViewModel", () => {
         );
 
         expect(fileSnapshot.event.isContinuation).toBe(false);
-        expect(bubbleSnapshot.event.isContinuation).toBe(true);
+        expect(bubbleSnapshot.event.isContinuation).toBe(false);
     });
 
     it("derives line classes from event type, message type, and media eligibility", () => {

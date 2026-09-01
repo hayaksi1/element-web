@@ -1,6 +1,6 @@
-// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`PreferencesUserSettingsTab should render 1`] = `
+exports[`PreferencesUserSettingsTab > should render 1`] = `
 <DocumentFragment>
   <div
     class="mx_SettingsTab"
@@ -1155,7 +1155,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                 <h2
                   class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
                 >
-                  Timeline
+                  Threads
                 </h2>
               </div>
               <div
@@ -1171,7 +1171,6 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_container_udcm8_10"
                     >
                       <input
-                        checked=""
                         class="_input_udcm8_24"
                         disabled=""
                         id="mx_SettingsFlag_7Az0xw4Bs4Tt"
@@ -1190,10 +1189,37 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_7Az0xw4Bs4Tt"
                     >
-                      Show typing notifications
+                      Show threads in the main chat area
                     </label>
+                    <span
+                      class="_message_1o4d9_86 _help-message_1o4d9_92"
+                      id="radix-react-use-id-6"
+                    >
+                      Opening a thread replaces the conversation instead of opening the right-hand panel.
+                    </span>
                   </div>
                 </div>
+              </div>
+            </div>
+          </form>
+          <form
+            class="_root_1o4d9_17"
+          >
+            <div
+              class="mx_SettingsSubsection"
+            >
+              <div
+                class="mx_SettingsSubsectionHeading"
+              >
+                <h2
+                  class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
+                >
+                  Timeline
+                </h2>
+              </div>
+              <div
+                class="mx_SettingsSubsection_content"
+              >
                 <div
                   class="_inline-field_1o4d9_33"
                 >
@@ -1223,7 +1249,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_8jmzPIlPoBCv"
                     >
-                      Show a placeholder for removed messages
+                      Show typing notifications
                     </label>
                   </div>
                 </div>
@@ -1256,7 +1282,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_enFRaTjdsFou"
                     >
-                      Show read receipts sent by other users
+                      Show a placeholder for removed messages
                     </label>
                   </div>
                 </div>
@@ -1289,7 +1315,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_bfwnd5rz4XNX"
                     >
-                      Show join/leave messages (invites/removes/bans unaffected)
+                      Show read receipts sent by other users
                     </label>
                   </div>
                 </div>
@@ -1322,7 +1348,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_gs5uWEzYzZrS"
                     >
-                      Show display name changes
+                      Show join/leave messages (invites/removes/bans unaffected)
                     </label>
                   </div>
                 </div>
@@ -1355,7 +1381,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_qWg7OgID1yRR"
                     >
-                      Show chat effects (animations when receiving e.g. confetti)
+                      Show display name changes
                     </label>
                   </div>
                 </div>
@@ -1388,7 +1414,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_pOPewl7rtMbV"
                     >
-                      Show profile picture changes
+                      Show chat effects (animations when receiving e.g. confetti)
                     </label>
                   </div>
                 </div>
@@ -1402,7 +1428,6 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_container_udcm8_10"
                     >
                       <input
-                        checked=""
                         class="_input_udcm8_24"
                         disabled=""
                         id="mx_SettingsFlag_cmt3PZSyNp3v"
@@ -1421,7 +1446,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_cmt3PZSyNp3v"
                     >
-                      Show avatars in user, room and event mentions
+                      Disable smooth scrolling (reduces motion)
                     </label>
                   </div>
                 </div>
@@ -1454,7 +1479,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_dJJz3lHUv9XX"
                     >
-                      Enable big emoji in chat
+                      Show profile picture changes
                     </label>
                   </div>
                 </div>
@@ -1487,7 +1512,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_SBSSOZDRlzlA"
                     >
-                      Jump to the bottom of the timeline when you send a message
+                      Show avatars in user, room and event mentions
                     </label>
                   </div>
                 </div>
@@ -1519,6 +1544,72 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                     <label
                       class="_label_1o4d9_60"
                       for="mx_SettingsFlag_FLEpLCb0jpp6"
+                    >
+                      Enable big emoji in chat
+                    </label>
+                  </div>
+                </div>
+                <div
+                  class="_inline-field_1o4d9_33"
+                >
+                  <div
+                    class="_inline-field-control_1o4d9_45"
+                  >
+                    <div
+                      class="_container_udcm8_10"
+                    >
+                      <input
+                        checked=""
+                        class="_input_udcm8_24"
+                        disabled=""
+                        id="mx_SettingsFlag_NQFWldEwbV3q"
+                        role="switch"
+                        type="checkbox"
+                      />
+                      <div
+                        class="_ui_udcm8_34"
+                      />
+                    </div>
+                  </div>
+                  <div
+                    class="_inline-field-body_1o4d9_39"
+                  >
+                    <label
+                      class="_label_1o4d9_60"
+                      for="mx_SettingsFlag_NQFWldEwbV3q"
+                    >
+                      Jump to the bottom of the timeline when you send a message
+                    </label>
+                  </div>
+                </div>
+                <div
+                  class="_inline-field_1o4d9_33"
+                >
+                  <div
+                    class="_inline-field-control_1o4d9_45"
+                  >
+                    <div
+                      class="_container_udcm8_10"
+                    >
+                      <input
+                        checked=""
+                        class="_input_udcm8_24"
+                        disabled=""
+                        id="mx_SettingsFlag_5ZjibYJT2HFm"
+                        role="switch"
+                        type="checkbox"
+                      />
+                      <div
+                        class="_ui_udcm8_34"
+                      />
+                    </div>
+                  </div>
+                  <div
+                    class="_inline-field-body_1o4d9_39"
+                  >
+                    <label
+                      class="_label_1o4d9_60"
+                      for="mx_SettingsFlag_5ZjibYJT2HFm"
                     >
                       Show current profile picture and name for users in message history
                     </label>
@@ -1556,7 +1647,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                     >
                       <input
                         class="_input_udcm8_24"
-                        id="react-use-id-6"
+                        id="react-use-id-7"
                         role="switch"
                         type="checkbox"
                       />
@@ -1570,7 +1661,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                   >
                     <label
                       class="_label_1o4d9_60"
-                      for="react-use-id-6"
+                      for="react-use-id-7"
                     >
                       Hide avatars of room and inviter
                     </label>
@@ -1584,13 +1675,13 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                 >
                   <label
                     class="_label_1o4d9_60"
-                    for="radix-react-use-id-7"
+                    for="radix-react-use-id-8"
                   >
                     Show media in timeline
                   </label>
                   <span
                     class="_message_1o4d9_86 _help-message_1o4d9_92 mx_MediaPreviewAccountSetting_RadioHelp"
-                    id="radix-react-use-id-8"
+                    id="radix-react-use-id-9"
                   >
                     A hidden media can always be shown by tapping on it
                   </span>
@@ -1703,7 +1794,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                         checked=""
                         class="_input_udcm8_24"
                         disabled=""
-                        id="react-use-id-9"
+                        id="react-use-id-10"
                         role="switch"
                         type="checkbox"
                       />
@@ -1717,13 +1808,13 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                   >
                     <label
                       class="_label_1o4d9_60"
-                      for="react-use-id-9"
+                      for="react-use-id-10"
                     >
                       Allow users to invite you to rooms
                     </label>
                     <span
                       class="_message_1o4d9_86 _help-message_1o4d9_92"
-                      id="radix-react-use-id-10"
+                      id="radix-react-use-id-11"
                     >
                       Your server does not implement this feature.
                     </span>
@@ -1768,7 +1859,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                       <input
                         class="_input_udcm8_24"
                         disabled=""
-                        id="mx_SettingsFlag_NQFWldEwbV3q"
+                        id="mx_SettingsFlag_mTnTitfNlxc2"
                         role="switch"
                         type="checkbox"
                       />
@@ -1782,7 +1873,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                   >
                     <label
                       class="_label_1o4d9_60"
-                      for="mx_SettingsFlag_NQFWldEwbV3q"
+                      for="mx_SettingsFlag_mTnTitfNlxc2"
                     >
                       Show NSFW content
                     </label>
@@ -1822,7 +1913,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                         checked=""
                         class="_input_udcm8_24"
                         disabled=""
-                        id="mx_SettingsFlag_5ZjibYJT2HFm"
+                        id="mx_SettingsFlag_XGIAmbtYRSKz"
                         role="switch"
                         type="checkbox"
                       />
@@ -1836,7 +1927,7 @@ exports[`PreferencesUserSettingsTab should render 1`] = `
                   >
                     <label
                       class="_label_1o4d9_60"
-                      for="mx_SettingsFlag_5ZjibYJT2HFm"
+                      for="mx_SettingsFlag_XGIAmbtYRSKz"
                     >
                       Prompt before sending invites to potentially invalid matrix IDs
                     </label>

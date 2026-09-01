@@ -516,7 +516,7 @@ describe("RoomViewStore", function () {
 
             roomViewStore.showJoinRoomError(new MatrixError(undefined, 404), roomId);
 
-            expect(mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
+            expect(vi.mocked(Modal).createDialog.mock.calls[0][1]).toEqual({
                 title: "Room not found",
                 description: "The room may no longer exist or is unavailable from your server.",
             });

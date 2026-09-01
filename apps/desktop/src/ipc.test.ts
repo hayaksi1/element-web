@@ -6,7 +6,7 @@ Please see LICENSE files in the repository root for full details.
 */
 
 import { expect, describe, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { desktopCapturer, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { desktopCapturer } from "electron";
 
 import { getConfig } from "./config.js";
 import { consumeDisplayMediaCallback } from "./displayMediaCallback.js";
@@ -197,7 +197,7 @@ describe("setThemeColor", () => {
 
     beforeAll(async () => {
         await import("./ipc.js");
-        handler = vi.mocked(ipcMain.on).mock.calls.find(([channel]) => channel === "setThemeColor")![1] as never;
+        handler = ipcHandlers["setThemeColor"] as never;
         expect(handler).toBeDefined();
     });
 
