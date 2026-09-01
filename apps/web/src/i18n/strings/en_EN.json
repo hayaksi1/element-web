@@ -588,6 +588,8 @@
     "composer": {
         "autocomplete": {
             "@room_description": "Notify the whole room",
+            "bot_command_a11y": "Bot Command Autocomplete",
+            "bot_command_description": "Bot commands",
             "command_a11y": "Command Autocomplete",
             "command_description": "Commands",
             "emoji_a11y": "Emoji Autocomplete",
@@ -1497,6 +1499,8 @@
         "beta_feedback_leave_button": "To leave the beta, visit your settings.",
         "beta_feedback_title": "%(featureName)s Beta feedback",
         "beta_section": "Upcoming features",
+        "bot_commands": "Bot commands (MSC4332)",
+        "bot_commands_description": "Show the commands advertised by bots in a room when you type a slash in the composer",
         "bridge_state": "Show info about bridges in room settings",
         "bridge_state_channel": "Channel: <channelLink/>",
         "bridge_state_creator": "This bridge was provisioned by <user />.",
