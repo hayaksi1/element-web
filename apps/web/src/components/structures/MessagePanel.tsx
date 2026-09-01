@@ -23,6 +23,7 @@ import {
     ReadMarker,
     TimelineSeparator,
     useCreateAutoDisposedViewModel,
+    type EventTileRenderingMode,
 } from "@element-hq/web-shared-components";
 
 import shouldHideEvent, { isHiddenMemberEvent } from "../../shouldHideEvent";
@@ -201,6 +202,9 @@ interface IProps {
 
     // which layout to use
     layout?: Layout;
+
+    // which shape to use
+    shape?: EventTileRenderingMode;
 
     permalinkCreator?: RoomPermalinkCreator;
     editState?: EditorStateTransfer;
@@ -840,6 +844,7 @@ export default class MessagePanel extends React.Component<IProps, IState> {
                 ref={this.collectEventTile.bind(this, eventId)}
                 alwaysShowTimestamps={this.props.alwaysShowTimestamps}
                 mxEvent={mxEv}
+                shape={this.props.shape}
                 continuation={continuation}
                 isRedacted={mxEv.isRedacted()}
                 replacingEventId={mxEv.replacingEventId()}

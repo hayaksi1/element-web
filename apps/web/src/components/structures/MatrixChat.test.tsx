@@ -263,7 +263,6 @@ describe("<MatrixChat />", () => {
     }
 
     beforeEach(async () => {
-        vi.restoreAllMocks();
         vi.spyOn(MediaDeviceHandler, "loadDevices").mockResolvedValue(undefined);
         vi.doMock("../../utils/SessionLock.ts", () => ({
             getSessionLock: vi.fn().mockResolvedValue(true),
@@ -346,6 +345,8 @@ describe("<MatrixChat />", () => {
 
         // Anything the drain kicked off may have opened a dialog again
         await clearAllModals();
+
+        vi.restoreAllMocks();
     });
 
     resetJsDomAfterEach();
