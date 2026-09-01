@@ -627,6 +627,10 @@ tooling change conflicts with the branch the moment the tooling moves on.
 Regenerate it without that path:
     git format-patch -1 <sha> -o $PATCH_DIR -- ':(exclude).fork/*'"
     fi
+    if git apply --reverse --check "$p" 2>/dev/null; then
+        log "  already in the tree - nothing to commit"
+        return 0
+    fi
     if git apply --index --check "$p" 2>/dev/null; then
         git apply --index "$p" || return 1
     elif git -c rerere.enabled=false apply --3way --check "$p" 2>/dev/null; then
@@ -1433,18 +1437,25 @@ sweep_jest_idioms() {
     while IFS= read -r f; do
         [[ -n "$f" && -f "$f" ]] || continue
         grep -q 'from "vitest"' "$f" || continue
-        grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f" || continue
-        perl -0777 -i -pe '
-            # the type first, so the call rewrite below cannot turn it into vi.SpyInstance,
-            # which vitest does not export.
-            s/\bjest\.SpyInstance\b/MockInstance/g;
-            # `jest` and `.spyOn(...)` are written on separate lines often enough that a
-            # jest\. pattern misses them entirely.
-            s/\bjest\b(?=\s*\n\s*\.)/vi/g;
-            s/\bjest\./vi./g;
-        ' "$f"
+        if grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
+            perl -0777 -i -pe '
+                # the type first, so the call rewrite below cannot turn it into vi.SpyInstance,
+                # which vitest does not export.
+                s/\bjest\.SpyInstance\b/MockInstance/g;
+                # `jest` and `.spyOn(...)` are written on separate lines often enough that a
+                # jest\. pattern misses them entirely.
+                s/\bjest\b(?=\s*\n\s*\.)/vi/g;
+                s/\bjest\./vi./g;
+            ' "$f"
+        fi
         if grep -q '\bMockInstance\b' "$f" && ! grep -qE 'import \{[^}]*MockInstance[^}]*\} from "vitest";' "$f"; then
             perl -0777 -i -pe 's/(import \{[^}]*?)(\s*\} from "vitest";)/$1, type MockInstance$2/' "$f"
+        fi
+        # The rewrite above turns `jest.spyOn` into `vi.spyOn`, but `vi` is a named export
+        # the file never needed before. Without this the suite runs and tsc fails on
+        # `Cannot find name 'vi'` - the one gate that reads the file as code.
+        if grep -qE '\bvi\s*\n?\s*\.' "$f" && ! grep -qE 'import \{[^}]*\bvi\b[^}]*\} from "vitest";' "$f"; then
+            perl -0777 -i -pe 's/(import \{[^}]*?)(\s*\} from "vitest";)/$1, vi$2/' "$f"
         fi
         # grep matching is not the same as the rewrite changing anything: a bare
         # "@types/jest" in an import matches the word and has nothing to convert. Count
