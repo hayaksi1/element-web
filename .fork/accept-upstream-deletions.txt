@@ -1,0 +1,54 @@
+# Paths in a modify/delete conflict where the DELETION is the correct answer.
+#
+# Either direction: upstream deleted a file a branch still edits, or the fork deliberately
+# replaced an upstream component and a rebuild keeps re-offering it.
+#
+# git rerere records content conflicts only. A modify/delete is a TREE conflict, so it
+# is never cached and would stop every single rebuild forever. Listing a path here tells
+# the sync script to accept upstream's deletion for that path and carry on.
+#
+# This is not a blanket -X ours. Each line is a deliberate, reviewed decision that the
+# file is gone upstream for good and the branch's change to it is obsolete. Removing a
+# feature's behaviour is a real consequence -- if the branch's change still matters, port
+# it to whatever replaced the file instead of listing it here.
+#
+# Format: one repo-relative path per line. # comments and blank lines ignored.
+
+# Deleted by upstream b68ecdb860 "Remove legacy room list (#34040)". The legacy room
+# list is gone; pr/desktop-smooth-scroll's change to it has nothing left to apply to.
+# The smooth-scroll setting itself still lands via that branch's other files.
+apps/web/src/components/views/rooms/RoomSublist.tsx
+
+# Deleted by the fork's search work (26c7c763ad). The aux panel was replaced by
+# RoomSearchHeader + RoomSearchResults; upstream still ships the old component, so every
+# rebuild re-offers it. Its stylesheet is likewise dropped from _components.pcss.
+apps/web/src/components/views/rooms/RoomSearchAuxPanel.tsx
+
+# Superseded by upstream's own DM-avatar work. The branch rewired the component; upstream
+# now resolves the fallback through Avatar.avatarUrlForRoom -> avatarMxcForRoom ->
+# getAvatarFallbackMember(), and the view model already listens on RoomStateEvent.Members
+# and RoomStateEvent.Update. The branch's Avatar.ts and Avatar.test.ts landed byte-identical,
+# so the helper and its fallback tests survive; only the component wiring is obsolete.
+apps/web/src/components/views/avatars/RoomAvatar.tsx
+apps/web/src/components/views/avatars/RoomAvatar.test.tsx
+
+# The branch's UTF-8 BOM test reaches the tree by another route: our side already carried
+# the migrated, colocated file including the byte-order-mark case and its
+# [0xef, 0xbb, 0xbf] assertion, so this merge legitimately has nothing left to add.
+# Verified present at apps/web/src/utils/exportUtils/PlainTextExport.test.ts.
+apps/web/src/utils/exportUtils/PlainTextExport.test.ts
+
+# Upstream 4dacb8b4ca "Move EventTile to shared components - #5b" deleted the legacy
+# hover/selected rules from this stylesheet; they now live in the shared
+# EventTileView.module.css. pr/message-hover-actions gated exactly those rules behind
+# the compactMessageActions setting, and its upstream PR #34315 is closed, so the CSS
+# half of the branch has nothing left to apply to. The setting, the LayoutSwitcher
+# toggle and the action-bar/context-menu behaviour still land via its other files.
+apps/web/res/css/views/rooms/_EventBubbleTile.pcss
+
+# Deleted from the legacy suite on purpose. pr/search-media-tabs asserted that the File
+# tile carries data-layout/data-self and never continues; upstream's shared root sets
+# no data-layout at all (its own test asserts that) and the never-continue-in-File
+# rule now lives in getIsContinuation() in EventTileDerivedState.ts, so the branch's
+# assertions describe a renderer that no longer exists.
+apps/web/test/unit-tests/components/views/rooms/EventTile-test.tsx
