@@ -9,6 +9,7 @@ Please see LICENSE files in the repository root for full details.
 import React from "react";
 import { fireEvent, render, waitFor } from "jest-matrix-react";
 import { type MatrixClient, MsgType } from "matrix-js-sdk/src/matrix";
+import { KnownMembership } from "matrix-js-sdk/src/types";
 import { mocked } from "jest-mock";
 import userEvent from "@testing-library/user-event";
 
@@ -37,6 +38,9 @@ import { SDKContextClass } from "../../../../../src/contexts/SDKContextClass";
 import { RoomUploadContextProvider } from "../../../../../src/viewmodels/room/RoomUploadViewModel.tsx";
 import { MessageComposerUrlPreviewViewModel } from "../../../../../src/viewmodels/composer/MessageComposerUrlPreviewViewModel.ts";
 import { SDKContext } from "../../../../../src/contexts/SDKContext.ts";
+import Modal from "../../../../../src/Modal";
+import SettingsStore from "../../../../../src/settings/SettingsStore";
+import { UNSTABLE_BOT_COMMANDS_EVENT_TYPE } from "../../../../../src/slash-commands/botCommands";
 
 jest.mock("../../../../../src/utils/local-room", () => ({
     doMaybeLocalRoomAction: jest.fn(),
@@ -406,6 +410,85 @@ describe("<SendMessageComposer/>", () => {
             });
 
             expect(defaultDispatcher.dispatch).not.toHaveBeenCalledWith({ action: `effects.confetti` });
+        });
+
+        describe("bot commands (MSC4332)", () => {
+            let settingsSpy: jest.SpyInstance;
+            let modalSpy: jest.SpyInstance;
+
+            /** Have a joined bot in the room advertise `/deploy` as one of its commands. */
+            const advertiseDeployCommand = (): void => {
+                const commandsEvent = mkEvent({
+                    type: UNSTABLE_BOT_COMMANDS_EVENT_TYPE,
+                    room: "myfakeroom",
+                    user: "@hermes:example.org",
+                    skey: "@hermes:example.org",
+                    content: { sigil: "/", commands: [{ syntax: "deploy {env}" }] },
+                    event: true,
+                });
+                mocked(mockRoom.currentState.getStateEvents).mockImplementation((type: string): any =>
+                    type === UNSTABLE_BOT_COMMANDS_EVENT_TYPE ? [commandsEvent] : [],
+                );
+                mocked(mockRoom.getMember).mockReturnValue({
+                    membership: KnownMembership.Join,
+                    rawDisplayName: "Hermes",
+                } as any);
+            };
+
+            beforeEach(() => {
+                const realGetValue = SettingsStore.getValue.bind(SettingsStore);
+                settingsSpy = jest
+                    .spyOn(SettingsStore, "getValue")
+                    .mockImplementation((name: any, ...rest: any[]): any =>
+                        name === "feature_msc4332_bot_commands" ? true : realGetValue(name, ...rest),
+                    );
+                // shouldSendAnyway() resolves from this dialog; answering "no" aborts the send,
+                // which makes "was the user interrupted?" observable via sendMessage.
+                modalSpy = jest
+                    .spyOn(Modal, "createDialog")
+                    .mockReturnValue({ finished: Promise.resolve([false]), close: jest.fn() } as any);
+
+                mocked(doMaybeLocalRoomAction).mockImplementation(
+                    <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>) => fn(roomId),
+                );
+                mockPlatformPeg({ overrideBrowserShortcuts: jest.fn().mockReturnValue(false) });
+                mocked(mockClient.sendMessage).mockClear();
+            });
+
+            afterEach(() => {
+                settingsSpy.mockRestore();
+                modalSpy.mockRestore();
+                mocked(mockRoom.currentState.getStateEvents).mockImplementation(() => [] as any);
+                mocked(mockRoom.getMember).mockReset();
+            });
+
+            it("sends a command advertised by a bot without warning about it", async () => {
+                advertiseDeployCommand();
+                const { container } = getComponent();
+
+                addTextToComposer(container, "/deploy prod");
+                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
+
+                await waitFor(() =>
+                    expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
+                        "body": "/deploy prod",
+                        "msgtype": MsgType.Text,
+                        "m.mentions": {},
+                    }),
+                );
+                expect(modalSpy).not.toHaveBeenCalled();
+            });
+
+            it("still warns about a command no bot has advertised", async () => {
+                advertiseDeployCommand();
+                const { container } = getComponent();
+
+                addTextToComposer(container, "/notacommand");
+                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
+
+                await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+                expect(mockClient.sendMessage).not.toHaveBeenCalled();
+            });
         });
     });
 
