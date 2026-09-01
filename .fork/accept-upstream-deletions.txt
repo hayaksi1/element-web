@@ -37,3 +37,18 @@ apps/web/src/components/views/avatars/RoomAvatar.test.tsx
 # [0xef, 0xbb, 0xbf] assertion, so this merge legitimately has nothing left to add.
 # Verified present at apps/web/src/utils/exportUtils/PlainTextExport.test.ts.
 apps/web/src/utils/exportUtils/PlainTextExport.test.ts
+
+# Upstream 4dacb8b4ca "Move EventTile to shared components - #5b" deleted the legacy
+# hover/selected rules from this stylesheet; they now live in the shared
+# EventTileView.module.css. pr/message-hover-actions gated exactly those rules behind
+# the compactMessageActions setting, and its upstream PR #34315 is closed, so the CSS
+# half of the branch has nothing left to apply to. The setting, the LayoutSwitcher
+# toggle and the action-bar/context-menu behaviour still land via its other files.
+apps/web/res/css/views/rooms/_EventBubbleTile.pcss
+
+# Deleted from the legacy suite on purpose. pr/search-media-tabs asserted that the File
+# tile carries data-layout/data-self and never continues; upstream's shared root sets
+# no data-layout at all (its own test asserts that) and the never-continue-in-File
+# rule now lives in getIsContinuation() in EventTileDerivedState.ts, so the branch's
+# assertions describe a renderer that no longer exists.
+apps/web/test/unit-tests/components/views/rooms/EventTile-test.tsx
