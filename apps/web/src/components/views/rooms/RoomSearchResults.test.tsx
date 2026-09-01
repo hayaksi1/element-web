@@ -5,12 +5,15 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect } from "vitest";
 import React from "react";
-import { fireEvent, render, screen } from "jest-matrix-react";
+import { fireEvent, render, screen } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
 
-import RoomSearchResults from "../../../../../src/components/views/rooms/RoomSearchResults";
-import { type SearchResultPreview } from "../../../../../src/Searching";
+import RoomSearchResults from "./RoomSearchResults";
+import { type SearchResultPreview } from "../../../Searching";
 
 const preview = (eventId: string, sender: string, body: string, ts: number): SearchResultPreview => ({
     roomId: "!r:server",
@@ -43,8 +46,8 @@ describe("RoomSearchResults", () => {
                 previews={previews}
                 inProgress={false}
                 hasMore={false}
-                onResultClick={jest.fn()}
-                onLoadMore={jest.fn()}
+                onResultClick={vi.fn()}
+                onLoadMore={vi.fn()}
                 getSenderName={getSenderName}
                 {...props}
             />,
@@ -52,7 +55,7 @@ describe("RoomSearchResults", () => {
     };
 
     it("renders a row per result with sender name and preview, reporting clicks by index", async () => {
-        const onResultClick = jest.fn();
+        const onResultClick = vi.fn();
         renderResults({ onResultClick });
 
         expect(screen.getByText("Alice")).toBeInTheDocument();
@@ -74,8 +77,8 @@ describe("RoomSearchResults", () => {
                 previews={[]}
                 inProgress={true}
                 hasMore={false}
-                onResultClick={jest.fn()}
-                onLoadMore={jest.fn()}
+                onResultClick={vi.fn()}
+                onLoadMore={vi.fn()}
                 getSenderName={getSenderName}
             />,
         );
@@ -93,8 +96,8 @@ describe("RoomSearchResults", () => {
                 previews={previews}
                 inProgress={true}
                 hasMore={true}
-                onResultClick={jest.fn()}
-                onLoadMore={jest.fn()}
+                onResultClick={vi.fn()}
+                onLoadMore={vi.fn()}
                 getSenderName={getSenderName}
             />,
         );
@@ -104,13 +107,13 @@ describe("RoomSearchResults", () => {
     });
 
     it("loads the next page when scrolled near the bottom", () => {
-        const onLoadMore = jest.fn();
+        const onLoadMore = vi.fn();
         const { container } = render(
             <RoomSearchResults
                 previews={previews}
                 inProgress={false}
                 hasMore={true}
-                onResultClick={jest.fn()}
+                onResultClick={vi.fn()}
                 onLoadMore={onLoadMore}
                 getSenderName={getSenderName}
             />,
@@ -122,13 +125,13 @@ describe("RoomSearchResults", () => {
     });
 
     it("does not load more when the user is not near the bottom", () => {
-        const onLoadMore = jest.fn();
+        const onLoadMore = vi.fn();
         const { container } = render(
             <RoomSearchResults
                 previews={previews}
                 inProgress={false}
                 hasMore={true}
-                onResultClick={jest.fn()}
+                onResultClick={vi.fn()}
                 onLoadMore={onLoadMore}
                 getSenderName={getSenderName}
             />,
@@ -140,13 +143,13 @@ describe("RoomSearchResults", () => {
     });
 
     it("does not load more when there are no further pages", () => {
-        const onLoadMore = jest.fn();
+        const onLoadMore = vi.fn();
         const { container } = render(
             <RoomSearchResults
                 previews={previews}
                 inProgress={false}
                 hasMore={false}
-                onResultClick={jest.fn()}
+                onResultClick={vi.fn()}
                 onLoadMore={onLoadMore}
                 getSenderName={getSenderName}
             />,
@@ -158,13 +161,13 @@ describe("RoomSearchResults", () => {
     });
 
     it("does not load more while a page is already loading", () => {
-        const onLoadMore = jest.fn();
+        const onLoadMore = vi.fn();
         const { container } = render(
             <RoomSearchResults
                 previews={previews}
                 inProgress={true}
                 hasMore={true}
-                onResultClick={jest.fn()}
+                onResultClick={vi.fn()}
                 onLoadMore={onLoadMore}
                 getSenderName={getSenderName}
             />,
