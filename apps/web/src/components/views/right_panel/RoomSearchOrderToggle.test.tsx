@@ -5,21 +5,24 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect, vi } from "vitest";
 import React from "react";
-import { render, screen } from "jest-matrix-react";
+import { render, screen } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
 import { SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
-import { RoomSearchOrderToggle } from "../../../../../src/components/views/right_panel/RoomSearchOrderToggle";
+import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle";
 
 describe("RoomSearchOrderToggle", () => {
     it("renders the order toggle trigger", () => {
-        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />);
+        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />);
         expect(screen.getByTestId("search-order-toggle-button")).toBeInTheDocument();
     });
 
     it("selecting Most relevant requests relevance (Rank) order", async () => {
-        const onChange = jest.fn();
+        const onChange = vi.fn();
         render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={onChange} />);
 
         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
@@ -29,7 +32,7 @@ describe("RoomSearchOrderToggle", () => {
     });
 
     it("selecting Most recent requests recency (Recent) order", async () => {
-        const onChange = jest.fn();
+        const onChange = vi.fn();
         render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={onChange} />);
 
         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
@@ -39,7 +42,7 @@ describe("RoomSearchOrderToggle", () => {
     });
 
     it("checks the radio matching the active order (controlled)", async () => {
-        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
+        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
 
         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
 
@@ -49,13 +52,13 @@ describe("RoomSearchOrderToggle", () => {
 
     it("shows the active-order indicator only for a non-default (relevance) order", () => {
         const { rerender } = render(
-            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />,
+            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />,
         );
         // Default (recency): no indicator dot, and the accessible name is the neutral label.
         expect(screen.getByTestId("search-order-toggle-button")).not.toHaveAttribute("data-indicator");
         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results");
 
-        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
+        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
         // Relevance: the indicator dot is shown and the active state is folded into the accessible name.
         expect(screen.getByTestId("search-order-toggle-button")).toHaveAttribute("data-indicator", "default");
         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results (by relevance)");

@@ -25,7 +25,7 @@ import {
     screen,
 } from "electron";
 import * as Sentry from "@sentry/electron/main";
-import path, { dirname } from "node:path";
+import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
 
 import "./ipc.js";

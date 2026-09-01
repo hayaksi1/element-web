@@ -6,24 +6,27 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { fireEvent, render, type RenderResult, screen, waitFor } from "jest-matrix-react";
+import { fireEvent, render, type RenderResult, screen, waitFor } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
 
-import PreferencesUserSettingsTab from "../../../../../../../src/components/views/settings/tabs/user/PreferencesUserSettingsTab";
-import { MatrixClientPeg } from "../../../../../../../src/MatrixClientPeg";
+import PreferencesUserSettingsTab from "./PreferencesUserSettingsTab";
+import { MatrixClientPeg } from "../../../../../MatrixClientPeg";
 import {
     getMockClientWithEventEmitter,
     mockClientMethodsServer,
     mockClientMethodsUser,
     mockPlatformPeg,
     stubClient,
-} from "../../../../../../test-utils";
-import SettingsStore from "../../../../../../../src/settings/SettingsStore";
-import { SettingLevel } from "../../../../../../../src/settings/SettingLevel";
-import MatrixClientBackedController from "../../../../../../../src/settings/controllers/MatrixClientBackedController";
-import PlatformPeg from "../../../../../../../src/PlatformPeg";
-import { type SettingKey } from "../../../../../../../src/settings/Settings.tsx";
+} from "test-utils";
+import SettingsStore from "../../../../../settings/SettingsStore";
+import { SettingLevel } from "../../../../../settings/SettingLevel";
+import MatrixClientBackedController from "../../../../../settings/controllers/MatrixClientBackedController";
+import PlatformPeg from "../../../../../PlatformPeg";
+import { type SettingKey } from "../../../../../settings/Settings.tsx";
 
 describe("PreferencesUserSettingsTab", () => {
     beforeEach(() => {
@@ -44,7 +47,7 @@ describe("PreferencesUserSettingsTab", () => {
     });
 
     it("should reload when changing language", async () => {
-        const reloadStub = jest.fn();
+        const reloadStub = vi.fn();
         PlatformPeg.get()!.reload = reloadStub;
 
         renderTab();
@@ -85,16 +88,16 @@ describe("PreferencesUserSettingsTab", () => {
     });
 
     it("should not show spell check setting if unsupported", async () => {
-        PlatformPeg.get()!.supportsSpellCheckSettings = jest.fn().mockReturnValue(false);
+        PlatformPeg.get()!.supportsSpellCheckSettings = vi.fn().mockReturnValue(false);
 
         renderTab();
         expect(screen.queryByRole("switch", { name: "Allow spell check" })).not.toBeInTheDocument();
     });
 
     it("should enable spell check", async () => {
-        const spellCheckEnableFn = jest.fn();
-        PlatformPeg.get()!.supportsSpellCheckSettings = jest.fn().mockReturnValue(true);
-        PlatformPeg.get()!.getSpellCheckEnabled = jest.fn().mockReturnValue(false);
+        const spellCheckEnableFn = vi.fn();
+        PlatformPeg.get()!.supportsSpellCheckSettings = vi.fn().mockReturnValue(true);
+        PlatformPeg.get()!.getSpellCheckEnabled = vi.fn().mockReturnValue(false);
         PlatformPeg.get()!.setSpellCheckEnabled = spellCheckEnableFn;
 
         renderTab();
@@ -109,20 +112,20 @@ describe("PreferencesUserSettingsTab", () => {
     describe("send read receipts", () => {
         beforeEach(() => {
             stubClient();
-            jest.spyOn(SettingsStore, "setValue");
-            jest.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+            vi.spyOn(SettingsStore, "setValue");
+            vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
         });
 
         afterEach(() => {
-            jest.resetAllMocks();
+            vi.resetAllMocks();
         });
 
         const getToggle = () => renderTab().getByRole("switch", { name: "Send read receipts" });
 
         const mockIsVersionSupported = (val: boolean) => {
             const client = MatrixClientPeg.safeGet();
-            jest.spyOn(client, "doesServerSupportUnstableFeature").mockResolvedValue(false);
-            jest.spyOn(client, "isVersionSupported").mockImplementation(async (version: string) => {
+            vi.spyOn(client, "doesServerSupportUnstableFeature").mockResolvedValue(false);
+            vi.spyOn(client, "isVersionSupported").mockImplementation(async (version: string) => {
                 if (version === "v1.4") return val;
                 return false;
             });
