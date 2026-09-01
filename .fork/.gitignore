@@ -1,1 +1,5 @@
 detect-report.tsv
+
+# rerere scratch: git writes thisimage* while a conflict is being resolved; only
+# preimage/postimage are resolutions. Tracking them left the tree dirty after every run.
+rr-cache/**/thisimage*
