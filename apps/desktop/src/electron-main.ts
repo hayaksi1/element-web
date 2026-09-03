@@ -44,6 +44,7 @@ import { setDisplayMediaCallback } from "./displayMediaCallback.js";
 import { WindowStateManager } from "./window-state.js";
 import { setupMacosTitleBar } from "./macos-titlebar.js";
 import { setupMediaAuth } from "./media-auth.js";
+import { handleWindowClose, revealMainWindow } from "./window-close.js";
 import { type RendererRecovery, setupRendererRecovery } from "./renderer-recovery.js";
 import { resolveBackgroundColor } from "./background-color.js";
 import { getBuildConfig } from "./build-config.js";
@@ -375,29 +376,12 @@ app.on("ready", async () => {
     global.mainWindow.on("closed", () => {
         global.mainWindow = null;
     });
-    global.mainWindow.on("close", async (e) => {
-        // Capture the final geometry synchronously while the window is still alive — this is the only
+    global.mainWindow.on("close", (e) => {
+        // Capture the final geometry synchronously while the window is still alive - this is the only
         // reliable flush on the macOS hide-on-close path (where `closed` never fires) and also picks up
         // any geometry change still sitting in the debounce when the user quits. See window-state.ts.
         windowState.persist(global.mainWindow!);
-
-        // If we are not quitting and have a tray icon then minimize to tray
-        if (!global.appQuitting && (tray.hasTray() || process.platform === "darwin")) {
-            // On Mac, closing the window just hides it
-            // (this is generally how single-window Mac apps
-            // behave, eg. Mail.app)
-            e.preventDefault();
-
-            if (global.mainWindow?.isFullScreen()) {
-                global.mainWindow.once("leave-full-screen", () => global.mainWindow?.hide());
-
-                global.mainWindow.setFullScreen(false);
-            } else {
-                global.mainWindow?.hide();
-            }
-
-            return false;
-        }
+        handleWindowClose(e, global.mainWindow, { appQuitting: global.appQuitting, hasTray: tray.hasTray() });
     });
 
     if (process.platform === "win32") {
@@ -477,9 +461,7 @@ app.on("second-instance", (ev, commandLine, workingDirectory) => {
         // brought to a working UI rather than a white screen. Routed through the capped recovery so a
         // relaunch can't re-arm a crash loop we've already given up on; a no-op for a healthy window.
         rendererRecovery?.recoverIfCrashed();
-        if (!global.mainWindow.isVisible()) global.mainWindow.show();
-        if (global.mainWindow.isMinimized()) global.mainWindow.restore();
-        global.mainWindow.focus();
+        revealMainWindow(global.mainWindow);
     }
 });
 
