@@ -1,0 +1,108 @@
+# Branches on gh that are in NEITHER manifest, and that is deliberate.
+#
+# A branch on gh listed nowhere is silently never merged into master. This file
+# is the acknowledged set, seeded 2026-09-04 from the state at that moment.
+# Anything appearing on gh after the seed is REPORTED, so a new branch cannot
+# go unnoticed.
+#
+# Every branch listed here STAYS. Being unmanaged is not evidence of being dead:
+# a closed-but-unmerged PR, an absorbed squash-merge, a screenshot scratch
+# branch and a live experiment all look identical from here. To adopt one, move
+# it into features.txt or contrib.txt and delete its line here -- this list
+# should only ever shrink.
+#
+# develop, master and feat/fork-tooling are excluded by the check itself.
+
+# Snapshots of develop from before the restructure / individual campaigns.
+backup/develop-pre-34590
+backup/develop-pre-34590-group
+backup/develop-pre-consolidate
+backup/develop-pre-reset-7a9f0181
+backup-develop-s61
+backup/pre-restructure-20260827
+
+# Scratch, demos, screenshot batches. Never listed.
+demo/media-tabs
+feature/remove-message-hover-highlight
+shots/aug06-batch
+shots/aug10-batch
+shots/base-20
+shots/pr25310-full-size-threads
+shots/pr25310-full-size-threads-v2
+shots/pr34659-aug19
+shots/thread-header-review
+ss/34590
+ss/34590-base
+sync/develop-4
+upstream-sync
+gh
+main
+
+# Search-chain subsets. Only the maximal element is in contrib.txt; merging a
+# subset AND its superset replays the same conflicts twice for no added content.
+pr/search-cmdf-default
+pr/search-from-filter
+pr/search-infra
+pr/search-jump-to-date
+pr/search-order-toggle
+pr/search-stepping
+
+# Absorbed upstream, duplicate of an open PR, or zero unique commits. Reasons
+# live in contrib.txt's "Deliberately excluded" block.
+pr/desktop-titlebar-drag
+pr/desktop-warn-before-quit-v2
+pr/macos-notification-sound
+pr/pinned-banner-edits-fix
+pr/room-list-max-width-persist
+pr/uploaded-media-cache
+
+# Remaining pr/* on gh whose PRs are MERGED (or closed) and must not be
+# re-merged: upstream squash-merges, so the content is already in develop.
+pr/all-rooms-unsent-symbol
+pr/audio-element-playback-end
+pr/audio-player-filename
+pr/autocomplete-duplicate-undo
+pr/background-audio-overlap
+pr/code-block-emoji-size
+pr/composer-newline-replaces-selection
+pr/dark-custom-code-highlight
+pr/desktop-config-bom
+pr/desktop-downloads-offer
+pr/desktop-notif-throttle
+pr/desktop-pickle-key
+pr/desktop-renderer-recovery
+pr/desktop-save-dialog-extension
+pr/desktop-save-image-authed
+pr/desktop-screenshare
+pr/desktop-storage-durability
+pr/editor-link-href-attribute
+pr/export-textual-event-jsx
+pr/file-panel-local-echo
+pr/home-space-badge-parity
+pr/invite-forbidden-reason
+pr/invite-rate-limit-retry
+pr/keyword-rule-id
+pr/left-room-unread
+pr/linkified-alias-local-permalink
+pr/memberlist-invite-power-level
+pr/notification-reconcile-error
+pr/notification-state-snapshot
+pr/permalink-repeat-jump
+pr/permission-power-selector-max
+pr/pinned-banner-edits
+pr/preview-card-radius
+pr/promote-warning-users-default
+pr/quick-theme-dropdown-height
+pr/read-marker-transition
+pr/registration-rate-limit
+pr/relative-time-intl
+pr/room-address-canonical-alias
+pr/room-delta-no-selection
+pr/search-abort-not-failure
+pr/search-incomplete-warning
+pr/separator-click-threshold
+pr/space-edit-topic-settings
+pr/spotlight-no-results
+pr/summary-profile-no-change
+pr/thread-notification-decryption-race
+pr/voice-message-decode-fallback

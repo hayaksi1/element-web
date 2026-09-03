@@ -139,6 +139,9 @@ if (( DETECT )); then
     rm -f "$DETECT_REPORT"
 fi
 
+# shellcheck source=/dev/null
+. "$REPO_ROOT/.fork/lib/rr-audit.sh"
+
 # ---------------------------------------------------------------- helpers
 
 read_list() {
@@ -678,72 +681,8 @@ restore_rr_worktree() {
     git checkout --quiet -- "$RR_REPO" 2>/dev/null || true
 }
 
-# ------------------------------------------- 5b2. cached-resolution audit
-
-# A postimage IS the merge result for its conflict, replayed verbatim on every rebuild
-# forever. A defective one is therefore worse than no cache at all: it reproduces the
-# same broken file silently, and the branch still merges cleanly, so nothing upstream of
-# the test run notices. Two of these shipped before this check existed - one left a file
-# unparseable, one left jest idioms in a vitest suite that only failed on the runner.
-audit_rr_cache() {
-    local f bad=""
-    for f in "$RR_REPO"/*/postimage*; do
-        [[ -e "$f" ]] || continue
-        # A resolution that still holds conflict markers was never finished.
-        if grep -qE '^(<{7}|>{7})$' "$f"; then
-            bad+="$f (unresolved conflict markers)"$'\n'; continue
-        fi
-        # jest in a file that imports vitest is a half-done migration. Files that do not
-        # import vitest are the legacy suites, where jest is correct - leave them be.
-        # Match a bare `jest` too: the real code writes `jest` and `.spyOn(...)` on
-        # separate lines often enough that a `jest\.` pattern misses it entirely.
-        if grep -q 'from "vitest"' "$f" && grep -qE '(^|[^-[:alnum:]])jest([^-[:alnum:]]|$)' "$f"; then
-            bad+="$f (jest idioms in a vitest resolution)"$'\n'
-        fi
-        # vitest has no `vi.SpyInstance`; the type is `MockInstance`, imported by name.
-        # A blanket jest.->vi. rewrite produces this and it compiles nowhere.
-        if grep -qE '\bvi\.(SpyInstance|Mocked|Mock)\b' "$f"; then
-            bad+="$f (vi.* used as a type; vitest exports these as named types)"$'\n'
-        fi
-    done
-    [[ -z "$bad" ]] && { log "rr-cache: ${RR_COUNT:-?} cached resolutions, none defective"; return 0; }
-    warn "DEFECTIVE CACHED RESOLUTIONS:"
-    warn "$(indent "${bad%$'\n'}")"
-    die "A postimage is replayed verbatim on every rebuild, so each of these reproduces a
-broken file every run while the merge still reports clean. Fix the postimage itself -
-editing the merged file afterwards fixes this run and no other."
-}
-
-import_rr_cache() {
-    mkdir -p "$RR_LIVE"
-    if [[ -d "$RR_REPO" ]]; then
-        # -T copies the CONTENTS, so we never nest rr-cache/rr-cache.
-        if ! cp -rT "$RR_REPO" "$RR_LIVE"; then
-            warn "could not import the shared rerere cache; conflicts you already solved"
-            warn "will have to be solved again this run."
-        fi
-        local n; n="$(find "$RR_LIVE" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-        log "rerere: imported shared cache ($n recorded resolutions)"
-    fi
-}
-
-export_rr_cache() {
-    [[ -d "$RR_LIVE" ]] || return 0
-    mkdir -p "$RR_REPO"
-    if ! cp -rT "$RR_LIVE" "$RR_REPO"; then
-        warn "FAILED to export the rerere cache to .fork/rr-cache. Resolutions recorded"
-        warn "this run are NOT saved and will have to be redone next time."
-        return 1
-    fi
-    touch "$RR_REPO/.gitkeep"
-    local n; n="$(find "$RR_REPO" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-    log "rerere: exported cache back to .fork/rr-cache ($n resolutions)"
-    if [[ -n "$(git status --porcelain -- .fork/rr-cache 2>/dev/null)" ]]; then
-        warn "the rerere cache changed. Commit it to feat/fork-tooling so the next sync"
-        warn "and every fresh clone replay these resolutions instead of re-deriving them:"
-        warn "    git add .fork/rr-cache && git commit -m 'Record conflict resolutions from this sync'"
-    fi
-}
+# cached-resolution audit, import, export and unmanaged-branch report live in
+# .fork/lib/rr-audit.sh (sourced above).
 
 # ---------------------------------------------------------------- preflight
 
@@ -883,6 +822,7 @@ fi
 log "fetching $UPSTREAM and $REMOTE"
 run git fetch "$UPSTREAM" --prune --tags
 run git fetch "$REMOTE" --prune
+check_unmanaged_branches
 
 if (( DRY_RUN )); then
     behind="$(git rev-list --count "$MIRROR..$UPSTREAM/develop" 2>/dev/null || echo '?')"
@@ -1108,7 +1048,7 @@ for i in "${!FEATURES[@]}"; do
     save_state rebase "$i" "$branch"
     if ! git rebase "$MIRROR" "$branch"; then
         files="$(conflicting_files)"
-        export_rr_cache
+        export_rr_cache 0
         echo >&2
         printf '%s================ REBASE CONFLICT ================%s\n' "$RED" "$RST" >&2
         printf 'branch : %s\n' "$branch" >&2
@@ -1159,6 +1099,7 @@ else
     log "rebuilding $INTEGRATION from $MIRROR"
     git checkout --quiet -B "$INTEGRATION" "$MIRROR"
 fi
+rr_reaudit_begin
 
 merge_one() {
     local branch="$1" kind="$2" idx="$3"
@@ -1174,7 +1115,7 @@ merge_one() {
     mbase="$(git merge-base HEAD "$branch")"
     if ! try_merge "$branch"; then
         local files; files="$(conflicting_files)"
-        export_rr_cache
+        export_rr_cache 0
         echo >&2
         printf '%s============== INTEGRATION MERGE CONFLICT ==============%s\n' "$RED" "$RST" >&2
         printf 'branch : %s  (%s)\n' "$branch" "$kind" >&2
@@ -1296,7 +1237,7 @@ if (( ${#PATCHES[@]} )); then
     log "applying ${#PATCHES[@]} integration patch(es)"
     for p in "${PATCHES[@]}"; do
         if ! apply_patch "$p"; then
-            export_rr_cache
+            export_rr_cache 0
             printf '%s[fork-sync]%s %sERROR:%s %s\n' "$BLD" "$RST" "$RED" "$RST" \
                 "integration patch failed to apply: $p" >&2
             cat >&2 <<EOF
@@ -1316,6 +1257,7 @@ else
     log "no integration patches to apply"
 fi
 
+rr_reaudit_recorded
 export_rr_cache
 
 # ------------------------------------------- 5a. conflict-marker guard
@@ -1382,7 +1324,7 @@ if [[ -s "$DROPS_FILE" ]]; then
 fi
 
 if [[ -s "$STILL_DROPPED" ]]; then
-    export_rr_cache
+    export_rr_cache 0
     echo >&2
     printf '%s============== MERGES THAT DROPPED BRANCH CONTENT ==============%s\n' "$RED" "$RST" >&2
     # Name the files that are still missing from the finished tree, rather than the
