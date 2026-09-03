@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, render } from "test-utils-rtl";
 import React from "react";
 import { type Room } from "matrix-js-sdk/src/matrix";
@@ -111,7 +111,7 @@ describe("<SearchWarning />", () => {
     describe("with seshat installed but message search turned off", () => {
         beforeEach(() => {
             EventIndexPeg.index = null;
-            jest.spyOn(EventIndexPeg, "supportIsInstalled").mockReturnValue(true);
+            vi.spyOn(EventIndexPeg, "supportIsInstalled").mockReturnValue(true);
             // Available by default, and the very config that produced the wrong advice on desktop.
             SdkConfig.put({
                 brand: "Element",
@@ -120,7 +120,7 @@ describe("<SearchWarning />", () => {
         });
 
         afterEach(() => {
-            jest.restoreAllMocks();
+            vi.restoreAllMocks();
         });
 
         it("points at the setting rather than the desktop app when searching", () => {
