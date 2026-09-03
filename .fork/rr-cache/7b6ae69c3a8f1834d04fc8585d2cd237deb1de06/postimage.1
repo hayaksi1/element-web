@@ -601,7 +601,7 @@ describe("<LoggedInView />", () => {
         });
 
         const mockChatBackgroundSettings = (values: Record<string, unknown>): void => {
-            getValueSpy = jest
+            getValueSpy = vi
                 .spyOn(SettingsStore, "getValue")
                 .mockImplementation(((name: string, ...rest: unknown[]) =>
                     name in values
