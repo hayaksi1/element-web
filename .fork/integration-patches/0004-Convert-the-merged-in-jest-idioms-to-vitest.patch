@@ -1,0 +1,46 @@
+From 5c0b5b96294086f06f2d2ffad982c1e97f8839d1 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 19:38:19 +0000
+Subject: [PATCH] Convert the merged-in jest idioms to vitest
+
+Branches predating upstream's move to vitest still write jest, and the call
+arrives wherever they merge. Converted for the suites the runner collects; the
+unmigrated ones keep jest, which is correct there.
+---
+ .../src/components/views/elements/SearchWarning.test.tsx    | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/apps/web/src/components/views/elements/SearchWarning.test.tsx b/apps/web/src/components/views/elements/SearchWarning.test.tsx
+index 99df9fe0d0..5a342e060c 100644
+--- a/apps/web/src/components/views/elements/SearchWarning.test.tsx
++++ b/apps/web/src/components/views/elements/SearchWarning.test.tsx
+@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, afterEach, beforeEach } from "vitest";
++import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+ import { act, render } from "test-utils-rtl";
+ import React from "react";
+ import { type Room } from "matrix-js-sdk/src/matrix";
+@@ -111,7 +111,7 @@ describe("<SearchWarning />", () => {
+     describe("with seshat installed but message search turned off", () => {
+         beforeEach(() => {
+             EventIndexPeg.index = null;
+-            jest.spyOn(EventIndexPeg, "supportIsInstalled").mockReturnValue(true);
++            vi.spyOn(EventIndexPeg, "supportIsInstalled").mockReturnValue(true);
+             // Available by default, and the very config that produced the wrong advice on desktop.
+             SdkConfig.put({
+                 brand: "Element",
+@@ -120,7 +120,7 @@ describe("<SearchWarning />", () => {
+         });
+ 
+         afterEach(() => {
+-            jest.restoreAllMocks();
++            vi.restoreAllMocks();
+         });
+ 
+         it("points at the setting rather than the desktop app when searching", () => {
+-- 
+2.52.0
+
