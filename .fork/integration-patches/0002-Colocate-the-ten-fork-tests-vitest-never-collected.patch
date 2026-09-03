@@ -48,12 +48,12 @@ index 5d5ae07660..584afc0183 100644
  
          expect(searchBinding(defaultBindingsProvider.getRoomBindings())).toBeUndefined();
      });
-diff --git a/apps/web/test/unit-tests/components/views/rooms/RoomSearchHeader-test.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
 similarity index 79%
-rename from apps/web/test/unit-tests/components/views/rooms/RoomSearchHeader-test.tsx
+rename from apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
 rename to apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
 index 4b457a730a..2b8a9391ed 100644
---- a/apps/web/test/unit-tests/components/views/rooms/RoomSearchHeader-test.tsx
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
 +++ b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
 @@ -5,19 +5,22 @@
   * Please see LICENSE files in the repository root for full details.
@@ -245,12 +245,12 @@ index 4b457a730a..2b8a9391ed 100644
          renderHeader({
              onBackToResults,
              // No focused match (results list already visible) — clicking the box is a plain focus, not a return.
-diff --git a/apps/web/test/unit-tests/components/views/rooms/RoomSearchResults-test.tsx b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+diff --git a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
 similarity index 88%
-rename from apps/web/test/unit-tests/components/views/rooms/RoomSearchResults-test.tsx
+rename from apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
 rename to apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
 index 1c6f51ad7f..ca03650c3d 100644
---- a/apps/web/test/unit-tests/components/views/rooms/RoomSearchResults-test.tsx
+--- a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
 +++ b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
 @@ -5,12 +5,15 @@
   * Please see LICENSE files in the repository root for full details.
@@ -377,12 +377,12 @@ index 1c6f51ad7f..ca03650c3d 100644
                  onLoadMore={onLoadMore}
                  getSenderName={getSenderName}
              />,
-diff --git a/apps/web/test/unit-tests/components/views/settings/ChatBackgroundPanel-test.tsx b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+diff --git a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
 similarity index 91%
-rename from apps/web/test/unit-tests/components/views/settings/ChatBackgroundPanel-test.tsx
+rename from apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
 rename to apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
 index 1eb8e80a3a..6a9c2b33b3 100644
---- a/apps/web/test/unit-tests/components/views/settings/ChatBackgroundPanel-test.tsx
+--- a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
 +++ b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
 @@ -5,21 +5,23 @@
   * Please see LICENSE files in the repository root for full details.
