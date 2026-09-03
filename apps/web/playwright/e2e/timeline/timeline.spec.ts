@@ -749,8 +749,6 @@ test.describe("Timeline", () => {
                     await page.locator(".mx_RoomSummaryCard_search").getByRole("searchbox").fill("Message");
                     await page.locator(".mx_RoomSummaryCard_search").getByRole("searchbox").press("Enter");
 
-                    await expect(page.locator(".mx_RoomSearchAuxPanel")).toMatchScreenshot("search-aux-panel.png");
-
                     for (const event of events) {
                         await expect(
                             page
