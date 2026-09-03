@@ -9,9 +9,9 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
 import React from "react";
-import { render, fireEvent, type RenderResult } from "test-utils-rtl";
+import { act, fireEvent, render, waitFor, type RenderResult } from "test-utils-rtl";
 import {
     ConditionKind,
     EventType,
@@ -504,6 +504,28 @@ describe("<LoggedInView />", () => {
         });
     });
 
+    describe("compact message actions", () => {
+        afterEach(async () => {
+            await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
+        });
+
+        it("toggles the wrapper class when the compactMessageActions setting changes", async () => {
+            await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, false);
+            const { container } = getComponent();
+            const wrapper = (): Element | null => container.querySelector(".mx_MatrixChat_wrapper");
+
+            expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(false);
+
+            await act(async () => {
+                await SettingsStore.setValue("compactMessageActions", null, SettingLevel.DEVICE, true);
+            });
+
+            await waitFor(() =>
+                expect(wrapper()?.classList.contains("mx_MatrixChat_compactMessageActions")).toBe(true),
+            );
+        });
+    });
+
     describe("resource limit exceeded errors", () => {
         it("pops a toast when M_RESOURCE_LIMIT_EXCEEDED is seen down sync", async () => {
             const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
@@ -571,7 +593,7 @@ describe("<LoggedInView />", () => {
     describe("chat background", () => {
         // Captured before any spy is installed, so the fallback never recurses into the mock itself.
         const realGetValue = SettingsStore.getValue.bind(SettingsStore);
-        let getValueSpy: jest.SpyInstance | undefined;
+        let getValueSpy: MockInstance | undefined;
 
         afterEach(() => {
             getValueSpy?.mockRestore();
@@ -579,7 +601,7 @@ describe("<LoggedInView />", () => {
         });
 
         const mockChatBackgroundSettings = (values: Record<string, unknown>): void => {
-            getValueSpy = jest
+            getValueSpy = vi
                 .spyOn(SettingsStore, "getValue")
                 .mockImplementation(((name: string, ...rest: unknown[]) =>
                     name in values
