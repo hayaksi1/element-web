@@ -16,6 +16,8 @@ import { mkEvent, stubClient } from "test-utils";
 import ReplyTile from "./ReplyTile";
 import { renderReplyTile } from "../../../events/EventTileFactory";
 import { VideoBodyFactory } from "../messages/MBodyFactory";
+import dis from "../../../dispatcher/dispatcher";
+import { Action } from "../../../dispatcher/actions";
 
 vi.mock("../../../events/EventTileFactory", async () => {
     const actual = await vi.importActual("../../../events/EventTileFactory");
@@ -66,5 +68,53 @@ describe("ReplyTile", () => {
             }),
             false,
         );
+    });
+
+    describe("clicking a reply", () => {
+        const mkTextEvent = () =>
+            mkEvent({
+                event: true,
+                type: EventType.RoomMessage,
+                user: "@alice:server",
+                room: "!room:server",
+                id: "$text",
+                content: { body: "hello", msgtype: MsgType.Text },
+            });
+
+        // The quoted body is injected as markup rather than as JSX because React refuses to nest an
+        // anchor inside the anchor which wraps the whole tile, and the test setup turns that warning
+        // into a failure.
+        const renderWithBody = (html: string) => {
+            vi.mocked(renderReplyTile).mockReturnValue(
+                <div className="mx_EventTile_body" dangerouslySetInnerHTML={{ __html: html }} />,
+            );
+            return render(<ReplyTile mxEvent={mkTextEvent()} />);
+        };
+
+        const clickOn = (element: Element): MouseEvent => {
+            const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+            element.dispatchEvent(click);
+            return click;
+        };
+
+        it("follows a link the click landed inside rather than jumping to the replied-to message", () => {
+            const dispatch = vi.spyOn(dis, "dispatch");
+            const { container } = renderWithBody('<a href="https://example.com/foo"><b id="inner">docs</b></a>');
+
+            const click = clickOn(container.querySelector("#inner")!);
+
+            expect(click.defaultPrevented).toBe(false);
+            expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ action: Action.ViewRoom }));
+        });
+
+        it("jumps to the replied-to message when the click was not on a link", () => {
+            const dispatch = vi.spyOn(dis, "dispatch");
+            const { container } = renderWithBody('<b id="plain">docs</b>');
+
+            const click = clickOn(container.querySelector("#plain")!);
+
+            expect(click.defaultPrevented).toBe(true);
+            expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ action: Action.ViewRoom }));
+        });
     });
 });
