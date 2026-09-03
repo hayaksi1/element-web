@@ -5,11 +5,13 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import { mocked } from "jest-mock";
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, afterEach } from "vitest";
 import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
 
-import { RoomSearchSenderFilterViewModel } from "../../../../src/viewmodels/search/RoomSearchSenderFilterViewModel";
-import { stubClient } from "../../../test-utils";
+import { RoomSearchSenderFilterViewModel } from "./RoomSearchSenderFilterViewModel";
+import { stubClient } from "test-utils";
 
 const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
 
@@ -17,14 +19,14 @@ describe("RoomSearchSenderFilterViewModel", () => {
     const myUserId = "@me:server";
 
     const buildRoom = (members: RoomMember[]): Room => {
-        const client = mocked(stubClient());
+        const client = vi.mocked(stubClient());
         const room = new Room("!r:server", client, myUserId);
-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
         return room;
     };
 
     afterEach(() => {
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     it("lists joined members excluding the current user, sorted by display name", () => {
