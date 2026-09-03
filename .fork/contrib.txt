@@ -22,6 +22,8 @@
 #   pr/pinned-banner-edits-fix          byte-identical head to an absorbed branch
 #   pr/room-list-max-width-persist      zero commits of its own
 #   pr/search-infra                     self-declared WIP; folds into pr/search-stepping
+#   pr/uploaded-media-cache             MERGED upstream as #34753 (d99eb665e9); every file
+#                                       is byte-identical to upstream/develop
 #   ...and all 49 branches whose PR is MERGED.
 #   pr/search-cmdf-default              subset of pr/search-cmdf-toast
 #   pr/search-stepping                  subset of pr/search-from-filter
@@ -82,7 +84,6 @@ pr/export-utf8-bom
 pr/query-user-id-validation
 pr/spoiler-markdown
 pr/image-aspect-ratio-from-loaded
-pr/uploaded-media-cache
 pr/deserialize-loose-lists
 pr/edit-composer-escaping
 pr/big-emoji-html

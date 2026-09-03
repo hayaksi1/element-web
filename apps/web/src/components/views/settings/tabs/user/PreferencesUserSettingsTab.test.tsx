@@ -8,13 +8,9 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import React from "react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fireEvent, render, type RenderResult, screen, waitFor } from "test-utils-rtl";
-import userEvent from "@testing-library/user-event";
-
-import PreferencesUserSettingsTab from "./PreferencesUserSettingsTab";
-import { MatrixClientPeg } from "../../../../../MatrixClientPeg";
 import {
     getMockClientWithEventEmitter,
     mockClientMethodsServer,
@@ -22,6 +18,10 @@ import {
     mockPlatformPeg,
     stubClient,
 } from "test-utils";
+import userEvent from "@testing-library/user-event";
+
+import PreferencesUserSettingsTab from "./PreferencesUserSettingsTab";
+import { MatrixClientPeg } from "../../../../../MatrixClientPeg";
 import SettingsStore from "../../../../../settings/SettingsStore";
 import { SettingLevel } from "../../../../../settings/SettingLevel";
 import MatrixClientBackedController from "../../../../../settings/controllers/MatrixClientBackedController";
