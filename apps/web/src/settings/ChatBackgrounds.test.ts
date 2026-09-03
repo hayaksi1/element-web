@@ -5,6 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+import { describe, it, expect, vi } from "vitest";
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -14,11 +15,11 @@ import {
     getChatBackgroundPreset,
     MIN_CHAT_BACKGROUND_OPACITY,
     resolveChatBackground,
-} from "../../../src/settings/ChatBackgrounds";
+} from "./ChatBackgrounds";
 
 describe("ChatBackgrounds", () => {
     const clientWith = (httpUrl: string | null): MatrixClient =>
-        ({ mxcUrlToHttp: jest.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
+        ({ mxcUrlToHttp: vi.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
 
     describe("CHAT_BACKGROUND_PRESETS", () => {
         it("exposes the bundled presets", () => {
@@ -113,7 +114,8 @@ describe("ChatBackgrounds", () => {
         });
 
         it("resolves an mxc URI to the same http url in both themes", () => {
-            const client = clientWith("https://cdn.example/wall.png");
+            const toHttp = vi.fn().mockReturnValue("https://cdn.example/wall.png");
+            const client = { mxcUrlToHttp: toHttp } as unknown as MatrixClient;
             const uploaded = {
                 image: 'url("https://cdn.example/wall.png")',
                 repeat: "no-repeat",
@@ -123,7 +125,7 @@ describe("ChatBackgrounds", () => {
                 light: uploaded,
                 dark: uploaded,
             });
-            expect(client.mxcUrlToHttp).toHaveBeenCalled();
+            expect(toHttp).toHaveBeenCalled();
         });
 
         it("returns null when the mxc URI cannot be resolved to http", () => {

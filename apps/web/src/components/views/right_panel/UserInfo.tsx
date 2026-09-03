@@ -202,7 +202,7 @@ const useMemberProfile = (member: Member): Member => {
         if (!needsProfile) return;
 
         let cancelled = false;
-        userProfilesStore.getOrFetchProfile(userId).then((profile) => {
+        void userProfilesStore.getOrFetchProfile(userId).then((profile) => {
             if (cancelled || !profile) return;
 
             const memberWithProfile = new RoomMember("", userId);

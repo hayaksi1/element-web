@@ -85,8 +85,9 @@ function linuxDesktopEntry(minimised: boolean): string {
  * Whether the app should start hidden (minimised to tray) for this launch.
  *
  * On Windows/Linux the login item passes `--hidden`, surfaced here as `argsHidden`. On macOS the
- * native loginItem API cannot pass arguments and `openAsHidden` is a no-op on macOS 13+, so we
- * instead derive it from `wasOpenedAtLogin` plus the stored minimised preference.
+ * native loginItem API cannot pass arguments and has no minimised flag (`openAsHidden` was a no-op
+ * on macOS 13+ and Electron 44 removed it), so we instead derive it from `wasOpenedAtLogin` plus
+ * the stored minimised preference.
  */
 export function shouldStartHidden(argsHidden: boolean): boolean {
     if (argsHidden) return true;
@@ -125,7 +126,8 @@ export class AutoLaunch {
      * On Windows a Squirrel install lives in a versioned `app-x.y.z` directory, so the login item
      * must point at the stable `Update.exe` (`--processStart`) rather than the versioned executable,
      * otherwise it breaks on the next update. MSI installs have no `Update.exe`, so there we launch
-     * the executable directly (its location is stable across updates). `openAsHidden` is macOS-only.
+     * the executable directly (its location is stable across updates). macOS carries no minimised
+     * flag here; {@link shouldStartHidden} derives it from the stored preference instead.
      *
      * @param minimised - whether the app should start hidden/minimised.
      */
@@ -146,7 +148,6 @@ export class AutoLaunch {
 
         return {
             openAtLogin: true,
-            openAsHidden: minimised, // macOS-only, no-op on macOS 13+ (see shouldStartHidden); ignored on Linux
             args: minimised ? ["--hidden"] : [],
         };
     }

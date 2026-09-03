@@ -5,26 +5,29 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { mocked } from "jest-mock";
-import { render, screen, waitFor } from "jest-matrix-react";
+import { render, screen, waitFor } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
 import { Direction } from "matrix-js-sdk/src/matrix";
 
-import { RoomSearchJumpToDate } from "../../../../../src/components/views/right_panel/RoomSearchJumpToDate";
-import SettingsStore from "../../../../../src/settings/SettingsStore";
-import { UIFeature } from "../../../../../src/settings/UIFeature";
-import dispatcher from "../../../../../src/dispatcher/dispatcher";
-import { Action } from "../../../../../src/dispatcher/actions";
-import { MatrixClientPeg } from "../../../../../src/MatrixClientPeg";
-import { SdkContextClass } from "../../../../../src/contexts/SDKContext";
+import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate";
+import SettingsStore from "../../../settings/SettingsStore";
+import { UIFeature } from "../../../settings/UIFeature";
+import dispatcher from "../../../dispatcher/dispatcher";
+import { Action } from "../../../dispatcher/actions";
+import { MatrixClientPeg } from "../../../MatrixClientPeg";
+import { SDKContextClass } from "../../../contexts/SDKContextClass";
+import { SDKContext } from "../../../contexts/SDKContext";
 
-jest.mock("../../../../../src/settings/SettingsStore");
-jest.mock("../../../../../src/contexts/SDKContext", () => ({
-    SdkContextClass: {
+vi.mock("../../../settings/SettingsStore");
+vi.mock("../../../contexts/SDKContextClass", () => ({
+    SDKContextClass: {
         instance: {
             roomViewStore: {
-                getRoomId: jest.fn(),
+                getRoomId: vi.fn(),
             },
         },
     },
@@ -32,10 +35,14 @@ jest.mock("../../../../../src/contexts/SDKContext", () => ({
 
 describe("RoomSearchJumpToDate", () => {
     const roomId = "!room:example.org";
-    const mockTimestampToEvent = jest.fn();
+
+    const withSdkContext = ({ children }: { children?: React.ReactNode }): React.ReactElement => (
+        <SDKContext.Provider value={SDKContextClass.instance}>{children}</SDKContext.Provider>
+    );
+    const mockTimestampToEvent = vi.fn();
 
     const setFeatureEnabled = (enabled: boolean): void => {
-        mocked(SettingsStore).getValue.mockImplementation((key): any => {
+        vi.mocked(SettingsStore).getValue.mockImplementation((key): any => {
             if (key === "feature_jump_to_date") return enabled;
             if (String(key) === UIFeature.TimelineEnableRelativeDates) return true;
             return undefined;
@@ -44,23 +51,23 @@ describe("RoomSearchJumpToDate", () => {
 
     beforeEach(() => {
         setFeatureEnabled(true);
-        mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
-        mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
+        vi.mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
+        vi.mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
 
         mockTimestampToEvent.mockReset();
-        jest.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
+        vi.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
             timestampToEvent: mockTimestampToEvent,
         } as any);
-        jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+        vi.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
+        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
     });
 
     afterEach(() => {
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     it("renders the calendar trigger when jump-to-date is enabled", () => {
-        render(<RoomSearchJumpToDate roomId={roomId} />);
+        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
 
         expect(screen.getByTestId("search-jump-to-date-button")).toBeInTheDocument();
     });
@@ -68,7 +75,7 @@ describe("RoomSearchJumpToDate", () => {
     it("renders nothing when jump-to-date is disabled", () => {
         setFeatureEnabled(false);
 
-        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />);
+        const { container } = render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
 
         expect(container).toBeEmptyDOMElement();
     });
@@ -76,7 +83,7 @@ describe("RoomSearchJumpToDate", () => {
     it("jumps the current room to the picked date via a quick option", async () => {
         mockTimestampToEvent.mockResolvedValue({ event_id: "$event", origin_server_ts: 0 });
 
-        render(<RoomSearchJumpToDate roomId={roomId} />);
+        render(<RoomSearchJumpToDate roomId={roomId} />, { wrapper: withSdkContext });
         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
 
@@ -93,10 +100,12 @@ describe("RoomSearchJumpToDate", () => {
         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
         const roomB = "!roomB:example.org";
         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+        vi.mocked(SDKContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
 
-        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
-        rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
+        const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />, {
+            wrapper: withSdkContext,
+        });
+        rerender(withSdkContext({ children: <RoomSearchJumpToDate key={roomB} roomId={roomB} /> }));
 
         await userEvent.click(screen.getByTestId("search-jump-to-date-button"));
         await userEvent.click(await screen.findByTestId("jump-to-date-last-week"));
