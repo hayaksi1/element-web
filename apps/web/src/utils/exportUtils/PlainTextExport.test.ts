@@ -10,11 +10,14 @@ Please see LICENSE files in the repository root for full details.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MatrixEvent, type Room } from "matrix-js-sdk/src/matrix";
+import { saveAs } from "file-saver";
 import { createTestClient, mkEvent, mkStubRoom, REPEATABLE_DATE } from "test-utils";
 
 import { ExportType, type IExportOptions } from "./exportUtils";
 import PlainTextExporter from "./PlainTextExport";
 import SettingsStore from "../../settings/SettingsStore";
+
+vi.mock("file-saver", () => ({ saveAs: vi.fn() }));
 
 class TestablePlainTextExporter extends PlainTextExporter {
     public async testCreateOutput(events: MatrixEvent[]): Promise<string> {
@@ -71,6 +74,18 @@ describe("PlainTextExport", () => {
         const events = await exporter.testGetRequiredEvents();
 
         expect(events.map((e) => e.getId())).toEqual(["$message", "$root", "$reply"]);
+    });
+
+    it("should start the exported file with a UTF-8 byte order mark", async () => {
+        const exporter = new PlainTextExporter(stubRoom, ExportType.Timeline, stubOptions, () => {});
+
+        await exporter.export();
+
+        // Asserted as bytes rather than as text: the mark is what a reader looks at to know the
+        // encoding, so what matters is that those three bytes lead the file.
+        const saved = vi.mocked(saveAs).mock.calls[0][0] as Blob;
+        const bytes = new Uint8Array(await saved.arrayBuffer());
+        expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
     });
 
     it("should have an Element-branded destination file name", () => {

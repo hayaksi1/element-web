@@ -141,6 +141,7 @@ export function RoomFilesView({
                             filterRefs.current[index] = el;
                         }}
                         role="option"
+                        aria-selected={category === activeCategory}
                         selected={category === activeCategory}
                         onClick={() => vm.toggleCategory(category)}
                     >

@@ -11,7 +11,7 @@ Please see LICENSE files in the repository root for full details.
 
 import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
 import React from "react";
-import { act, fireEvent, render, waitFor, type RenderResult } from "test-utils-rtl";
+import { act, render, fireEvent, waitFor, type RenderResult } from "test-utils-rtl";
 import {
     ConditionKind,
     EventType,
@@ -428,6 +428,28 @@ describe("<LoggedInView />", () => {
         expect(defaultDispatcher.fire).toHaveBeenCalledWith(Action.FocusMessageSearch);
     });
 
+    it("shows the one-time in-room search nudge on Ctrl+F when the shortcut is disabled (web)", async () => {
+        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
+        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, false);
+        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
+
+        getComponent();
+        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
+
+        expect(addOrReplaceToast).toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
+    });
+
+    it("does not show the in-room search nudge when the shortcut is enabled", async () => {
+        const addOrReplaceToast = vi.spyOn(ToastStore.sharedInstance(), "addOrReplaceToast");
+        await SettingsStore.setValue("ctrlFForSearch", null, SettingLevel.DEVICE, true);
+        await SettingsStore.setValue("ctrlFForSearchNudgeShown", null, SettingLevel.DEVICE, false);
+
+        getComponent();
+        fireEvent.keyDown(document.body, { key: "f", ctrlKey: true });
+
+        expect(addOrReplaceToast).not.toHaveBeenCalledWith(expect.objectContaining({ key: "in-room-search-nudge" }));
+    });
+
     it("should go home on home shortcut", async () => {
         vi.spyOn(defaultDispatcher, "dispatch").mockImplementation(() => {});
 
@@ -613,7 +635,7 @@ describe("<LoggedInView />", () => {
         };
 
         const getChatBody = (container: HTMLElement): HTMLElement =>
-            container.querySelector(".mx_MatrixChat") as HTMLElement;
+            container.querySelector<HTMLElement>(".mx_MatrixChat")!;
 
         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
             mockChatBackgroundSettings({
