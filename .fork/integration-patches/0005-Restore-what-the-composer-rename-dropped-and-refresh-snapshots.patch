@@ -1,176 +1,39 @@
-From 61414a68abca15293d7f66651e39366fa9dfd0c9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
-Date: Thu, 3 Sep 2026 22:25:09 +0300
-Subject: [PATCH] Restore what the composer rename dropped and regenerate the
- snapshots it moved
+Date: Wed, 3 Sep 2026 22:45:00 +0300
+Subject: [PATCH] Restore what the composer rename dropped and refresh the fork's snapshots
 
 Upstream renamed SendMessageComposer's suite out of test/unit-tests into src/,
 and three contribution branches still edit the old path. Only one of them can
-win that merge, so the other two contributed nothing and the drop gate said
-so: pr/slash-command-double-send's guard against a slash command running twice
-on a double Enter, and pr/full-size-threads' fullSizeThreadViewEnabled fixture
-field. The field is not cosmetic -- it is a required member of IRoomState, so
-its absence is a type error rather than a failing test, and exactly three
-fixtures have to carry it.
+win that merge, so the other two contributed nothing: pr/slash-command-double-send's
+guard against a slash command running twice on a double Enter, and
+pr/full-size-threads' fullSizeThreadViewEnabled fixture field. The field is a
+required member of IRoomState, so losing it is a type error rather than a
+failing test, and exactly three fixtures have to carry it.
 
-Neither belongs on its branch: each branch is correct against the path it was
+Neither belongs on its branch. Each branch is correct against the path it was
 written for, and both are heads of open pull requests that must not be
-rewritten. The loss only exists in the combination, which is what an
-integration patch is for.
+rewritten; the loss exists only in the combination.
 
-The snapshots move for a second, unrelated reason. They embed the CSS-module
-hash of stylesheets the fork edits, so every fork resolution that touches
-EventTileView or EventTileBubble moves the hash and every snapshot quoting it
-goes stale. Two earlier patches carried a hand-picked hash for exactly this and
-broke the moment upstream moved the same file again; regenerating from the
-rebuilt tree replaces both.
+The three snapshots move for an unrelated reason: they embed the CSS-module
+hash of stylesheets the fork edits, so every fork resolution touching
+EventTileView moves the hash and every snapshot quoting it goes stale. Two
+earlier patches pinned that hash by hand and broke the moment upstream moved
+the same file again; regenerating from the rebuilt tree replaces both.
 
-The Preferences snapshot is the one worth reading rather than trusting: it is
+The Preferences snapshot is the one worth reading rather than trusting. It is
 the only place the fork's four settings rows are asserted, and a regeneration
-would happily bake their absence in. All four survived -- smooth scrolling, the
+would happily bake their absence in. All four survived: smooth scrolling, the
 in-room search shortcut, its find-on-page help text, and the full-size thread
 toggle.
-
-The DeviceDetails snapshot the same run rewrote is deliberately not included.
-Its only change was a timestamp losing its weekday prefix, which tracks the
-clock on the machine that ran the suite rather than anything in this tree.
 ---
- .../__snapshots__/MessagePanel.test.tsx.snap  |   4 +-
- .../__snapshots__/RoomView.test.tsx.snap      |  18 +--
- .../RoomPredecessorTile.test.tsx.snap         |   6 +-
- .../views/rooms/SendMessageComposer.test.tsx  |  18 +++
- .../LayoutSwitcher.test.tsx.snap              |  32 ++--
- .../AppearanceUserSettingsTab.test.tsx.snap   |  32 ++--
- .../PreferencesUserSettingsTab.test.tsx.snap  | 151 ++++++++++++++----
- .../__snapshots__/HtmlExport.test.ts.snap     |   2 +-
- 8 files changed, 189 insertions(+), 74 deletions(-)
+ .../views/rooms/SendMessageComposer.test.tsx       |  18 +++
+ .../__snapshots__/LayoutSwitcher.test.tsx.snap     |  32 ++---
+ .../AppearanceUserSettingsTab.test.tsx.snap        |  32 ++---
+ .../PreferencesUserSettingsTab.test.tsx.snap       | 151 +++++++++++++++++----
+ .../__snapshots__/HtmlExport.test.ts.snap          |   2 +-
+ 5 files changed, 175 insertions(+), 60 deletions(-)
 
-diff --git a/apps/web/src/components/structures/__snapshots__/MessagePanel.test.tsx.snap b/apps/web/src/components/structures/__snapshots__/MessagePanel.test.tsx.snap
-index e770f49bc9..b6817fb112 100644
---- a/apps/web/src/components/structures/__snapshots__/MessagePanel.test.tsx.snap
-+++ b/apps/web/src/components/structures/__snapshots__/MessagePanel.test.tsx.snap
-@@ -63,7 +63,7 @@ exports[`MessagePanel > should handle lots of membership events quickly 1`] = `
-           </div>
-         </li>
-         <div
--          class="_container_1mzk4_8 mx_EventTileBubble mx_HistoryTile"
-+          class="_container_69wqt_8 mx_EventTileBubble mx_HistoryTile"
-         >
-           <svg
-             fill="currentColor"
-@@ -77,7 +77,7 @@ exports[`MessagePanel > should handle lots of membership events quickly 1`] = `
-             />
-           </svg>
-           <div
--            class="_title_1mzk4_34"
-+            class="_title_69wqt_33"
-           >
-             You can't see earlier messages
-           </div>
-diff --git a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
-index a0a20fd1c1..522ffb06a7 100644
---- a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
-+++ b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
-@@ -152,7 +152,7 @@ exports[`RoomView > for a local room > in state ERROR > should match the snapsho
-                 class="mx_NewRoomIntro"
-               >
-                 <div
--                  class="_container_1mzk4_8 mx_EventTileBubble mx_cryptoEvent"
-+                  class="_container_69wqt_8 mx_EventTileBubble mx_cryptoEvent"
-                 >
-                   <svg
-                     color="var(--cpd-color-icon-critical-primary)"
-@@ -167,12 +167,12 @@ exports[`RoomView > for a local room > in state ERROR > should match the snapsho
-                     />
-                   </svg>
-                   <div
--                    class="_title_1mzk4_34"
-+                    class="_title_69wqt_33"
-                   >
-                     End-to-end encryption isn't enabled
-                   </div>
-                   <div
--                    class="_subtitle_1mzk4_35"
-+                    class="_subtitle_69wqt_34"
-                   >
-                     <span>
-                        
-@@ -348,7 +348,7 @@ exports[`RoomView > for a local room > in state NEW > should match the snapshot
-                 class="mx_NewRoomIntro"
-               >
-                 <div
--                  class="_container_1mzk4_8 mx_EventTileBubble mx_cryptoEvent"
-+                  class="_container_69wqt_8 mx_EventTileBubble mx_cryptoEvent"
-                 >
-                   <svg
-                     color="var(--cpd-color-icon-critical-primary)"
-@@ -363,12 +363,12 @@ exports[`RoomView > for a local room > in state NEW > should match the snapshot
-                     />
-                   </svg>
-                   <div
--                    class="_title_1mzk4_34"
-+                    class="_title_69wqt_33"
-                   >
-                     End-to-end encryption isn't enabled
-                   </div>
-                   <div
--                    class="_subtitle_1mzk4_35"
-+                    class="_subtitle_69wqt_34"
-                   >
-                     <span>
-                        
-@@ -750,7 +750,7 @@ exports[`RoomView > for a local room > in state NEW > that is encrypted > should
-               style="height: 400px;"
-             >
-               <div
--                class="_container_1mzk4_8 mx_EventTileBubble mx_cryptoEvent _content_ufv8a_8"
-+                class="_container_69wqt_8 mx_EventTileBubble mx_cryptoEvent _content_ufv8a_8"
-               >
-                 <svg
-                   data-state="supported"
-@@ -765,12 +765,12 @@ exports[`RoomView > for a local room > in state NEW > that is encrypted > should
-                   />
-                 </svg>
-                 <div
--                  class="_title_1mzk4_34"
-+                  class="_title_69wqt_33"
-                 >
-                   Encryption enabled
-                 </div>
-                 <div
--                  class="_subtitle_1mzk4_35"
-+                  class="_subtitle_69wqt_34"
-                 >
-                   Messages in this chat will be end-to-end encrypted.
-                 </div>
-diff --git a/apps/web/src/components/views/messages/__snapshots__/RoomPredecessorTile.test.tsx.snap b/apps/web/src/components/views/messages/__snapshots__/RoomPredecessorTile.test.tsx.snap
-index 4bc0d38493..1071468f03 100644
---- a/apps/web/src/components/views/messages/__snapshots__/RoomPredecessorTile.test.tsx.snap
-+++ b/apps/web/src/components/views/messages/__snapshots__/RoomPredecessorTile.test.tsx.snap
-@@ -3,7 +3,7 @@
- exports[`<RoomPredecessorTile /> > Renders as expected 1`] = `
- <DocumentFragment>
-   <div
--    class="_container_1mzk4_8 mx_EventTileBubble mx_CreateEvent"
-+    class="_container_69wqt_8 mx_EventTileBubble mx_CreateEvent"
-   >
-     <svg
-       fill="currentColor"
-@@ -17,12 +17,12 @@ exports[`<RoomPredecessorTile /> > Renders as expected 1`] = `
-       />
-     </svg>
-     <div
--      class="_title_1mzk4_34"
-+      class="_title_69wqt_33"
-     >
-       This room is a continuation of another conversation.
-     </div>
-     <div
--      class="_subtitle_1mzk4_35"
-+      class="_subtitle_69wqt_34"
-     >
-       <a
-         href="https://matrix.to/#/old_room_id/$tombstone_event_id"
 diff --git a/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx b/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx
 index 226b5cea01..36db648242 100644
 --- a/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx
@@ -208,7 +71,7 @@ index 226b5cea01..36db648242 100644
              stubClient();
              vi.mocked(doMaybeLocalRoomAction).mockImplementation(
 diff --git a/apps/web/src/components/views/settings/__snapshots__/LayoutSwitcher.test.tsx.snap b/apps/web/src/components/views/settings/__snapshots__/LayoutSwitcher.test.tsx.snap
-index 1f46a8b869..fec00d45f4 100644
+index 1f46a8b869..4543ea8fb0 100644
 --- a/apps/web/src/components/views/settings/__snapshots__/LayoutSwitcher.test.tsx.snap
 +++ b/apps/web/src/components/views/settings/__snapshots__/LayoutSwitcher.test.tsx.snap
 @@ -62,14 +62,14 @@ exports[`<LayoutSwitcher /> > should render 1`] = `
@@ -216,7 +79,7 @@ index 1f46a8b869..fec00d45f4 100644
                  aria-atomic="true"
                  aria-live="off"
 -                class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutGroup_1eu7g_194"
-+                class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutGroup_umc2n_194"
++                class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutGroup_w72ta_194"
                  data-event-id="$9999999999999999999999999999999999999999999"
                  data-scroll-tokens="$9999999999999999999999999999999999999999999"
                  data-testid="event-tile"
@@ -224,7 +87,7 @@ index 1f46a8b869..fec00d45f4 100644
                >
                  <div
 -                  class="_slotSender_1eu7g_104"
-+                  class="_slotSender_umc2n_104"
++                  class="_slotSender_w72ta_104"
                    data-testid="event-tile-slot-sender"
                  >
                    <div
@@ -233,7 +96,7 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_slotAvatar_1eu7g_95"
-+                  class="_slotAvatar_umc2n_95"
++                  class="_slotAvatar_w72ta_95"
                    data-testid="event-tile-slot-avatar"
                  >
                    <span
@@ -242,13 +105,13 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_line_1eu7g_71 mx_EventTile_line"
-+                  class="_line_umc2n_71 mx_EventTile_line"
++                  class="_line_w72ta_71 mx_EventTile_line"
                    data-testid="event-tile-line"
                    id="1"
                  >
                    <div
 -                    class="_slotBody_1eu7g_96"
-+                    class="_slotBody_umc2n_96"
++                    class="_slotBody_w72ta_96"
                      data-testid="event-tile-slot-body"
                    >
                      <div
@@ -257,7 +120,7 @@ index 1f46a8b869..fec00d45f4 100644
                  aria-atomic="true"
                  aria-live="off"
 -                class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutBubble_1eu7g_705"
-+                class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutBubble_umc2n_705"
++                class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutBubble_w72ta_705"
                  data-event-id="$9999999999999999999999999999999999999999999"
                  data-scroll-tokens="$9999999999999999999999999999999999999999999"
                  data-testid="event-tile"
@@ -265,7 +128,7 @@ index 1f46a8b869..fec00d45f4 100644
                >
                  <div
 -                  class="_slotSender_1eu7g_104"
-+                  class="_slotSender_umc2n_104"
++                  class="_slotSender_w72ta_104"
                    data-testid="event-tile-slot-sender"
                  >
                    <div
@@ -274,7 +137,7 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_slotAvatar_1eu7g_95"
-+                  class="_slotAvatar_umc2n_95"
++                  class="_slotAvatar_w72ta_95"
                    data-testid="event-tile-slot-avatar"
                  >
                    <span
@@ -283,13 +146,13 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_line_1eu7g_71 mx_EventTile_line"
-+                  class="_line_umc2n_71 mx_EventTile_line"
++                  class="_line_w72ta_71 mx_EventTile_line"
                    data-testid="event-tile-line"
                    id="2"
                  >
                    <div
 -                    class="_slotBody_1eu7g_96"
-+                    class="_slotBody_umc2n_96"
++                    class="_slotBody_w72ta_96"
                      data-testid="event-tile-slot-body"
                    >
                      <div
@@ -298,7 +161,7 @@ index 1f46a8b869..fec00d45f4 100644
                  aria-atomic="true"
                  aria-live="off"
 -                class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutIrc_1eu7g_471"
-+                class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutIrc_umc2n_471"
++                class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutIrc_w72ta_471"
                  data-event-id="$9999999999999999999999999999999999999999999"
                  data-scroll-tokens="$9999999999999999999999999999999999999999999"
                  data-testid="event-tile"
@@ -306,7 +169,7 @@ index 1f46a8b869..fec00d45f4 100644
                >
                  <div
 -                  class="_slotTimestamp_1eu7g_106"
-+                  class="_slotTimestamp_umc2n_106"
++                  class="_slotTimestamp_w72ta_106"
                    data-testid="event-tile-slot-timestamp"
                  >
                    <span
@@ -315,7 +178,7 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_slotAvatar_1eu7g_95"
-+                  class="_slotAvatar_umc2n_95"
++                  class="_slotAvatar_w72ta_95"
                    data-testid="event-tile-slot-avatar"
                  >
                    <span
@@ -324,7 +187,7 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_slotSender_1eu7g_104"
-+                  class="_slotSender_umc2n_104"
++                  class="_slotSender_w72ta_104"
                    data-testid="event-tile-slot-sender"
                  >
                    <div
@@ -333,18 +196,18 @@ index 1f46a8b869..fec00d45f4 100644
                  </div>
                  <div
 -                  class="_line_1eu7g_71 mx_EventTile_line"
-+                  class="_line_umc2n_71 mx_EventTile_line"
++                  class="_line_w72ta_71 mx_EventTile_line"
                    data-testid="event-tile-line"
                    id="3"
                  >
                    <div
 -                    class="_slotBody_1eu7g_96"
-+                    class="_slotBody_umc2n_96"
++                    class="_slotBody_w72ta_96"
                      data-testid="event-tile-slot-body"
                    >
                      <div
 diff --git a/apps/web/src/components/views/settings/tabs/user/__snapshots__/AppearanceUserSettingsTab.test.tsx.snap b/apps/web/src/components/views/settings/tabs/user/__snapshots__/AppearanceUserSettingsTab.test.tsx.snap
-index 2fd6c2e7b8..3e1607797c 100644
+index 2fd6c2e7b8..e8de92cc2d 100644
 --- a/apps/web/src/components/views/settings/tabs/user/__snapshots__/AppearanceUserSettingsTab.test.tsx.snap
 +++ b/apps/web/src/components/views/settings/tabs/user/__snapshots__/AppearanceUserSettingsTab.test.tsx.snap
 @@ -205,14 +205,14 @@ exports[`AppearanceUserSettingsTab > should render 1`] = `
@@ -352,7 +215,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          aria-atomic="true"
                          aria-live="off"
 -                        class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutGroup_1eu7g_194"
-+                        class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutGroup_umc2n_194"
++                        class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutGroup_w72ta_194"
                          data-event-id="$9999999999999999999999999999999999999999999"
                          data-scroll-tokens="$9999999999999999999999999999999999999999999"
                          data-testid="event-tile"
@@ -360,7 +223,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                        >
                          <div
 -                          class="_slotSender_1eu7g_104"
-+                          class="_slotSender_umc2n_104"
++                          class="_slotSender_w72ta_104"
                            data-testid="event-tile-slot-sender"
                          >
                            <div
@@ -369,7 +232,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_slotAvatar_1eu7g_95"
-+                          class="_slotAvatar_umc2n_95"
++                          class="_slotAvatar_w72ta_95"
                            data-testid="event-tile-slot-avatar"
                          >
                            <span
@@ -378,13 +241,13 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_line_1eu7g_71 mx_EventTile_line"
-+                          class="_line_umc2n_71 mx_EventTile_line"
++                          class="_line_w72ta_71 mx_EventTile_line"
                            data-testid="event-tile-line"
                            id="1"
                          >
                            <div
 -                            class="_slotBody_1eu7g_96"
-+                            class="_slotBody_umc2n_96"
++                            class="_slotBody_w72ta_96"
                              data-testid="event-tile-slot-body"
                            >
                              <div
@@ -393,7 +256,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          aria-atomic="true"
                          aria-live="off"
 -                        class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutBubble_1eu7g_705"
-+                        class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutBubble_umc2n_705"
++                        class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutBubble_w72ta_705"
                          data-event-id="$9999999999999999999999999999999999999999999"
                          data-scroll-tokens="$9999999999999999999999999999999999999999999"
                          data-testid="event-tile"
@@ -401,7 +264,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                        >
                          <div
 -                          class="_slotSender_1eu7g_104"
-+                          class="_slotSender_umc2n_104"
++                          class="_slotSender_w72ta_104"
                            data-testid="event-tile-slot-sender"
                          >
                            <div
@@ -410,7 +273,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_slotAvatar_1eu7g_95"
-+                          class="_slotAvatar_umc2n_95"
++                          class="_slotAvatar_w72ta_95"
                            data-testid="event-tile-slot-avatar"
                          >
                            <span
@@ -419,13 +282,13 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_line_1eu7g_71 mx_EventTile_line"
-+                          class="_line_umc2n_71 mx_EventTile_line"
++                          class="_line_w72ta_71 mx_EventTile_line"
                            data-testid="event-tile-line"
                            id="2"
                          >
                            <div
 -                            class="_slotBody_1eu7g_96"
-+                            class="_slotBody_umc2n_96"
++                            class="_slotBody_w72ta_96"
                              data-testid="event-tile-slot-body"
                            >
                              <div
@@ -434,7 +297,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          aria-atomic="true"
                          aria-live="off"
 -                        class="_root_1eu7g_9 mx_EventTile _stateOwnEvent_1eu7g_903 _layoutIrc_1eu7g_471"
-+                        class="_root_umc2n_9 mx_EventTile _stateOwnEvent_umc2n_903 _layoutIrc_umc2n_471"
++                        class="_root_w72ta_9 mx_EventTile _stateOwnEvent_w72ta_903 _layoutIrc_w72ta_471"
                          data-event-id="$9999999999999999999999999999999999999999999"
                          data-scroll-tokens="$9999999999999999999999999999999999999999999"
                          data-testid="event-tile"
@@ -442,7 +305,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                        >
                          <div
 -                          class="_slotTimestamp_1eu7g_106"
-+                          class="_slotTimestamp_umc2n_106"
++                          class="_slotTimestamp_w72ta_106"
                            data-testid="event-tile-slot-timestamp"
                          >
                            <span
@@ -451,7 +314,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_slotAvatar_1eu7g_95"
-+                          class="_slotAvatar_umc2n_95"
++                          class="_slotAvatar_w72ta_95"
                            data-testid="event-tile-slot-avatar"
                          >
                            <span
@@ -460,7 +323,7 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_slotSender_1eu7g_104"
-+                          class="_slotSender_umc2n_104"
++                          class="_slotSender_w72ta_104"
                            data-testid="event-tile-slot-sender"
                          >
                            <div
@@ -469,13 +332,13 @@ index 2fd6c2e7b8..3e1607797c 100644
                          </div>
                          <div
 -                          class="_line_1eu7g_71 mx_EventTile_line"
-+                          class="_line_umc2n_71 mx_EventTile_line"
++                          class="_line_w72ta_71 mx_EventTile_line"
                            data-testid="event-tile-line"
                            id="3"
                          >
                            <div
 -                            class="_slotBody_1eu7g_96"
-+                            class="_slotBody_umc2n_96"
++                            class="_slotBody_w72ta_96"
                              data-testid="event-tile-slot-body"
                            >
                              <div
