@@ -26,7 +26,7 @@ import {
     type EventTileRenderingMode,
 } from "@element-hq/web-shared-components";
 
-import shouldHideEvent from "../../shouldHideEvent";
+import shouldHideEvent, { isHiddenMemberEvent } from "../../shouldHideEvent";
 import { formatDate, wantsDateSeparator } from "../../DateUtils";
 import { MatrixClientPeg } from "../../MatrixClientPeg";
 import SettingsStore from "../../settings/SettingsStore";
@@ -514,7 +514,10 @@ export default class MessagePanel extends React.Component<IProps, IState> {
         }
 
         if (this.showHiddenEvents && !forceHideEvents) {
-            return true;
+            // Showing hidden events is about events with no tile of their own, not about the
+            // membership changes somebody has turned off in preferences. Turning it on used to
+            // bring those back too, quietly undoing a setting made somewhere else entirely.
+            return !isHiddenMemberEvent(mxEv, this.context);
         }
 
         if (!haveRendererForEvent(mxEv, MatrixClientPeg.safeGet(), this.showHiddenEvents)) {
