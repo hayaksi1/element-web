@@ -1,0 +1,33 @@
+From 7e9d97fce8f1f8a5997334ea9beb008aacbf64c0 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 22:17:09 +0300
+Subject: [PATCH] Transform content-type for jest
+ snapshot hash
+
+matrix-js-sdk's develop now imports content-type 3, which ships only ESM.
+Upstream never notices because its CI links the SDK from a sibling clone
+whose dependencies sit outside the .pnpm store that jest's transform-ignore
+pattern matches, so babel transforms it there; on a plain install the
+pattern skips it and every jest suite dies on "Unexpected token 'export'".
+Naming it in the allowlist is the one-word fix.
+
+The HTML export snapshot carries the CSS-module hash of the shared
+EventTileView stylesheet, which the fork's full-size-threads resolution
+edits, so it is regenerated for the rebuilt tree.
+---
+ apps/web/jest.config.ts                                         | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/apps/web/jest.config.ts b/apps/web/jest.config.ts
+index 83b3cf7479..e55bb0e215 100644
+--- a/apps/web/jest.config.ts
++++ b/apps/web/jest.config.ts
+@@ -51,7 +51,7 @@ const config: Config = {
+         "test-utils-rtl": "<rootDir>/test/test-utils/jest-matrix-react.tsx",
+     },
+     transformIgnorePatterns: [
+-        `${path.join(__dirname, "../..")}/node_modules/.pnpm/(?!(matrix-js-sdk|htmlparser2|mime|uuid|p-retry|is-network-error|react-merge-refs|is-ip|ip-regex|super-regex|function-timeout|time-span|convert-hrtime|clone-regexp|is-regexp|matrix-web-i18n|await-lock|@element-hq/web-shared-components|react-virtuoso|lodash|domutils|domhandler|domelementtype|dom-serializer|entities)).+$`,
++        `${path.join(__dirname, "../..")}/node_modules/.pnpm/(?!(matrix-js-sdk|content-type|htmlparser2|mime|uuid|p-retry|is-network-error|react-merge-refs|is-ip|ip-regex|super-regex|function-timeout|time-span|convert-hrtime|clone-regexp|is-regexp|matrix-web-i18n|await-lock|@element-hq/web-shared-components|react-virtuoso|lodash|domutils|domhandler|domelementtype|dom-serializer|entities)).+$`,
+     ],
+     collectCoverageFrom: [
+         "<rootDir>/src/**/*.{js,ts,tsx}",
