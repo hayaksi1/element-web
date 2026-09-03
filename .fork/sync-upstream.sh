@@ -687,7 +687,7 @@ restore_rr_worktree() {
 # unparseable, one left jest idioms in a vitest suite that only failed on the runner.
 audit_rr_cache() {
     local f bad=""
-    for f in "$RR_REPO"/*/postimage; do
+    for f in "$RR_REPO"/*/postimage*; do
         [[ -e "$f" ]] || continue
         # A resolution that still holds conflict markers was never finished.
         if grep -qE '^(<{7}|>{7})$' "$f"; then
@@ -1006,7 +1006,7 @@ if (( DETECT )); then
     for p in "${PATCHES[@]}"; do
         if apply_patch "$p"; then continue; fi
         files="$(git apply --check "$p" 2>&1 | sed -n -e 's/^error: patch failed: \(.*\):[0-9][0-9]*$/\1/p' \
-                                                      -e 's/^error: \(.*\): patch does not apply$/\1/p' | LC_ALL=C sort -u)"
+                                                      -e 's/^error: \(.*\): patch does not apply$/\1/p' | LC_ALL=C sort -u || true)"
         warn "  PATCH WOULD NOT APPLY: $(basename "$p")"
         [[ -n "$files" ]] && warn "$(indent "$files")"
         record "integration-patches/$(basename "$p")" 4 "$files"
