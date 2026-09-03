@@ -17,6 +17,11 @@ import { textForEvent } from "../../TextForEvent";
 import SettingsStore from "../../settings/SettingsStore";
 import { formatFullDate } from "../../DateUtils";
 
+// A file with no byte order mark leaves the reader to guess its encoding, and the text editors and
+// spreadsheet tools people open an export in on Windows guess the system code page rather than
+// UTF-8, turning every emoji and every non-Latin name into mojibake.
+const UTF8_BOM = "\uFEFF";
+
 export default class PlainTextExporter extends Exporter {
     protected totalSize: number;
     protected mediaOmitText: string;
@@ -138,11 +143,11 @@ export default class PlainTextExporter extends Exporter {
         const text = await this.createOutput(res);
 
         if (this.files.length) {
-            this.addFile("export.txt", new Blob([text]));
+            this.addFile("export.txt", new Blob([UTF8_BOM + text], { type: "text/plain;charset=utf-8" }));
             await this.downloadZIP();
         } else {
             const fileName = this.destinationFileName;
-            this.downloadPlainText(fileName, text);
+            this.downloadPlainText(fileName, UTF8_BOM + text);
         }
 
         const exportEnd = performance.now();
