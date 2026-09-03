@@ -1,0 +1,128 @@
+# Upstream contribution branches, in merge order.
+#
+# These back pull requests against element-hq/element-web. They are MERGED into
+# master as-is and are NEVER rebased, amended or pushed by the sync
+# script -- rewriting one detaches its review threads and re-fires its CI.
+#
+# Do NOT list a branch whose PR was already MERGED upstream. Upstream squash-merges,
+# so its content is already in develop; re-merging it re-applies stale code and can
+# silently revert later upstream work. pr/desktop-titlebar-drag is the cautionary
+# case: absorbed by #33991, then rewritten by #34419 and #34704, so re-merging it
+# would undo both.
+#
+# Order is by file-overlap cluster, largest first, oldest commit first within a
+# cluster, so conflicts land together and rerere can replay them.
+#
+# Deliberately excluded, with reasons:
+#   demo/media-tabs                     duplicate of pr/search-media-tabs (#34007)
+#   e2e/full-size-threads               develop-derived scratch, 345 commits ahead
+#   feature/remove-message-hover-highlight  develop-derived scratch, 348 ahead
+#   pr/desktop-warn-before-quit-v2      same 5 files as the open #33995
+#   pr/macos-notification-sound         re-applies invite work absorbed by #34575
+#   pr/pinned-banner-edits-fix          byte-identical head to an absorbed branch
+#   pr/room-list-max-width-persist      zero commits of its own
+#   pr/search-infra                     self-declared WIP; folds into pr/search-stepping
+#   pr/uploaded-media-cache             MERGED upstream as #34753 (d99eb665e9); every file
+#                                       is byte-identical to upstream/develop
+#   ...and all 49 branches whose PR is MERGED.
+#   pr/search-cmdf-default              subset of pr/search-cmdf-toast
+#   pr/search-stepping                  subset of pr/search-from-filter
+#   pr/search-from-filter               subset of pr/search-order-toggle
+#   pr/search-order-toggle              subset of pr/search-jump-to-date
+#   pr/search-jump-to-date              subset of pr/search-top-bar
+#
+# Those five are strict ancestors of a branch already listed. Merging a subset AND its
+# superset replays the same 20+ file conflicts twice for no added content. Only the
+# maximal element of each chain is listed.
+
+pr/desktop-white-flash
+pr/desktop-smooth-scroll
+pr/desktop-window-geometry
+pr/search-cmdf-toast
+pr/search-top-bar
+pr/chat-background
+pr/bubble-full-width
+pr/message-hover-actions
+pr/desktop-auto-launch
+pr/notifier-audio-setting
+pr/bot-command-autocomplete
+pr/force-verification-screen-guard
+pr/video-download-error-label
+pr/unpin-last-message
+pr/search-resilience
+pr/clear-search-on-empty
+pr/search-media-tabs
+pr/slash-command-double-send
+pr/search-warning-indexing-off
+pr/hidden-events-member-settings
+pr/deleted-voice-message-replay
+pr/duplicate-highlight-notification
+pr/space-panel-collapsed-persist
+pr/settings-during-startup
+pr/table-cell-image-width
+pr/reaction-notification-body
+pr/alias-error-messages
+pr/video-title-filename
+pr/ignored-user-event-summary
+pr/invite-notification
+pr/rejoin-room-not-found
+pr/desktop-warn-before-quit
+pr/leave-warning-restricted-room
+pr/composer-resolve-emoji-shortcodes
+pr/desktop-autoupdate-location
+pr/search-all-rooms
+pr/desktop-cmd-w-hides-app
+pr/voice-message-clock-width
+pr/full-size-threads
+pr/desktop-media-perms
+pr/markdown-plaintext-line-breaks
+pr/ipv6-literal-links
+pr/markdown-list-paragraphs
+pr/export-last-n-renderable
+pr/export-thread-messages
+pr/export-utf8-bom
+pr/query-user-id-validation
+pr/spoiler-markdown
+pr/image-aspect-ratio-from-loaded
+pr/deserialize-loose-lists
+pr/edit-composer-escaping
+pr/big-emoji-html
+pr/formatted-body-entity-escaping
+pr/rte-mentions
+pr/wysiwyg-mention-plain-body
+pr/seshat-circuit-breaker
+pr/space-hierarchy-membership
+pr/rejoin-after-kick-feedback
+pr/summary-redacted-membership
+pr/image-body-reserve-size
+pr/location-reply
+pr/space-settings-cancel-avatar
+pr/event-list-summary-avatar-align
+pr/dm-avatar-member-update
+pr/restricted-room-rejoin
+pr/pill-avatar-font-scale
+pr/user-info-profile-fetch
+pr/space-stay-on-preview
+pr/change-password-uia
+pr/forward-superseded-room
+pr/spotlight-page-keys
+pr/desktop-locale-denormalise
+pr/desktop-zoom-in-accelerator
+pr/virtualized-focus-scroll
+pr/invite-email-no-identity-server
+pr/mentions-only-global-unread
+pr/member-list-alphabetical-fallback
+pr/reply-tile-inner-links
+pr/room-list-sticky-baseline
+pr/preview-decryption-failure
+pr/jump-to-date-local-timezone
+pr/keybinding-caps-lock
+pr/mark-read-predecessor
+pr/mentions-skip-code-blocks
+pr/poll-edit-content
+pr/font-stack-emoji-order
+pr/room-pill-upgraded-alias
+pr/read-receipt-tooltip-boundary
+pr/dm-context-parted-partner
+pr/mobile-guide-config
+pr/url-preview-count-renderable

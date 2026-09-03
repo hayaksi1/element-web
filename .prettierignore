@@ -1,0 +1,7 @@
+# Fork-only. Upstream has no .prettierignore, so this file has no conflict surface.
+#
+# CLAUDE.md is the fork's own instruction file, written to be read as prose. Reflowing
+# it at 120 columns moves every line number without improving anything, and the file is
+# edited by hand often enough that stable line references matter more than uniform
+# wrapping. It does not exist upstream, so nothing else depends on its formatting.
+CLAUDE.md
