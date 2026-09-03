@@ -47,6 +47,7 @@ import { setupMediaAuth } from "./media-auth.js";
 import { handleWindowClose, revealMainWindow } from "./window-close.js";
 import { type RendererRecovery, setupRendererRecovery } from "./renderer-recovery.js";
 import { resolveBackgroundColor } from "./background-color.js";
+import { setupMediaPermissions } from "./media-permissions.js";
 import { getBuildConfig } from "./build-config.js";
 import { getAsarPath } from "./asar.js";
 import { getIconPath } from "./icon.js";
@@ -428,6 +429,7 @@ app.on("ready", async () => {
     ); // Use Mac OS 15+ native picker
 
     setupMediaAuth(global.mainWindow);
+    setupMediaPermissions();
 });
 
 app.on("window-all-closed", () => {
