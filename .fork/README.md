@@ -139,17 +139,17 @@ the code underneath it — regenerate or delete it.
 
 ## Files here
 
-| Path                   | What                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `sync-upstream.sh`     | the only supported way to sync. `--help` for flags.                                                     |
-| `lib/rr-audit.sh`      | rerere quarantine, export gate, import-no-overwrite, unmanaged-branch report                            |
-| `features.txt`         | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first.                              |
-| `contrib.txt`          | ordered `pr/*` branches, merged as-is. Order clusters conflicts together.                               |
-| `unmanaged-branches.txt` | on `gh`, in neither manifest, deliberately. Anything new is reported.                                 |
-| `integration-patches/` | cross-feature fixes, re-applied after every rebuild                                                     |
-| `rr-cache/`            | shared rerere conflict-resolution cache                                                                 |
-| `rr-cache-quarantined.tsv` | every resolution moved aside, and why                                                               |
-| `FORK_AUDIT.md`        | the 2026-08-27 audit this structure came from. Historical, but it records _why_ each decision was made. |
+| Path                       | What                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sync-upstream.sh`         | the only supported way to sync. `--help` for flags.                                                     |
+| `lib/rr-audit.sh`          | rerere quarantine, export gate, import-no-overwrite, unmanaged-branch report                            |
+| `features.txt`             | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first.                              |
+| `contrib.txt`              | ordered `pr/*` branches, merged as-is. Order clusters conflicts together.                               |
+| `unmanaged-branches.txt`   | on `gh`, in neither manifest, deliberately. Anything new is reported.                                   |
+| `integration-patches/`     | cross-feature fixes, re-applied after every rebuild                                                     |
+| `rr-cache/`                | shared rerere conflict-resolution cache                                                                 |
+| `rr-cache-quarantined.tsv` | every resolution moved aside, and why                                                                   |
+| `FORK_AUDIT.md`            | the 2026-08-27 audit this structure came from. Historical, but it records _why_ each decision was made. |
 
 ## Running a sync
 
