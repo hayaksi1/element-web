@@ -119,6 +119,8 @@ interface StoreData {
     backgroundColor?: string;
     /** the persisted main-window geometry restored on the next launch (#32228 / #32360) */
     windowState?: PersistedWindowState;
+    /** whether the one-time migration off the legacy `auto-launch` package has run (see AutoLaunch.migrate) */
+    autoLaunchMigrated?: boolean;
 }
 
 /**
@@ -296,6 +298,9 @@ class Store extends ElectronStore<StoreData> {
                         isMaximized: { type: "boolean" },
                     },
                     additionalProperties: false,
+                },
+                autoLaunchMigrated: {
+                    type: "boolean",
                 },
             },
         });
