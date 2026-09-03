@@ -519,6 +519,7 @@ export class UnwrappedEventTile extends React.Component<EventTileProps, IState> 
             action: Action.ViewRoom,
             event_id: this.props.mxEvent.getId(),
             highlighted: true,
+            view_in_room: true,
             room_id: this.props.mxEvent.getRoomId(),
             metricsTrigger: undefined, // room doesn't change
         });
@@ -908,6 +909,7 @@ export class UnwrappedEventTile extends React.Component<EventTileProps, IState> 
             display: {
                 timelineRenderingType: this.context.timelineRenderingType,
                 layout: this.props.layout,
+                fullSizeThreadView: this.context.fullSizeThreadViewEnabled,
                 continuation: this.props.continuation,
                 isProbablyMedia,
                 isHighlighted: shouldHighlightEventTile({
