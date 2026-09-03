@@ -69,6 +69,8 @@ export interface EventTileSenderProfileStateInput {
     isBubbleMessage: boolean;
     /** The current timeline layout. */
     layout?: Layout;
+    /** Whether the thread is rendering full-size in the room's main split rather than as a card. */
+    fullSizeThreadView?: boolean;
     /** Whether the event is a room create event. */
     isRoomCreate: boolean;
     /** Whether the event is a call invite. */
@@ -94,6 +96,7 @@ export function getEventTileSenderProfileState({
     eventType,
     isBubbleMessage,
     layout,
+    fullSizeThreadView,
     isRoomCreate,
     isCallInvite,
     isRtcNotification,
@@ -108,7 +111,7 @@ export function getEventTileSenderProfileState({
 
     if (
         timelineRenderingType === TimelineRenderingType.ThreadsList ||
-        (timelineRenderingType === TimelineRenderingType.Thread && !continuation)
+        (timelineRenderingType === TimelineRenderingType.Thread && !continuation && !fullSizeThreadView)
     ) {
         return { avatarSize: "32px", needsSenderProfile: true };
     }
