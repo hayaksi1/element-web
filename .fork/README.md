@@ -88,6 +88,21 @@ clone. So the script **copies** the cache in and out:
 .git/rr-cache/    (where git actually looks)
 ```
 
+The two copies are **not** mirrors of each other. Import never overwrites a live
+entry (it may be a resolution recorded since). Deleting an entry from the
+committed cache therefore does not stop it replaying.
+
+A failing entry is **quarantined, never cleared**: it moves to
+`$GITDIR/rr-cache-quarantine/<id>/` with a `QUARANTINE_REASON.txt`, is listed in
+`.fork/rr-cache-quarantined.tsv`, and is skipped on the next import. Clearing the
+cache to deal with a handful of bad entries would re-ask every conflict already
+answered once.
+
+Export copies only `preimage`/`postimage`. `thisimage` is git's per-conflict
+scratch and is what used to dirty the tree after every run. A failing entry is
+refused, not warned-and-copied: exporting a wrong resolution is what makes it
+permanent and shared.
+
 A symlink was the obvious alternative and is wrong here: during a `feat/*` rebase, `HEAD`
 is the feature branch, which does not contain `.fork/`, so the symlink would dangle and
 rerere would silently record nothing. Copying is branch-independent.
@@ -95,7 +110,7 @@ rerere would silently record nothing. Copying is branch-independent.
 **After any sync where you resolved a conflict, commit the cache:**
 
 ```bash
-git add .fork/rr-cache
+git add .fork/rr-cache .fork/rr-cache-quarantined.tsv
 git commit -m "Record conflict resolutions from this sync"
 ```
 
@@ -124,14 +139,17 @@ the code underneath it — regenerate or delete it.
 
 ## Files here
 
-| Path                   | What                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `sync-upstream.sh`     | the only supported way to sync. `--help` for flags.                                                     |
-| `features.txt`         | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first.                              |
-| `contrib.txt`          | ordered `pr/*` branches, merged as-is. Order clusters conflicts together.                               |
-| `integration-patches/` | cross-feature fixes, re-applied after every rebuild                                                     |
-| `rr-cache/`            | shared rerere conflict-resolution cache                                                                 |
-| `FORK_AUDIT.md`        | the 2026-08-27 audit this structure came from. Historical, but it records _why_ each decision was made. |
+| Path                       | What                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sync-upstream.sh`         | the only supported way to sync. `--help` for flags.                                                     |
+| `lib/rr-audit.sh`          | rerere quarantine, export gate, import-no-overwrite, unmanaged-branch report                            |
+| `features.txt`             | ordered `feat/*` branches, rebased then merged. `feat/fork-tooling` first.                              |
+| `contrib.txt`              | ordered `pr/*` branches, merged as-is. Order clusters conflicts together.                               |
+| `unmanaged-branches.txt`   | on `gh`, in neither manifest, deliberately. Anything new is reported.                                   |
+| `integration-patches/`     | cross-feature fixes, re-applied after every rebuild                                                     |
+| `rr-cache/`                | shared rerere conflict-resolution cache                                                                 |
+| `rr-cache-quarantined.tsv` | every resolution moved aside, and why                                                                   |
+| `FORK_AUDIT.md`            | the 2026-08-27 audit this structure came from. Historical, but it records _why_ each decision was made. |
 
 ## Running a sync
 
