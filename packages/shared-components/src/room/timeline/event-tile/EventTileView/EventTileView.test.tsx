@@ -719,6 +719,47 @@ describe("EventTileView", () => {
         expect(onContextMenu).not.toHaveBeenCalled();
     });
 
+    it.each([
+        { name: "own", isOwnEvent: true },
+        { name: "other", isOwnEvent: false },
+    ])("keeps the $name-event bubble thread summary on its own side of the timeline", ({ isOwnEvent }) => {
+        const { container, getByTestId } = render(
+            <div style={{ width: "1200px" }}>
+                <EventTileView
+                    {...createProps({
+                        root: { ...renderState, state: { ...renderState.state, isOwnEvent } },
+                        slots: {
+                            body: <span data-testid="body">Body</span>,
+                            threadInfo: (
+                                <span
+                                    data-testid="thread-summary"
+                                    style={{
+                                        display: "block",
+                                        maxWidth: "min(100%, 300px)",
+                                        overflow: "hidden",
+                                        whiteSpace: "nowrap",
+                                    }}
+                                >
+                                    A thread reply preview long enough to overflow the summary it is clamped inside
+                                </span>
+                            ),
+                        },
+                    })}
+                />
+            </div>,
+            { presentation: { layout: "bubble" } },
+        );
+
+        const tile = container.querySelector(`.${styles.root}`)!.getBoundingClientRect();
+        const summary = getByTestId("thread-summary").getBoundingClientRect();
+
+        if (isOwnEvent) {
+            expect(summary.right).toBeGreaterThan(tile.right - 1);
+        } else {
+            expect(summary.left).toBeLessThan(tile.left + 1);
+        }
+    });
+
     it("forwards the root ref and supports a custom root element", () => {
         const rootRef = createRef<HTMLElement>();
         const { container } = render(

@@ -945,6 +945,7 @@
     &.stateOwnEvent .slotThreadInfo {
         margin-inline-start: auto;
         margin-inline-end: -11px;
+        justify-content: flex-end;
     }
 
     &:hover::before,
