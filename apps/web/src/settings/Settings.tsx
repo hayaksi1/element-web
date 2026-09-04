@@ -1332,7 +1332,7 @@ export const SETTINGS: Settings = {
         supportedLevels: LEVELS_ACCOUNT_SETTINGS,
         displayName: _td("settings|preferences|threads_full_size_view"),
         description: _td("settings|preferences|threads_full_size_view_description"),
-        default: false,
+        default: true,
     },
     "Performance.addSendMessageTimingMetadata": {
         supportedLevels: [SettingLevel.CONFIG],
