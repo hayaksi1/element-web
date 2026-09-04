@@ -1,0 +1,16 @@
+# Every rerere resolution this fork has moved aside, and why.
+#
+# A recorded resolution is not a one-time mistake: rerere replays it on every
+# rebuild and reports the merge clean, so a wrong entry is an institutionalised
+# one. These failed the audit in .fork/lib/rr-audit.sh.
+#
+# QUARANTINED, NOT DELETED. The live copy is at
+# $(git rev-parse --git-common-dir)/rr-cache-quarantine/<id>/ with a
+# QUARANTINE_REASON.txt beside it. Restoring one is a mv, then delete its row
+# here and its line in $GITDIR/rr-cache-skip.
+#
+# Removing an entry from .fork/rr-cache does NOT stop it replaying: import
+# never overwrites a live entry, so the committed cache and $GITDIR/rr-cache
+# have to be cleaned SEPARATELY. Quarantine does both.
+#
+# id	rules	date
