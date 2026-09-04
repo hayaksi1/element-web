@@ -5,10 +5,13 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { showInRoomSearchNudgeIfNeeded } from "../../../src/toasts/InRoomSearchNudgeToast";
-import SettingsStore from "../../../src/settings/SettingsStore";
-import { SettingLevel } from "../../../src/settings/SettingLevel";
-import ToastStore from "../../../src/stores/ToastStore";
+// @vitest-environment happy-dom
+
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
+import SettingsStore from "../settings/SettingsStore";
+import { SettingLevel } from "../settings/SettingLevel";
+import ToastStore from "../stores/ToastStore";
 
 const TOAST_KEY = "in-room-search-nudge";
 
@@ -17,22 +20,22 @@ const TOAST_KEY = "in-room-search-nudge";
 const ctrlF = (): KeyboardEvent => new KeyboardEvent("keydown", { key: "f", ctrlKey: true });
 
 describe("showInRoomSearchNudgeIfNeeded", () => {
-    let addOrReplaceToast: jest.SpyInstance;
-    let setValue: jest.SpyInstance;
+    let addOrReplaceToast: MockInstance;
+    let setValue: MockInstance;
 
     const mockSettings = (values: Record<string, boolean>): void => {
-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
+        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
     };
 
     beforeEach(() => {
-        addOrReplaceToast = jest
+        addOrReplaceToast = vi
             .spyOn(ToastStore.sharedInstance(), "addOrReplaceToast")
             .mockImplementation(() => undefined);
-        setValue = jest.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
+        setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
     });
 
     afterEach(() => {
-        jest.restoreAllMocks();
+        vi.restoreAllMocks();
     });
 
     it("shows the one-time toast on Ctrl/Cmd+F when in-room search is disabled and not yet shown", () => {

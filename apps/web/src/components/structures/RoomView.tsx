@@ -2112,21 +2112,7 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
         const session = SearchSessionStore.instance.getSnapshot();
         if (!session || SearchSessionStore.instance.focusedMatch === null) return;
 
-        this.setState({
-            search: {
-                searchId: session.searchId,
-                roomId: session.roomId,
-                term: session.term,
-                scope: session.scope,
-                promise: session.promise,
-                abortController: session.abortController,
-                inProgress: session.inProgress,
-                count: session.count,
-                error: session.error,
-                currentMatchIndex: session.currentMatchIndex,
-                highlights: session.highlights,
-            },
-        });
+        this.setState({ search: searchInfoFromSession(session) });
     }
 
     /**
