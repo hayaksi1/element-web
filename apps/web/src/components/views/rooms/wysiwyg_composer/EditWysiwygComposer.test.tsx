@@ -210,11 +210,13 @@ describe("EditWysiwygComposer", () => {
                 "body": `* foo bar`,
                 "format": "org.matrix.custom.html",
                 "formatted_body": `* foo bar`,
+                "m.mentions": {},
                 "m.new_content": {
-                    body: "foo bar",
-                    format: "org.matrix.custom.html",
-                    formatted_body: "foo bar",
-                    msgtype: "m.text",
+                    "body": "foo bar",
+                    "format": "org.matrix.custom.html",
+                    "formatted_body": "foo bar",
+                    "msgtype": "m.text",
+                    "m.mentions": {},
                 },
                 "m.relates_to": {
                     event_id: blankMockEvent.getId(),
