@@ -5,8 +5,12 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import { RoomFilesViewModel } from "../../../../src/viewmodels/right_panel/RoomFilesViewModel";
-import { FileCategory } from "../../../../src/utils/FileCategory";
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect } from "vitest";
+
+import { RoomFilesViewModel } from "./RoomFilesViewModel";
+import { FileCategory } from "../../utils/FileCategory";
 
 describe("RoomFilesViewModel", () => {
     it("starts with no category filter and an empty search term", () => {
@@ -16,7 +20,7 @@ describe("RoomFilesViewModel", () => {
 
     it("toggleCategory selects the category and notifies subscribers", () => {
         const vm = new RoomFilesViewModel();
-        const listener = jest.fn();
+        const listener = vi.fn();
         vm.subscribe(listener);
 
         vm.toggleCategory(FileCategory.Audio);
@@ -45,7 +49,7 @@ describe("RoomFilesViewModel", () => {
 
     it("setSearchTerm updates the term and notifies subscribers", () => {
         const vm = new RoomFilesViewModel();
-        const listener = jest.fn();
+        const listener = vi.fn();
         vm.subscribe(listener);
 
         vm.setSearchTerm("report");

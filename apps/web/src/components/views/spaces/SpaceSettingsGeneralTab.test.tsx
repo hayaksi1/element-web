@@ -5,13 +5,16 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
+// @vitest-environment happy-dom
+
+import { vi, describe, it, expect, beforeEach } from "vitest";
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "jest-matrix-react";
+import { fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { type MatrixClient, Room } from "matrix-js-sdk/src/matrix";
 
-import SpaceSettingsGeneralTab from "../../../../../src/components/views/spaces/SpaceSettingsGeneralTab";
-import { stubClient } from "../../../../test-utils";
-import DMRoomMap from "../../../../../src/utils/DMRoomMap";
+import SpaceSettingsGeneralTab from "./SpaceSettingsGeneralTab";
+import { stubClient } from "test-utils";
+import DMRoomMap from "../../../utils/DMRoomMap";
 
 describe("<SpaceSettingsGeneralTab />", () => {
     let client: MatrixClient;
@@ -21,10 +24,10 @@ describe("<SpaceSettingsGeneralTab />", () => {
 
     beforeEach(() => {
         client = stubClient();
-        jest.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
+        vi.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
         space = new Room("!space:example.com", client, client.getSafeUserId());
         space.name = "Test space";
-        jest.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
+        vi.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
     });
 
     const renderTab = (): ReturnType<typeof render> =>
