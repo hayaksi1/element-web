@@ -9,3 +9,4 @@
 # Blank lines and # comments are ignored.
 
 feat/fork-tooling
+feat/bubble-thread-summary-align
