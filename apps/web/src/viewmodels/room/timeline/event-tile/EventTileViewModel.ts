@@ -125,6 +125,8 @@ export interface EventTileDisplayInput {
     isHighlighted: boolean;
     /** Whether the tile is selected or has an open context menu. */
     isSelected: boolean;
+    /** Whether the tile is the search match currently focused while stepping in the live timeline. */
+    isSearchHighlightMatch?: boolean;
     /** Whether the tile is the last event in the timeline. */
     isLast?: boolean;
     /** Whether the tile is the last event in its section. */
@@ -515,7 +517,9 @@ export class EventTileViewModel extends BaseViewModel<EventTileViewModelRenderSt
             snapshot,
             root: snapshot.root,
             line: snapshot.line,
-            classNames: EVENT_TILE_VIEW_CLASS_NAMES,
+            classNames: props.display.isSearchHighlightMatch
+                ? { ...EVENT_TILE_VIEW_CLASS_NAMES, root: "mx_EventTile mx_EventTile_searchHighlightActive" }
+                : EVENT_TILE_VIEW_CLASS_NAMES,
             timestamp: snapshot.timestamp,
             e2ePadlock: {
                 showInGroupLine: !useIRCLayout && showPadlock,
@@ -646,7 +650,7 @@ export class EventTileViewModel extends BaseViewModel<EventTileViewModelRenderSt
             encryptionFailure: event.isEncryptionFailure,
             emote: sender.isEmote,
             highlighted: display.isHighlighted,
-            selected: display.isSelected,
+            selected: display.isSelected || !!display.isSearchHighlightMatch,
             editing: event.isEditing,
             continuation: isContinuation || event.isCallInvite || ElementCallEventType.matches(event.eventType),
             lastInSection: display.isLastInSection,

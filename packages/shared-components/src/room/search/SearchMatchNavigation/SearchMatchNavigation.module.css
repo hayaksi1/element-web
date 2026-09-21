@@ -5,5 +5,13 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-export { DateSeparatorView, type DateSeparatorViewModel, type DateSeparatorViewSnapshot } from "./DateSeparatorView";
-export { DateSeparatorContextMenuView } from "./DateSeparatorContextMenuView";
+.navigation {
+    flex-shrink: 0;
+}
+
+.counter {
+    color: var(--cpd-color-text-secondary);
+    font: var(--cpd-font-body-sm-medium);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
