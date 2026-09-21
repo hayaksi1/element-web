@@ -181,11 +181,13 @@ export class UrlPreviewGroupViewModel
         }
 
         const loadMedia = this.visibility === PreviewVisibility.Visible;
-        let previews: (UrlPreview | null)[] | undefined;
+        let previews: UrlPreview[] | undefined;
 
         if (this.visibility <= PreviewVisibility.UserHidden) {
             previews = [];
         }
+
+        let unresolvedCount = 0;
 
         const content = this.props.mxEvent.getContent();
         const urlPreviewKind = this.props.urlPreviewKind;
@@ -201,34 +203,59 @@ export class UrlPreviewGroupViewModel
                 // reaches the homeserver, so entries carrying only a matched_url are dropped
                 // rather than resolved via /preview_url.
                 const allowServerFallback = urlPreviewKind !== "bundledonly";
-                previews = (
-                    await Promise.all(
-                        bundledPreviews
-                            .slice(0, this.limitPreviews ? MAX_PREVIEWS_WHEN_LIMITED : undefined)
-                            .map((preview) =>
-                                this.fetcher
-                                    .previewFromBundle(preview, this.props.mxEvent, loadMedia, allowServerFallback)
-                                    .catch((_) => null),
-                            ),
-                    )
-                ).filter((p) => !!p);
+                ({ previews, unresolvedCount } = await this.resolvePreviews(bundledPreviews, (preview) =>
+                    this.fetcher
+                        .previewFromBundle(preview, this.props.mxEvent, loadMedia, allowServerFallback)
+                        .catch((_) => null),
+                ));
             }
         }
 
-        if (urlPreviewKind === "fetchonly" || urlPreviewKind === "preferbundled") {
-            previews ??= await Promise.all(
-                this.links
-                    .slice(0, this.limitPreviews ? MAX_PREVIEWS_WHEN_LIMITED : undefined)
-                    .map((link) => this.fetcher.fetchPreview(link, loadMedia, this.props.mxEvent).catch((_) => null)),
-            );
+        if ((urlPreviewKind === "fetchonly" || urlPreviewKind === "preferbundled") && previews === undefined) {
+            ({ previews, unresolvedCount } = await this.resolvePreviews(this.links, (link) =>
+                this.fetcher.fetchPreview(link, loadMedia, this.props.mxEvent).catch((_) => null),
+            ));
         }
 
+        const resolvedPreviews = previews ?? [];
+        const totalPreviewCount = resolvedPreviews.length + unresolvedCount;
         this.snapshot.merge({
-            previews: (previews ?? []).filter((p) => !!p),
-            totalPreviewCount: this.links.length,
+            previews: resolvedPreviews,
+            totalPreviewCount,
             previewsLimited: this.limitPreviews,
-            overPreviewLimit: this.links.length > MAX_PREVIEWS_WHEN_LIMITED,
+            overPreviewLimit: totalPreviewCount > MAX_PREVIEWS_WHEN_LIMITED,
         });
+    }
+
+    /**
+     * Resolve entries in order until enough of them have previews to fill the limited view,
+     * leaving the rest untouched. An entry the server cannot preview renders nothing, so the
+     * limit has to be counted in previews rather than in entries, but only the entries needed
+     * to reach it are worth a request until the user asks to see more. When the view is not
+     * limited, everything is resolved at once.
+     *
+     * @param entries - the links, or bundled previews, to resolve in order.
+     * @param resolve - turns one entry into a preview, or null if it has none.
+     * @returns the previews that resolved, and how many entries were left unasked about.
+     */
+    private async resolvePreviews<T>(
+        entries: T[],
+        resolve: (entry: T) => Promise<UrlPreview | null>,
+    ): Promise<{ previews: UrlPreview[]; unresolvedCount: number }> {
+        if (!this.limitPreviews) {
+            return { previews: (await Promise.all(entries.map(resolve))).filter((p) => !!p), unresolvedCount: 0 };
+        }
+
+        const previews: UrlPreview[] = [];
+        let requestedCount = 0;
+
+        while (previews.length < MAX_PREVIEWS_WHEN_LIMITED && requestedCount < entries.length) {
+            const batch = entries.slice(requestedCount, requestedCount + MAX_PREVIEWS_WHEN_LIMITED - previews.length);
+            requestedCount += batch.length;
+            previews.push(...(await Promise.all(batch.map(resolve))).filter((p) => !!p));
+        }
+
+        return { previews, unresolvedCount: entries.length - requestedCount };
     }
 
     /**
