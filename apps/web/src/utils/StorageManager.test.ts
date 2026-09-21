@@ -123,7 +123,7 @@ describe("StorageManager", () => {
 
     describe("tryPersistStorage", () => {
         // node/happy-dom do not implement navigator.storage, so stub it per-test; vi.replaceProperty (aka
-        // jest.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
+        // vi.replaceProperty) cannot be used as it refuses to replace a property that does not exist.
         function setStorage(value: unknown): void {
             Object.defineProperty(navigator, "storage", { value, configurable: true });
         }
