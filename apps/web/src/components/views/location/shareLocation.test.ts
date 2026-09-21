@@ -14,6 +14,10 @@ import {
     type MLocationEventContent,
 } from "matrix-js-sdk/src/matrix";
 
+import { mkEvent } from "test-utils";
+
+import { TimelineRenderingType } from "../../../contexts/RoomContext";
+import defaultDispatcher from "../../../dispatcher/dispatcher";
 import { doMaybeLocalRoomAction } from "../../../utils/local-room";
 import { LocationShareType, shareLocation, type ShareLocationFn } from "./shareLocation";
 
@@ -32,6 +36,7 @@ describe("shareLocation", () => {
         const makeLocationContent = vi.spyOn(ContentHelpers, "makeLocationContent");
         client = {
             sendMessage: vi.fn(),
+            getSafeUserId: vi.fn().mockReturnValue("@alice:example.com"),
         } as unknown as MatrixClient;
 
         vi.mocked(makeLocationContent).mockReturnValue(content);
@@ -47,5 +52,44 @@ describe("shareLocation", () => {
     it("should forward the call to doMaybeLocalRoomAction", () => {
         shareLocationFn({ uri: "https://example.com/" });
         expect(client.sendMessage).toHaveBeenCalledWith(roomId, null, content);
+    });
+
+    describe("when replying to an event", () => {
+        it("should send the location as a reply and clear the composer's reply state", () => {
+            const replyContent = { test: "location content" } as unknown as LegacyLocationEventContent &
+                MLocationEventContent;
+            vi.mocked(ContentHelpers.makeLocationContent).mockReturnValue(replyContent);
+            const replyToEvent = mkEvent({
+                event: true,
+                type: "m.room.message",
+                room: roomId,
+                user: "@bob:example.com",
+                content: { msgtype: "m.text", body: "where are you?" },
+            });
+            const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+
+            shareLocation(
+                client,
+                roomId,
+                shareType,
+                undefined,
+                () => {},
+                replyToEvent,
+                TimelineRenderingType.Room,
+            )({ uri: "https://example.com/" });
+
+            expect(client.sendMessage).toHaveBeenCalledWith(
+                roomId,
+                null,
+                expect.objectContaining({
+                    "m.relates_to": { "m.in_reply_to": { event_id: replyToEvent.getId() } },
+                }),
+            );
+            expect(dispatchSpy).toHaveBeenCalledWith({
+                action: "reply_to_event",
+                event: null,
+                context: TimelineRenderingType.Room,
+            });
+        });
     });
 });
