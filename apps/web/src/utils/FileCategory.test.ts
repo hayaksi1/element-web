@@ -5,6 +5,9 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+import { describe, it, expect } from "vitest";
+
+
 import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -14,7 +17,7 @@ import {
     eventMatchesCategory,
     eventMatchesFileSearch,
     buildFileEventFilter,
-} from "../../../src/utils/FileCategory";
+} from "./FileCategory";
 import { mkEvent } from "../../test-utils";
 
 const ROOM = "!room:server";

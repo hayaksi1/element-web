@@ -5,6 +5,9 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+import { describe, it, expect, vi } from "vitest";
+
+
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -14,11 +17,11 @@ import {
     getChatBackgroundPreset,
     MIN_CHAT_BACKGROUND_OPACITY,
     resolveChatBackground,
-} from "../../../src/settings/ChatBackgrounds";
+} from "./ChatBackgrounds";
 
 describe("ChatBackgrounds", () => {
     const clientWith = (httpUrl: string | null): MatrixClient =>
-        ({ mxcUrlToHttp: jest.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
+        ({ mxcUrlToHttp: vi.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
 
     describe("CHAT_BACKGROUND_PRESETS", () => {
         it("exposes the bundled presets", () => {

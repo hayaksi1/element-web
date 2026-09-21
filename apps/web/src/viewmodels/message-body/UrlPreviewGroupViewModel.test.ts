@@ -258,7 +258,7 @@ describe("UrlPreviewGroupViewModel", () => {
     });
     it("should count bundled previews rather than the links in the message", async () => {
         const { vm } = getViewModel({
-            urlPreviewBundleEnabled: true,
+            urlPreviewKind: "preferbundled",
             content: {
                 msgtype: MsgType.Text,
                 body: BUNDLE_PREVIEW_ONE.matched_url,

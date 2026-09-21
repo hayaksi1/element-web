@@ -54,6 +54,7 @@ describe("createMessageContent", () => {
                 format: "org.matrix.custom.html",
                 formatted_body: mention,
                 msgtype: "m.text",
+                "m.mentions": { user_ids: ["@alice:example.org"] },
             });
         });
 
