@@ -49,6 +49,7 @@ import { waitFor } from "test-utils-rtl";
 
 import type BasePlatform from "./BasePlatform";
 import Notifier, { NOTIFICATION_SOUND_THROTTLE_MS } from "./Notifier";
+import { SettingLevel } from "./settings/SettingLevel";
 import SettingsStore from "./settings/SettingsStore";
 import ToastStore from "./stores/ToastStore";
 import {
@@ -961,6 +962,20 @@ describe("Notifier", () => {
                 action: "notifier_enabled",
                 value: true,
             });
+        });
+
+        it("should not turn audible notifications off when the browser withholds permission", async () => {
+            // The browser will not let us show desktop notifications...
+            vi.mocked(MockPlatform.maySendNotifications).mockReturnValue(false);
+            vi.mocked(MockPlatform.requestNotificationPermission).mockResolvedValue("denied");
+            vi.spyOn(Modal, "createDialog").mockReturnValue({} as ReturnType<typeof Modal.createDialog>);
+            const setValueSpy = vi.spyOn(SettingsStore, "setValue");
+            const notifier = new Notifier(dis, context);
+
+            notifier.setEnabled(true);
+
+            // ...which must not silently disable the separate audible notifications setting.
+            expect(setValueSpy).not.toHaveBeenCalledWith("audioNotificationsEnabled", null, SettingLevel.DEVICE, false);
         });
 
         it("should call fire notifier_enabled value=false when disabling", async () => {
