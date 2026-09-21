@@ -7,7 +7,6 @@
 
 import { describe, it, expect } from "vitest";
 
-
 import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -18,7 +17,7 @@ import {
     eventMatchesFileSearch,
     buildFileEventFilter,
 } from "./FileCategory";
-import { mkEvent } from "../../test-utils";
+import { mkEvent } from "test-utils";
 
 const ROOM = "!room:server";
 const USER = "@me:server";

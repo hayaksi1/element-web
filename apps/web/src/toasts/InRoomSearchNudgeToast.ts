@@ -11,7 +11,7 @@ import { isKeyComboMatch } from "../KeyBindingsManager";
 import SettingsStore from "../settings/SettingsStore";
 import { SettingLevel } from "../settings/SettingLevel";
 import ToastStore from "../stores/ToastStore";
-import GenericToast from "../components/views/toasts/GenericToast";
+import { GenericToast } from "@element-hq/web-shared-components";
 
 const TOAST_KEY = "in-room-search-nudge";
 

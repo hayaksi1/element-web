@@ -126,6 +126,7 @@ describe("<TextualBody />", () => {
             isGuest: () => false,
             mxcUrlToHttp: (s: string) => s,
             getUserId: () => "@user:example.com",
+            getVisibleRooms: () => [],
             fetchRoomEvent: () => {
                 throw new Error("MockClient event not found");
             },
