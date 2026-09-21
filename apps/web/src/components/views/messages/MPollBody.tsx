@@ -307,7 +307,11 @@ export default class MPollBody extends React.Component<IBodyProps, IState> {
         // counts later fill into rows that already exist. Waiting for the votes
         // instead left a freshly loaded poll empty and then grew it by ~180px,
         // shoving the rest of the timeline down.
-        const pollEvent = (poll?.pollEvent ?? this.props.mxEvent.unstableExtensibleEvent) as PollStartEvent | null;
+        // A Poll parses its start event once, when the room first hears about it, and holds on to the
+        // result. An edit which lands after that point never reaches the copy it is holding, so read
+        // the question and the answers from the event itself, which does follow its replacement.
+        const pollEvent = ((this.props.mxEvent.unstableExtensibleEvent as PollStartEvent | undefined) ??
+            poll?.pollEvent) as PollStartEvent | null;
         if (!pollEvent?.isEquivalentTo(M_POLL_START)) {
             return null;
         }
