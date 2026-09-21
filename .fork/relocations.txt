@@ -20,3 +20,8 @@
 # co-location transform guesses apps/web/src/stores/RoomNotificationStateStore.test.ts and
 # rename detection does not pair them either.
 apps/web/test/unit-tests/stores/RoomNotificationStateStore-test.ts -> apps/web/src/stores/notifications/RoomNotificationStateStore.test.ts
+
+# Upstream rewrote ReplyTile into a view model in a different directory. Similarity
+# detection does not pair them, and the co-location transform only rewrites test paths.
+apps/web/src/components/views/rooms/ReplyTile.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/ReplyTileViewModel.ts
+apps/web/test/unit-tests/components/views/rooms/ReplyTile-test.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/ReplyTileViewModel.test.tsx
