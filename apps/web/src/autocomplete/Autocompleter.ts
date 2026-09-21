@@ -9,6 +9,7 @@ Please see LICENSE files in the repository root for full details.
 import { type ReactElement, type RefAttributes, type HTMLAttributes } from "react";
 import { type Room } from "matrix-js-sdk/src/matrix";
 
+import BotCommandProvider from "./BotCommandProvider";
 import CommandProvider from "./CommandProvider";
 import RoomProvider from "./RoomProvider";
 import UserProvider from "./UserProvider";
@@ -40,7 +41,17 @@ export interface ICompletion {
     href?: string;
 }
 
-const PROVIDERS = [UserProvider, RoomProvider, EmojiProvider, NotifProvider, CommandProvider, SpaceProvider];
+// CommandProvider comes before BotCommandProvider so that Element's own commands are always
+// offered first, as MSC4332 suggests, rather than a bot's.
+const PROVIDERS = [
+    UserProvider,
+    RoomProvider,
+    EmojiProvider,
+    NotifProvider,
+    CommandProvider,
+    BotCommandProvider,
+    SpaceProvider,
+];
 
 // Providers will get rejected if they take longer than this.
 const PROVIDER_COMPLETION_TIMEOUT = 3000;
