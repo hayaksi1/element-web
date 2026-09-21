@@ -1,0 +1,223 @@
+diff --git a/apps/web/src/Notifier.test.ts b/apps/web/src/Notifier.test.ts
+index 3b93f86223..77ff8fd61a 100644
+--- a/apps/web/src/Notifier.test.ts
++++ b/apps/web/src/Notifier.test.ts
+@@ -29,10 +29,14 @@ import {
+     MsgType,
+     type IContent,
+     MatrixEvent,
++    RelationType,
+     SyncState,
+     type AccountDataEvents,
++    type EventTimeline,
++    type EventTimelineSet,
+ } from "matrix-js-sdk/src/matrix";
+ import { KnownMembership } from "matrix-js-sdk/src/types";
++
+ import { CallMembership, type SessionMembershipData, type MatrixRTCSession } from "matrix-js-sdk/src/matrixrtc";
+ import { randomUUID } from "node:crypto";
+ import { PushProcessor } from "matrix-js-sdk/src/pushprocessor";
+@@ -49,6 +53,7 @@ import { waitFor } from "test-utils-rtl";
+ 
+ import type BasePlatform from "./BasePlatform";
+ import Notifier, { NOTIFICATION_SOUND_THROTTLE_MS } from "./Notifier";
++import { SettingLevel } from "./settings/SettingLevel";
+ import SettingsStore from "./settings/SettingsStore";
+ import ToastStore from "./stores/ToastStore";
+ import {
+@@ -151,6 +156,7 @@ describe("Notifier", () => {
+             decryptEventIfNeeded: vi.fn(),
+             getRoom: vi.fn(),
+             getPushActionsForEvent: vi.fn(),
++            getNotifTimelineSet: vi.fn().mockReturnValue(null),
+             // Mock required because TextForEvent now evaluates supportsVoip for RTCNotification to trigger OS popups.
+             // The true/false value is arbitrary here, as this test only verifies the in-app toast creation, not the OS text output.
+             supportsVoip: vi.fn().mockReturnValue(true),
+@@ -254,6 +260,22 @@ describe("Notifier", () => {
+             expect(MockPlatform.loudNotification).not.toHaveBeenCalled();
+         });
+ 
++        it("only notifies once for a highlight which also lands on the notification timeline", () => {
++            // A highlight in an unencrypted room is added to the global notification timeline as
++            // well as to its own room's, and the client re-emits from both.
++            const notifTimelineSet = { threadListType: null } as unknown as EventTimelineSet;
++            mockClient.getNotifTimelineSet.mockReturnValue(notifTimelineSet);
++
++            mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
++            emitLiveEvent(event);
++            mockClient!.emit(RoomEvent.Timeline, event, testRoom, false, false, {
++                liveEvent: true,
++                timeline: { getTimelineSet: () => notifTimelineSet } as unknown as EventTimeline,
++            });
++
++            expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(1);
++        });
++
+         it("does not create notifications for non-live events (scrollback)", () => {
+             mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
+             mockClient!.emit(RoomEvent.Timeline, event, testRoom, false, false, {
+@@ -337,6 +359,112 @@ describe("Notifier", () => {
+             // without noisy
+             expect(MockPlatform.loudNotification).not.toHaveBeenCalled();
+         });
++
++        describe("room invites", () => {
++            // An invite arrives as stripped state rather than as a timeline event, so it reaches the
++            // room's state without ever passing through the live timeline.
++            const inviteRoomWith = (sender: string, membership = KnownMembership.Invite): Room => {
++                const room = new Room("!invite:server.org", mockClient, mockClient.getSafeUserId());
++                room.currentState.setStateEvents([
++                    new MatrixEvent({
++                        sender,
++                        type: EventType.RoomMember,
++                        state_key: userId,
++                        room_id: room.roomId,
++                        content: { membership: KnownMembership.Invite },
++                    }),
++                ]);
++                room.updateMyMembership(membership);
++                return room;
++            };
++
++            // A room invited to for the first time only reaches the store once the whole sync
++            // response has been applied, which is after the membership change is announced.
++            const beInvited = (room: Room, previous?: string): void => {
++                mockClient.getRoom.mockImplementation((id) => (id === room.roomId ? null : testRoom));
++                mockClient!.emit(RoomEvent.MyMembership, room, room.getMyMembership(), previous);
++                mockClient.getRoom.mockImplementation((id) => (id === room.roomId ? room : testRoom));
++            };
++
++            const syncCompletes = (): void => {
++                mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, SyncState.Syncing);
++            };
++
++            beforeEach(() => {
++                // Put the notifier past its startup sync, where invites are deliberately ignored.
++                mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
++            });
++
++            it("notifies when we are invited to a room", () => {
++                const room = inviteRoomWith("@alice:server.org");
++
++                beInvited(room);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).toHaveBeenCalled();
++                expect(MockPlatform.loudNotification).toHaveBeenCalled();
++            });
++
++            it("notifies once, however many syncs redeliver the invite", () => {
++                const room = inviteRoomWith("@alice:server.org");
++
++                beInvited(room);
++                syncCompletes();
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(1);
++            });
++
++            it("does not notify for invites which were already pending before syncing started", () => {
++                notifier.stop();
++                notifier.start();
++                const room = inviteRoomWith("@alice:server.org");
++
++                beInvited(room);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
++            });
++
++            it("does not notify for an invite we accepted elsewhere in the same sync", () => {
++                // A gappy sync can announce the invite and the join we already made from another
++                // device in one response, leaving us joined by the time it has been applied.
++                const room = inviteRoomWith("@alice:server.org", KnownMembership.Join);
++
++                beInvited(room, KnownMembership.Leave);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
++            });
++
++            it("does not notify when we join a room", () => {
++                const room = inviteRoomWith("@alice:server.org", KnownMembership.Join);
++
++                beInvited(room, KnownMembership.Invite);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
++            });
++
++            it("does not notify for an invite we sent to ourselves", () => {
++                const room = inviteRoomWith(userId);
++
++                beInvited(room);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
++            });
++
++            it("does not notify when the invite does not have a notify push action", () => {
++                mockClient.getPushActionsForEvent.mockReturnValue({ notify: false, tweaks: {} });
++                const room = inviteRoomWith("@alice:server.org");
++
++                beInvited(room);
++                syncCompletes();
++
++                expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
++            });
++        });
+     });
+ 
+     describe("displayPopupNotification", () => {
+@@ -351,6 +479,30 @@ describe("Notifier", () => {
+             expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(count);
+         });
+ 
++        it("should display a notification for a reaction", () => {
++            const reaction = mkEvent({
++                event: true,
++                type: EventType.Reaction,
++                user: mockClient.getSafeUserId(),
++                room: testRoom.roomId,
++                content: {
++                    "m.relates_to": {
++                        rel_type: RelationType.Annotation,
++                        event_id: "$target:example.org",
++                        key: "👍",
++                    },
++                },
++            });
++            notifier.displayPopupNotification(reaction, testRoom);
++            expect(MockPlatform.displayNotification).toHaveBeenCalledWith(
++                "@bob:example.org (!room1:server)",
++                "Reacted with 👍",
++                expect.any(String),
++                testRoom,
++                reaction,
++            );
++        });
++
+         it("should display a notification for a voice message", () => {
+             const audioEvent = mkAudioEvent();
+             notifier.displayPopupNotification(audioEvent, testRoom);
+@@ -963,6 +1115,20 @@ describe("Notifier", () => {
+             });
+         });
+ 
++        it("should not turn audible notifications off when the browser withholds permission", async () => {
++            // The browser will not let us show desktop notifications...
++            vi.mocked(MockPlatform.maySendNotifications).mockReturnValue(false);
++            vi.mocked(MockPlatform.requestNotificationPermission).mockResolvedValue("denied");
++            vi.spyOn(Modal, "createDialog").mockReturnValue({} as ReturnType<typeof Modal.createDialog>);
++            const setValueSpy = vi.spyOn(SettingsStore, "setValue");
++            const notifier = new Notifier(dis, context);
++
++            notifier.setEnabled(true);
++
++            // ...which must not silently disable the separate audible notifications setting.
++            expect(setValueSpy).not.toHaveBeenCalledWith("audioNotificationsEnabled", null, SettingLevel.DEVICE, false);
++        });
++
+         it("should call fire notifier_enabled value=false when disabling", async () => {
+             const dispatchSpy = vi.spyOn(dis, "dispatch").mockImplementation(() => {});
+             const notifier = new Notifier(dis, context);
