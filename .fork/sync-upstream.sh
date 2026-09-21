@@ -106,6 +106,7 @@ FEATURES_FILE="$REPO_ROOT/.fork/features.txt"
 CONTRIB_FILE="$REPO_ROOT/.fork/contrib.txt"
 PATCH_DIR="$REPO_ROOT/.fork/integration-patches"
 DELETIONS_FILE="$REPO_ROOT/.fork/accept-upstream-deletions.txt"
+KEEP_FILE="$REPO_ROOT/.fork/keep-branch-versions.txt"
 RELOCATIONS_FILE="$REPO_ROOT/.fork/relocations.txt"
 DROPS_FILE="$GIT_COMMON/fork-sync-drops"
 # A manifest entry with no local branch used to warn and carry on, which builds the
@@ -368,6 +369,25 @@ resolve_listed_deletions() {
     return $(( ! resolved ))
 }
 
+# The mirror deleted the file and the contribution branch modified it. For these
+# paths the branch's version is the one the fork ships, so stage the copy git
+# left in the tree. A modify/delete is not cached by rerere.
+resolve_kept_files() {
+    local path resolved=0 allowed
+    [[ -f "$KEEP_FILE" ]] || return 1
+    allowed="$(grep -v '^[[:space:]]*#' "$KEEP_FILE" | grep -v '^[[:space:]]*$' || true)"
+    [[ -z "$allowed" ]] && return 1
+    while read -r path; do
+        [[ -n "$path" ]] || continue
+        if printf '%s\n' "$allowed" | grep -qxF -- "$path"; then
+            git add -- "$path"
+            log "    kept the branch version of $path (listed in keep-branch-versions.txt)"
+            resolved=1
+        fi
+    done <<< "$(unmerged_kinds | awk '$1=="DU"||$1=="UD"{print $2}')"
+    return $(( ! resolved ))
+}
+
 # ---------------------------------------------------------------- relocations
 # Upstream co-located its test suite: apps/web/test/unit-tests/X/Y-test.tsx became
 # apps/web/src/X/Y.test.tsx, and the original was deleted. A contribution branch that
@@ -446,7 +466,17 @@ between is silently never run. Fix the mapping in .fork/relocations.txt." ;;
         esac
         # A rename pair whose extension changes is git guessing across file types: the
         # same detection window paired a .pcss stylesheet with a .ts helper at -M50%.
-        if [[ "${old##*.}" != "${new##*.}" ]]; then
+        # A pair written in relocations.txt is intentional, including .tsx -> .ts.
+        explicit=0
+        if [[ -f "$RELOCATIONS_FILE" ]] && awk -F'->' -v k="$old" '
+            { sub(/#.*/, "")
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2) }
+            $1 == k && $2 != "" { found = 1 }
+            END { exit !found }' "$RELOCATIONS_FILE"; then
+            explicit=1
+        fi
+        if [[ "${old##*.}" != "${new##*.}" && "$explicit" -eq 0 ]]; then
             warn "    ignoring rename $old -> $new: different file types, almost certainly a false pair"
             continue
         fi
@@ -597,6 +627,7 @@ try_merge() {
     # deletion and the branch's tests would vanish with it.
     resolve_relocations || true
     resolve_rr_cache_conflicts || true
+    resolve_kept_files || true
     resolve_listed_deletions || true
     resolve_lockfile || true
     resolve_snapshots || true
