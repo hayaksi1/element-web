@@ -9,12 +9,20 @@ Please see LICENSE files in the repository root for full details.
 // @vitest-environment happy-dom
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ClientEvent, type MatrixClient, Room, RoomEvent, SyncState } from "matrix-js-sdk/src/matrix";
+import {
+    ClientEvent,
+    type MatrixClient,
+    PushRuleActionName,
+    Room,
+    RoomEvent,
+    SyncState,
+} from "matrix-js-sdk/src/matrix";
 import { KnownMembership } from "matrix-js-sdk/src/types";
 import { createTestClient, setupAsyncStoreWithClient } from "test-utils";
 
 import { RoomNotificationStateStore, UPDATE_STATUS_INDICATOR } from "./RoomNotificationStateStore";
 import { NotificationLevel } from "./NotificationLevel";
+import { type RoomNotificationState } from "./RoomNotificationState";
 import { DefaultTagID } from "../room-list-v3/skip-list/tag";
 import * as RoomNotifs from "../../RoomNotifs";
 import SettingsStore from "../../settings/SettingsStore";
@@ -215,6 +223,43 @@ describe("RoomNotificationStateStore", function () {
             // Then we check visible rooms, using the dynamic predecessor flag
             expect(client.getVisibleRooms).toHaveBeenCalledWith(true);
             expect(client.getVisibleRooms).not.toHaveBeenCalledWith(false);
+        });
+    });
+
+    describe("when a room is set to mentions & keywords", () => {
+        function fakeActivityRoom(level: NotificationLevel): Room {
+            const room = fakeRoom(0);
+            client.getRoomPushRule = vi.fn().mockReturnValue({
+                rule_id: room.roomId,
+                enabled: true,
+                default: false,
+                actions: [PushRuleActionName.DontNotify],
+            });
+            vi.spyOn(store, "getRoomState").mockReturnValue({
+                level,
+                symbol: null,
+                count: 0,
+                hasUnreadCount: true,
+            } as RoomNotificationState);
+            return room;
+        }
+
+        it("keeps its activity out of the global state", async () => {
+            const room = fakeActivityRoom(NotificationLevel.Activity);
+
+            vi.mocked(client.getVisibleRooms).mockReturnValue([room]);
+            client.emit(ClientEvent.Sync, SyncState.Syncing, SyncState.Syncing);
+
+            expect(store.emit).not.toHaveBeenCalled();
+        });
+
+        it("still contributes a mention to the global state", async () => {
+            const room = fakeActivityRoom(NotificationLevel.Highlight);
+
+            vi.mocked(client.getVisibleRooms).mockReturnValue([room]);
+            client.emit(ClientEvent.Sync, SyncState.Syncing, SyncState.Syncing);
+
+            expect(store.emit).toHaveBeenCalledWith(UPDATE_STATUS_INDICATOR, expect.anything(), "SYNCING");
         });
     });
 

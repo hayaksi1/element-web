@@ -20,6 +20,8 @@ import { SummarizedNotificationState } from "./SummarizedNotificationState";
 import { isRoomVisible } from "../room-list-v3/isRoomVisible";
 import { PosthogAnalytics } from "../../PosthogAnalytics";
 import SettingsStore from "../../settings/SettingsStore";
+import { getRoomNotifsState, RoomNotifState } from "../../RoomNotifs";
+import { NotificationLevel } from "./NotificationLevel";
 
 export const UPDATE_STATUS_INDICATOR = Symbol("update-status-indicator");
 
@@ -138,11 +140,23 @@ export class RoomNotificationStateStore extends AsyncStoreWithClient<EmptyObject
         let numFavourites = 0;
         for (const room of visibleRooms) {
             if (isRoomVisible(room)) {
-                const state = this.getRoomState(room);
+                const roomState = this.getRoomState(room);
+
                 // The space badges leave a low priority room's activity out, so the summary must
-                // too — otherwise Home and the tab badge light up for a room that no space badge
+                // too - otherwise Home and the tab badge light up for a room that no space badge
                 // admits to (https://github.com/vector-im/element-web/issues/20372).
-                if (!state.isLowPriorityActivity) globalState.add(state);
+                //
+                // A room set to "mentions & keywords" has asked not to be told about ordinary
+                // traffic, and the app-level indicators this feeds - the asterisk in the page
+                // title and the dot on the tray icon - carry no room context to explain
+                // themselves. Its mere activity is therefore left out too. Anything louder than
+                // activity is a mention, a marked-unread or an invite, and still counts.
+                const isActivityOnly = roomState.level === NotificationLevel.Activity;
+                const isMentionsOnlyChatter =
+                    isActivityOnly && getRoomNotifsState(room.client, room.roomId) === RoomNotifState.MentionsOnly;
+                if (!roomState.isLowPriorityActivity && !isMentionsOnlyChatter) {
+                    globalState.add(roomState);
+                }
 
                 if (room.tags[DefaultTagID.Favourite] && !room.getType()) numFavourites++;
             }
