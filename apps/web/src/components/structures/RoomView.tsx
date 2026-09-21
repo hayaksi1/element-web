@@ -3001,6 +3001,10 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
             searchHighlights = this.state.search.highlights;
         }
 
+        // Keep the timeline mounted during search so its scroll position survives, but hide it
+        // while the results list is what's on screen.
+        const hideMessagePanel = !!this.state.search && !isSteppingSearchMatch;
+
         let messagePanel: JSX.Element | undefined;
         if (!isRoomEncryptionLoading && SettingsStore.getValue("feature_new_timeline")) {
             // New MVVM timeline behind the Labs flag. It manages its own scrolling, read

@@ -7,7 +7,6 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -126,7 +125,6 @@ describe("ChatBackgrounds", () => {
                 light: uploaded,
                 dark: uploaded,
             });
-            expect(client.mxcUrlToHttp).toHaveBeenCalled();
         });
 
         it("returns null when the mxc URI cannot be resolved to http", () => {

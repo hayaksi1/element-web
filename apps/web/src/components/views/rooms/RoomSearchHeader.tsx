@@ -11,8 +11,12 @@ import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/searc
 import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
 import ListIcon from "@vector-im/compound-design-tokens/assets/web/icons/list-view";
 import { type Room, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
-import { Box, Flex } from "@element-hq/web-shared-components";
-import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
+import {
+    Box,
+    Flex,
+    SearchMatchNavigation,
+    type SearchMatchNavigationViewModel,
+} from "@element-hq/web-shared-components";
 
 import { _t } from "../../../languageHandler";
 import { Key } from "../../../Keyboard";

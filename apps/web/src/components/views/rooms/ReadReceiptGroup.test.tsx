@@ -15,12 +15,7 @@ import { RoomMember } from "matrix-js-sdk/src/matrix";
 import userEvent from "@testing-library/user-event";
 import { stubClient } from "test-utils";
 
-import {
-    determineAvatarPosition,
-    ReadReceiptGroup,
-    ReadReceiptPerson,
-    readReceiptTooltip,
-} from "./ReadReceiptGroup";
+import { determineAvatarPosition, ReadReceiptGroup, ReadReceiptPerson, readReceiptTooltip } from "./ReadReceiptGroup";
 import * as languageSettings from "../../../i18n/settings";
 import dispatcher from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";

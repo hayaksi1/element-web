@@ -7,7 +7,6 @@ Please see LICENSE files in the repository root for full details.
 
 import { describe, it, expect } from "vitest";
 
-
 import { MatrixError } from "matrix-js-sdk/src/matrix";
 
 import { getAliasCreationErrorMessage } from "./AliasSettings";

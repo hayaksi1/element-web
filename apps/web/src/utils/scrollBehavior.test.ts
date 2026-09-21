@@ -7,7 +7,6 @@ Please see LICENSE files in the repository root for full details.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-
 import SettingsStore from "../settings/SettingsStore";
 import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";
 
