@@ -13,6 +13,14 @@
 #
 # develop, master and feat/fork-tooling are excluded by the check itself.
 
+# Backups of contribution branches whose upstream PR is merged and closed.
+# The live pr/* ref is deleted; this copy is the rollback.
+backup/merged/leave-warning-restricted-room
+backup/merged/desktop-cmd-w-hides-app
+backup/merged/query-user-id-validation
+backup/merged/jump-to-date-local-timezone
+backup/merged/keybinding-caps-lock
+
 # Snapshots of develop from before the restructure / individual campaigns.
 backup/develop-pre-34590
 backup/develop-pre-34590-group
