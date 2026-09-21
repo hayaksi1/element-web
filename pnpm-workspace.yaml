@@ -108,8 +108,6 @@ patchedDependencies:
     react-blurhash: patches/react-blurhash.patch
     # Workaround for https://github.com/nfrasser/linkifyjs/issues/429
     linkify-html: patches/linkify-html.patch
-    # Workaround to access a private API
-    "@types/auto-launch": patches/@types__auto-launch.patch
     # Workaround for missing return types
     postcss-mixins: patches/postcss-mixins.patch
     # Workaround for some babel rules being false positively flagged
