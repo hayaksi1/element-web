@@ -9,10 +9,8 @@ Please see LICENSE files in the repository root for full details.
 
 import React, {
     type ComponentProps,
-    type Dispatch,
     type ReactNode,
     type RefCallback,
-    type SetStateAction,
     type JSX,
     useCallback,
     useEffect,
@@ -269,7 +267,7 @@ const metaSpaceComponentMap: Record<MetaSpace, typeof HomeButton> = {
 interface IInnerSpacePanelProps extends DroppableProvidedProps {
     children?: ReactNode;
     isPanelCollapsed: boolean;
-    setPanelCollapsed: Dispatch<SetStateAction<boolean>>;
+    setPanelCollapsed: (collapsed: boolean) => void;
     isDraggingOver: boolean;
     innerRef: RefCallback<HTMLElement>;
 }
@@ -367,17 +365,15 @@ const SpacePanel: React.FC = () => {
     const sdkContext = useContext(SDKContext);
     const client = sdkContext.client!;
     const [dragging, setDragging] = useState(false);
-    const [isPanelCollapsed, setPanelCollapsed] = useState(() => SettingsStore.getValue("Spaces.isPanelCollapsed"));
+    const [isPanelCollapsed, setPanelCollapsedState] = useState(() =>
+        SettingsStore.getValue("Spaces.isPanelCollapsed"),
+    );
     // Remember how the panel was left so that it comes back the same way, as the room list beside it
     // already does. Expanding it is a deliberate act, not something to undo on every launch.
-    const isFirstRender = useRef(true);
-    useEffect(() => {
-        if (isFirstRender.current) {
-            isFirstRender.current = false;
-            return;
-        }
-        void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, isPanelCollapsed);
-    }, [isPanelCollapsed]);
+    const setPanelCollapsed = useCallback((collapsed: boolean): void => {
+        setPanelCollapsedState(collapsed);
+        void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, collapsed);
+    }, []);
     const ref = useRef<HTMLDivElement>(null);
     useLayoutEffect(() => {
         if (ref.current) UIStore.instance.trackElementDimensions("SpacePanel", ref.current);

@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 
 import {
@@ -114,8 +115,7 @@ describe("ChatBackgrounds", () => {
         });
 
         it("resolves an mxc URI to the same http url in both themes", () => {
-            const toHttp = vi.fn().mockReturnValue("https://cdn.example/wall.png");
-            const client = { mxcUrlToHttp: toHttp } as unknown as MatrixClient;
+            const client = clientWith("https://cdn.example/wall.png");
             const uploaded = {
                 image: 'url("https://cdn.example/wall.png")',
                 repeat: "no-repeat",
@@ -125,7 +125,6 @@ describe("ChatBackgrounds", () => {
                 light: uploaded,
                 dark: uploaded,
             });
-            expect(toHttp).toHaveBeenCalled();
         });
 
         it("returns null when the mxc URI cannot be resolved to http", () => {

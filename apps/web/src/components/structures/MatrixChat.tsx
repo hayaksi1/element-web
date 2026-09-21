@@ -29,8 +29,8 @@ import { CryptoEvent, type KeyBackupInfo } from "matrix-js-sdk/src/crypto-api";
 import { TooltipProvider } from "@vector-im/compound-web";
 // what-input helps improve keyboard accessibility
 import "what-input";
-import sanitizeHtml from "sanitize-html";
-import { I18nContext, LinkedTextContext, LinkedText } from "@element-hq/web-shared-components";
+import { sanitizeHtml } from "@element-hq/element-web-shared-utils";
+import { I18nContext, LinkedTextContext, LinkedText, GenericToast } from "@element-hq/web-shared-components";
 import { LockSolidIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import PosthogTrackers from "../../PosthogTrackers";
@@ -79,7 +79,6 @@ import { UIFeature } from "../../settings/UIFeature";
 import DialPadModal from "../views/voip/DialPadModal";
 import { showToast as showMobileGuideToast } from "../../toasts/MobileGuideToast";
 import { shouldUseLoginForWelcome } from "../../utils/pages";
-import { ModuleRunner } from "../../modules/ModuleRunner";
 import Spinner from "../views/elements/Spinner";
 import QuestionDialog from "../views/dialogs/QuestionDialog";
 import UserSettingsDialog from "../views/dialogs/UserSettingsDialog";
@@ -121,10 +120,9 @@ import { isLocalRoom } from "../../utils/localRoom/isLocalRoom";
 import { SDKContext } from "../../contexts/SDKContext";
 import { SDKContextClass } from "../../contexts/SDKContextClass.ts";
 import { viewUserDeviceSettings } from "../../actions/handlers/viewUserDeviceSettings";
-import GenericToast from "../views/toasts/GenericToast";
 import RovingSpotlightDialog from "../views/dialogs/spotlight/SpotlightDialog";
 import { findDMForUser } from "../../utils/dm/findDMForUser";
-import { getHtmlText } from "../../HtmlUtils";
+import { sanitizeHtmlText } from "../../HtmlUtils";
 import { NotificationLevel } from "../../stores/notifications/NotificationLevel";
 import { type UserTab } from "../views/dialogs/UserTab";
 import { shouldSkipSetupEncryption } from "../../utils/crypto/shouldSkipSetupEncryption";
@@ -436,12 +434,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
             // if the user has previously set up cross-signing, verify this device so we can fetch the
             // private keys.
 
-            const cryptoExtension = ModuleRunner.instance.extensions.cryptoSetup;
-            if (cryptoExtension.SHOW_ENCRYPTION_SETUP_UI == false) {
-                this.onShowPostLoginScreen();
-            } else {
-                this.setStateForNewView({ view: Views.COMPLETE_SECURITY });
-            }
+            this.setStateForNewView({ view: Views.COMPLETE_SECURITY });
         } else if (!(await shouldSkipSetupEncryption(cli))) {
             // if cross-signing is not yet set up, do so now if possible.
             InitialCryptoSetupStore.sharedInstance().startInitialCryptoSetup(
@@ -1160,7 +1153,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                         type: "m.room.message",
                         content: {
                             msgtype: MsgType.Text,
-                            body: getHtmlText(msg),
+                            body: sanitizeHtmlText(msg),
                             format: "org.matrix.custom.html",
                             formatted_body: sanitizeHtml(msg, sanitizeHtmlParams),
                         },

@@ -5,9 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-// @vitest-environment happy-dom
-
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ISearchResults } from "matrix-js-sdk/src/matrix";
 
 import { RoomSearchNavigationViewModel, type RoomSearchNavigationProps } from "./RoomSearchNavigationViewModel";

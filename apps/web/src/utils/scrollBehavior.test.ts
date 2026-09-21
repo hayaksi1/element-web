@@ -5,9 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-// @vitest-environment happy-dom
-
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import SettingsStore from "../settings/SettingsStore";
 import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";

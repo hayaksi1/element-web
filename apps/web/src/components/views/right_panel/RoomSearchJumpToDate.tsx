@@ -15,8 +15,9 @@ import {
 } from "@element-hq/web-shared-components";
 
 import { _t } from "../../../languageHandler";
-import { DateSeparatorViewModel } from "../../../viewmodels/room/timeline/DateSeparatorViewModel";
 import { SDKContext } from "../../../contexts/SDKContext";
+import { SDKContextClass } from "../../../contexts/SDKContextClass";
+import { DateSeparatorViewModel } from "../../../viewmodels/room/timeline/DateSeparatorViewModel";
 
 interface Props {
     /**
@@ -39,8 +40,11 @@ interface Props {
  */
 export function RoomSearchJumpToDate({ roomId }: Props): JSX.Element | null {
     const sdkContext = useContext(SDKContext);
+    // The search header is rendered in tests without the MatrixChat provider. Production always has one;
+    // the singleton is the same store that provider holds.
+    const roomViewStore = sdkContext?.roomViewStore ?? SDKContextClass.instance.roomViewStore;
     const vm = useCreateAutoDisposedViewModel(
-        () => new DateSeparatorViewModel({ roomId, ts: Date.now(), roomViewStore: sdkContext.roomViewStore }),
+        () => new DateSeparatorViewModel({ roomId, ts: Date.now(), roomViewStore }),
     );
     const { jumpToEnabled } = useViewModel(vm);
     const [open, setOpen] = useState(false);

@@ -7,11 +7,11 @@
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, afterEach } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
+import { stubClient } from "test-utils";
 
 import { RoomSearchSenderFilterViewModel } from "./RoomSearchSenderFilterViewModel";
-import { stubClient } from "test-utils";
 
 const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
 

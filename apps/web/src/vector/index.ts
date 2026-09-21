@@ -121,7 +121,6 @@ async function start(): Promise<void> {
         loadLanguage,
         loadTheme,
         loadApp,
-        loadModules,
         loadPlugins,
         showError,
         showIncompatibleBrowser,
@@ -173,8 +172,6 @@ async function start(): Promise<void> {
         // await things settling so that any errors we have to render have features like i18n running
         await settled(loadThemePromise, loadLanguagePromise);
 
-        const loadModulesPromise = loadModules();
-        await settled(loadModulesPromise);
         const loadPluginsPromise = loadPlugins();
         await settled(loadPluginsPromise);
 
@@ -222,7 +219,6 @@ async function start(): Promise<void> {
         // assert things started successfully
         // ##################################
         await loadPluginsPromise;
-        await loadModulesPromise;
         await loadThemePromise;
         await loadLanguagePromise;
 

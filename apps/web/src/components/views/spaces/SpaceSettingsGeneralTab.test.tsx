@@ -7,7 +7,8 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { type MatrixClient, Room } from "matrix-js-sdk/src/matrix";

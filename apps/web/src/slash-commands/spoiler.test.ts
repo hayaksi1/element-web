@@ -7,7 +7,7 @@
 
 // @vitest-environment happy-dom
 
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type IContent } from "matrix-js-sdk/src/matrix";
 
 import { setUpCommandTest } from "./__mocks__";

@@ -7,7 +7,8 @@
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
 import React from "react";
 import { render, screen } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";
@@ -19,8 +20,7 @@ import { RoomSearchNavigationViewModel } from "../../../viewmodels/search/RoomSe
 import { SearchSessionStore } from "../../../stores/SearchSessionStore";
 import { Action } from "../../../dispatcher/actions";
 import defaultDispatcher from "../../../dispatcher/dispatcher";
-import { stubClient, TestSDKContext } from "test-utils";
-import { SDKContext } from "../../../contexts/SDKContext";
+import { stubClient } from "test-utils";
 
 const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
 
@@ -54,22 +54,20 @@ describe("RoomSearchHeader", () => {
 
     const renderHeader = (props: Partial<React.ComponentProps<typeof RoomSearchHeader>> = {}): void => {
         render(
-            <SDKContext.Provider value={new TestSDKContext()}>
-                <RoomSearchHeader
-                    room={buildRoom()}
-                    term=""
-                    onSearchChange={vi.fn()}
-                    onCancel={vi.fn()}
-                    isRoomEncrypted={false}
-                    scope={SearchScope.Room}
-                    onSearchScopeChange={vi.fn()}
-                    senders={[]}
-                    onSearchSendersChange={vi.fn()}
-                    order={SearchOrderBy.Recent}
-                    onSearchOrderChange={vi.fn()}
-                    {...props}
-                />
-            </SDKContext.Provider>,
+            <RoomSearchHeader
+                room={buildRoom()}
+                term=""
+                onSearchChange={vi.fn()}
+                onCancel={vi.fn()}
+                isRoomEncrypted={false}
+                scope={SearchScope.Room}
+                onSearchScopeChange={vi.fn()}
+                senders={[]}
+                onSearchSendersChange={vi.fn()}
+                order={SearchOrderBy.Recent}
+                onSearchOrderChange={vi.fn()}
+                {...props}
+            />,
         );
     };
 

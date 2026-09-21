@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { RelationType } from "matrix-js-sdk/src/matrix";
 import { mkEvent, stubClient } from "test-utils";
 

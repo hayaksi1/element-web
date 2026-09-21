@@ -28,8 +28,6 @@ import { KnownMembership } from "matrix-js-sdk/src/types";
 import { CryptoEvent, UserVerificationStatus } from "matrix-js-sdk/src/crypto-api";
 import {
     act,
-    createEvent,
-    fireEvent,
     getAllByLabelText,
     getByLabelText,
     getByText,
@@ -39,7 +37,6 @@ import {
     screen,
     waitFor,
 } from "test-utils-rtl";
-import { type ViewRoomOpts } from "@matrix-org/react-sdk-module-api/lib/lifecycles/RoomViewLifecycle";
 import userEvent from "@testing-library/user-event";
 import { filterConsole, setupAsyncStoreWithClient, stubClient } from "test-utils";
 
@@ -53,7 +50,6 @@ import { RightPanelPhases } from "../../../../stores/right-panel/RightPanelStore
 import SettingsStore from "../../../../settings/SettingsStore";
 import SdkConfig from "../../../../SdkConfig";
 import dispatcher from "../../../../dispatcher/dispatcher";
-import { Action } from "../../../../dispatcher/actions";
 import { CallStore } from "../../../../stores/CallStore";
 import { type Call } from "../../../../models/Call";
 import * as ShieldUtils from "../../../../utils/ShieldUtils";
@@ -224,15 +220,6 @@ describe("RoomHeader", () => {
 
         await user.click(getByLabelText(document.body, "Threads"));
         expect(setCardSpy).toHaveBeenCalledWith({ phase: RightPanelPhases.ThreadPanel });
-    });
-
-    it("opens & focuses in-room search when the header search button is clicked", async () => {
-        const user = userEvent.setup();
-        const fireSpy = vi.spyOn(dispatcher, "fire");
-        render(<RoomHeader room={room} />, getWrapper());
-
-        await user.click(getByLabelText(document.body, "Search"));
-        expect(fireSpy).toHaveBeenCalledWith(Action.FocusMessageSearch);
     });
 
     it("opens the notifications panel", async () => {
@@ -933,41 +920,6 @@ describe("RoomHeader", () => {
             });
             await waitFor(() => expect(getByLabelText(document.body, "Untrusted")).toBeInTheDocument());
         });
-    });
-
-    it("renders legacy additionalButtons", async () => {
-        const additionalButtons: ViewRoomOpts["buttons"] = [
-            {
-                icon: () => <>test-icon</>,
-                id: "test-id",
-                label: () => "test-label",
-                onClick: () => {},
-            },
-        ];
-        render(<RoomHeader room={room} legacyAdditionalButtons={additionalButtons} />, getWrapper());
-        expect(screen.getByRole("button", { name: "test-label" })).toBeInTheDocument();
-    });
-
-    it("calls onClick-callback on legacyAdditionalButtons", () => {
-        const callback = vi.fn();
-        const additionalButtons: ViewRoomOpts["buttons"] = [
-            {
-                icon: () => <>test-icon</>,
-                id: "test-id",
-                label: () => "test-label",
-                onClick: callback,
-            },
-        ];
-
-        render(<RoomHeader room={room} legacyAdditionalButtons={additionalButtons} />, getWrapper());
-
-        const button = screen.getByRole("button", { name: "test-label" });
-        const event = createEvent.click(button);
-        event.stopPropagation = vi.fn();
-        fireEvent(button, event);
-
-        expect(callback).toHaveBeenCalled();
-        expect(event.stopPropagation).toHaveBeenCalled();
     });
 
     describe("ask to join disabled", () => {

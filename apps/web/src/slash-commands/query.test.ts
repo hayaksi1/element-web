@@ -8,6 +8,7 @@
 // @vitest-environment happy-dom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
 import { setUpCommandTest } from "./__mocks__";
 import * as createRoom from "../createRoom";
 import dis from "../dispatcher/dispatcher";

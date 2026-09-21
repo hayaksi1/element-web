@@ -71,6 +71,7 @@ exports[`ImageBodyView > matches snapshot for error story 1`] = `
 <div>
   <span
     class="ImageBodyView-module_root ImageBodyView-module_error"
+    style="--mx-image-reserved-height: 320px;"
   >
     <svg
       class="ImageBodyView-module_errorIcon"

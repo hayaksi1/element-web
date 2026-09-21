@@ -7,9 +7,9 @@
 
 import EventEmitter from "node:events";
 import { SimpleObservable } from "matrix-widget-api";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
-import { PlaybackState } from "../Playback";
+import { type Playback, PlaybackState } from "../Playback";
 
 /**
  * A mocked playback implementation for testing purposes.
@@ -52,9 +52,9 @@ export class MockedPlayback extends EventEmitter {
         return this.waveformObservable;
     }
 
-    public prepare = vi.fn().mockResolvedValue(undefined);
-    public skipTo = vi.fn();
-    public toggle = vi.fn();
-    public play = vi.fn().mockResolvedValue(undefined);
-    public destroy = vi.fn().mockResolvedValue(undefined);
+    public prepare: Mock<Playback["prepare"]> = vi.fn().mockResolvedValue(undefined);
+    public skipTo: Mock<Playback["skipTo"]> = vi.fn();
+    public toggle: Mock<Playback["toggle"]> = vi.fn();
+    public play: Mock<Playback["play"]> = vi.fn().mockResolvedValue(undefined);
+    public destroy: Mock<Playback["destroy"]> = vi.fn().mockResolvedValue(undefined);
 }

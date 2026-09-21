@@ -7,7 +7,8 @@
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
+
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";

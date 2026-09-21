@@ -7,7 +7,8 @@
 
 // @vitest-environment happy-dom
 
-import { vi, describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
 import React from "react";
 import { fireEvent, render, screen } from "test-utils-rtl";
 import userEvent from "@testing-library/user-event";

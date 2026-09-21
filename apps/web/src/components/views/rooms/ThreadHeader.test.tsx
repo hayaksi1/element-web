@@ -21,7 +21,7 @@ import {
 } from "matrix-js-sdk/src/matrix";
 
 import { ThreadHeader } from "./ThreadHeader";
-import { mkEvent, mkMessage, stubClient } from "../../../../test/test-utils";
+import { mkEvent, mkMessage, stubClient } from "test-utils";
 import MatrixClientContext from "../../../contexts/MatrixClientContext";
 import RoomContext, { type RoomContextType } from "../../../contexts/RoomContext";
 import { ScopedRoomContextProvider } from "../../../contexts/ScopedRoomContext";

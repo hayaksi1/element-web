@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 // @vitest-environment happy-dom
 
 import React from "react";
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, waitFor } from "test-utils-rtl";
 import { type MatrixClient, MsgType } from "matrix-js-sdk/src/matrix";
 import { KnownMembership } from "matrix-js-sdk/src/types";
@@ -21,7 +21,7 @@ import SendMessageComposer, { createMessageContent, isQuickReaction } from "./Se
 import MatrixClientContext from "../../../contexts/MatrixClientContext";
 import { type RoomContextType, TimelineRenderingType, MainSplitContentType } from "../../../contexts/RoomContext";
 import EditorModel from "../../../editor/model";
-import { createPartCreator } from "../../../../test/unit-tests/editor/mock";
+import { createPartCreator } from "../../../editor/__mocks__";
 import { MatrixClientPeg } from "../../../MatrixClientPeg";
 import defaultDispatcher from "../../../dispatcher/dispatcher";
 import DocumentOffset from "../../../editor/offset";
@@ -32,6 +32,8 @@ import { SDKContextClass } from "../../../contexts/SDKContextClass";
 import { RoomUploadContextProvider } from "../../../viewmodels/room/RoomUploadViewModel.tsx";
 import { MessageComposerUrlPreviewViewModel } from "../../../viewmodels/composer/MessageComposerUrlPreviewViewModel.ts";
 import { SDKContext } from "../../../contexts/SDKContext.ts";
+import { UrlPreviewApi } from "../../../modules/UrlPreviewApi.ts";
+import { attachUrlPreviews } from "../../../utils/messages";
 import Modal from "../../../Modal";
 import SettingsStore from "../../../settings/SettingsStore";
 import { UNSTABLE_BOT_COMMANDS_EVENT_TYPE } from "../../../slash-commands/botCommands";
@@ -39,6 +41,13 @@ import { UNSTABLE_BOT_COMMANDS_EVENT_TYPE } from "../../../slash-commands/botCom
 vi.mock("../../../utils/local-room", () => ({
     doMaybeLocalRoomAction: vi.fn(),
 }));
+
+// Wrapped rather than replaced: every other test relies on the real attach behaviour, only the
+// cancellation test below overrides it.
+vi.mock("../../../utils/messages", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../../utils/messages")>();
+    return { ...actual, attachUrlPreviews: vi.fn(actual.attachUrlPreviews) };
+});
 
 describe("<SendMessageComposer/>", () => {
     const defaultRoomContext: RoomContextType = {
@@ -84,7 +93,6 @@ describe("<SendMessageComposer/>", () => {
         msc3946ProcessDynamicPredecessor: false,
         canAskToJoin: false,
         promptAskToJoin: false,
-        viewRoomOpts: { buttons: [] },
         isRoomEncrypted: false,
     };
     describe("createMessageContent", () => {
@@ -194,7 +202,7 @@ describe("<SendMessageComposer/>", () => {
             client: mockClient,
             visible: false,
             showTooltips: false,
-            urlPreviewBundle: false,
+            moduleUrlPreviewApi: new UrlPreviewApi(),
         });
         const defaultProps = {
             room: mockRoom,
@@ -302,7 +310,7 @@ describe("<SendMessageComposer/>", () => {
             });
         });
 
-        it("correctly sends a message", () => {
+        it("correctly sends a message", async () => {
             vi.mocked(doMaybeLocalRoomAction).mockImplementation(
                 <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>, _client?: MatrixClient) => {
                     return fn(roomId);
@@ -315,11 +323,39 @@ describe("<SendMessageComposer/>", () => {
             addTextToComposer(container, "test message");
             fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
 
-            expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
-                "body": "test message",
-                "msgtype": MsgType.Text,
-                "m.mentions": {},
-            });
+            // sending awaits attachUrlPreviews, so the message goes out a tick after the keypress
+            await waitFor(() =>
+                expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
+                    "body": "test message",
+                    "msgtype": MsgType.Text,
+                    "m.mentions": {},
+                }),
+            );
+        });
+
+        // Attaching the previews can take a while in an encrypted room, and the user may cancel the
+        // pending message in the meantime; the message must then not be sent after all.
+        it("does not send the message when attaching the previews reports a cancellation", async () => {
+            vi.mocked(doMaybeLocalRoomAction).mockImplementation(
+                <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>, _client?: MatrixClient) => {
+                    return fn(roomId);
+                },
+            );
+            vi.mocked(attachUrlPreviews).mockResolvedValueOnce(true);
+
+            const { container } = getComponent();
+
+            addTextToComposer(container, "cancelled message");
+            fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
+
+            await waitFor(() => expect(attachUrlPreviews).toHaveBeenCalled());
+            // The client mock is shared across the suite, so look for this message specifically
+            // rather than asserting that nothing at all was sent.
+            expect(mockClient.sendMessage).not.toHaveBeenCalledWith(
+                "myfakeroom",
+                null,
+                expect.objectContaining({ body: "cancelled message" }),
+            );
         });
 
         it("only runs a slash command once when enter is pressed twice", async () => {
@@ -377,7 +413,7 @@ describe("<SendMessageComposer/>", () => {
             );
         });
 
-        it("shows chat effects on message sending", () => {
+        it("shows chat effects on message sending", async () => {
             vi.mocked(doMaybeLocalRoomAction).mockImplementation(
                 <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>, _client?: MatrixClient) => {
                     return fn(roomId);
@@ -390,16 +426,20 @@ describe("<SendMessageComposer/>", () => {
             addTextToComposer(container, "🎉");
             fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
 
-            expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
-                "body": "test message",
-                "msgtype": MsgType.Text,
-                "m.mentions": {},
-            });
+            await waitFor(() =>
+                expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
+                    "body": "🎉",
+                    "msgtype": MsgType.Text,
+                    "m.mentions": {},
+                }),
+            );
 
-            expect(defaultDispatcher.dispatch).toHaveBeenCalledWith({ action: `effects.confetti` });
+            await waitFor(() =>
+                expect(defaultDispatcher.dispatch).toHaveBeenCalledWith({ action: `effects.confetti` }),
+            );
         });
 
-        it("not to send chat effects on message sending for threads", () => {
+        it("not to send chat effects on message sending for threads", async () => {
             vi.mocked(doMaybeLocalRoomAction).mockImplementation(
                 <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>, _client?: MatrixClient) => {
                     return fn(roomId);
@@ -418,19 +458,23 @@ describe("<SendMessageComposer/>", () => {
             addTextToComposer(container, "🎉");
             fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
 
-            expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
-                "body": "test message",
-                "msgtype": MsgType.Text,
-                "m.mentions": {},
-            });
+            await waitFor(() =>
+                expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", "$yolo", {
+                    "body": "🎉",
+                    "msgtype": MsgType.Text,
+                    "m.mentions": {},
+                    "m.relates_to": {
+                        event_id: "$yolo",
+                        is_falling_back: true,
+                        rel_type: "m.thread",
+                    },
+                }),
+            );
 
             expect(defaultDispatcher.dispatch).not.toHaveBeenCalledWith({ action: `effects.confetti` });
         });
 
         describe("bot commands (MSC4332)", () => {
-            let settingsSpy: MockInstance;
-            let modalSpy: MockInstance;
-
             /** Have a joined bot in the room advertise `/deploy` as one of its commands. */
             const advertiseDeployCommand = (): void => {
                 const commandsEvent = mkEvent({
@@ -450,6 +494,9 @@ describe("<SendMessageComposer/>", () => {
                 } as any);
             };
 
+            let settingsSpy: ReturnType<typeof vi.spyOn>;
+            let modalSpy: ReturnType<typeof vi.spyOn>;
+
             beforeEach(() => {
                 const realGetValue = SettingsStore.getValue.bind(SettingsStore);
                 settingsSpy = vi
@@ -459,9 +506,10 @@ describe("<SendMessageComposer/>", () => {
                     );
                 // shouldSendAnyway() resolves from this dialog; answering "no" aborts the send,
                 // which makes "was the user interrupted?" observable via sendMessage.
-                modalSpy = vi
-                    .spyOn(Modal, "createDialog")
-                    .mockReturnValue({ finished: Promise.resolve([false]), close: vi.fn() } as any);
+                modalSpy = vi.spyOn(Modal, "createDialog").mockReturnValue({
+                    finished: Promise.resolve([false]),
+                    close: vi.fn(),
+                } as any);
 
                 vi.mocked(doMaybeLocalRoomAction).mockImplementation(
                     <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>) => fn(roomId),
@@ -549,7 +597,7 @@ describe("<SendMessageComposer/>", () => {
             client: cli,
             visible: false,
             showTooltips: false,
-            urlPreviewBundle: false,
+            moduleUrlPreviewApi: new UrlPreviewApi(),
         });
 
         cli.isRoomEncrypted = vi.fn().mockReturnValue(true);

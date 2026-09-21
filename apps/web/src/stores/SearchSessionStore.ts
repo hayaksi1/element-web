@@ -5,7 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-import { type ISearchResults, type SearchOrderBy, TypedEventEmitter } from "matrix-js-sdk/src/matrix";
+import { TypedEventEmitter, type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
 
 import { type SearchMatch, type SearchResultPreview, type SearchScope } from "../Searching";
 import defaultDispatcher from "../dispatcher/dispatcher";
@@ -14,6 +14,10 @@ import { type ActionPayload } from "../dispatcher/payloads";
 
 export enum SearchSessionStoreEvent {
     Update = "update",
+}
+
+interface SearchSessionStoreEventHandlerMap {
+    [SearchSessionStoreEvent.Update]: () => void;
 }
 
 /**
@@ -86,11 +90,7 @@ export interface SearchSession extends SearchSessionParams {
  * component. This singleton is that owner: {@link RoomView} mirrors it into its render state and re-hydrates from it
  * after a remount, while {@link RoomSearchNavigationViewModel} reads/writes the cursor here.
  */
-type SearchSessionStoreHandlerMap = {
-    [SearchSessionStoreEvent.Update]: () => void;
-};
-
-export class SearchSessionStore extends TypedEventEmitter<SearchSessionStoreEvent, SearchSessionStoreHandlerMap> {
+export class SearchSessionStore extends TypedEventEmitter<SearchSessionStoreEvent, SearchSessionStoreEventHandlerMap> {
     private static _instance: SearchSessionStore | null = null;
 
     private session: SearchSession | null = null;

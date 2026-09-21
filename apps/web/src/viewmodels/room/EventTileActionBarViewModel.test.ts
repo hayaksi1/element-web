@@ -733,7 +733,7 @@ describe("EventTileActionBarViewModel", () => {
         it("collapses the quick actions into the options button", () => {
             const vm = createVm({ isQuoteExpanded: true });
 
-            // The whole point of the setting: hovering a plain message reveals one button, not six.
+            // Hovering a plain message reveals one button, not six.
             expect(vm.getSnapshot().actions).toEqual([ActionBarAction.Expand, ActionBarAction.Options]);
         });
 
@@ -767,8 +767,8 @@ describe("EventTileActionBarViewModel", () => {
 
             const vm = createVm({ mxEvent, timelineRenderingType: TimelineRenderingType.Room });
 
-            // A redacted event is not content-actionable, so the options menu cannot offer reply in thread;
-            // dropping it from the bar as well would lose the action entirely.
+            // A redacted event is not content-actionable, so the options menu cannot offer reply in thread.
+            // Dropping it from the bar as well would lose the action entirely.
             expect(vm.getSnapshot().actions).toContain(ActionBarAction.ReplyInThread);
         });
 
@@ -806,10 +806,10 @@ describe("EventTileActionBarViewModel", () => {
 
             // The view model watches the setting, so flipping it must repopulate the bar without a remount.
             compactMessageActions = false;
-            const [, , onChange] = vi
+            const onChange = vi
                 .mocked(SettingsStore.watchSetting)
-                .mock.calls.find(([name]) => name === "compactMessageActions")!;
-            onChange("compactMessageActions", null, SettingLevel.ACCOUNT, false, false);
+                .mock.calls.find(([name]) => name === "compactMessageActions")?.[2];
+            onChange?.("compactMessageActions", null, SettingLevel.ACCOUNT, false, false);
 
             expect(vm.getSnapshot().actions).toContain(ActionBarAction.Reply);
         });

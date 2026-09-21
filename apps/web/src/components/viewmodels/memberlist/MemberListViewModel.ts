@@ -24,7 +24,6 @@ import { throttle } from "lodash";
 
 import { type RoomMember } from "../../../models/rooms/RoomMember";
 import { mediaFromMxc } from "../../../customisations/Media";
-import UserIdentifierCustomisations from "../../../customisations/UserIdentifier";
 import { shouldShowComponent } from "../../../customisations/helpers/UIComponents";
 import { UIComponent } from "../../../settings/UIFeature";
 import { type PresenceState } from "../../../models/rooms/PresenceState";
@@ -68,10 +67,7 @@ export function getPending3PidInvites(room: Room, searchQuery?: string): Member[
 }
 
 export function sdkRoomMemberToRoomMember(member: SdkRoomMember): Member {
-    const displayUserId =
-        UserIdentifierCustomisations.getDisplayUserIdentifier(member.userId, {
-            roomId: member.roomId,
-        }) ?? member.userId;
+    const displayUserId = member.userId;
 
     const mxcAvatarURL = member.getMxcAvatarUrl();
     const avatarThumbnailUrl =
@@ -257,6 +253,7 @@ export function useMemberListViewModel(roomId: string): MemberListViewState {
 
     // Initial load of the memberlist
     useEffect(() => {
+        let active = true;
         (async () => {
             await loadMembers();
             /**
@@ -264,8 +261,14 @@ export function useMemberListViewModel(roomId: string): MemberListViewState {
              * Further calls need not mutate this state since it's perfectly fine to
              * show the existing memberlist until the new one loads.
              */
-            setIsLoading(false);
+            if (active) setIsLoading(false);
         })();
+        return () => {
+            // The trailing throttle reads localStorage. After unmount that store is gone
+            // and the rejection kills the vitest worker.
+            active = false;
+            loadMembers.cancel();
+        };
     }, [loadMembers]);
 
     return {

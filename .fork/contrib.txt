@@ -25,6 +25,11 @@
 #   pr/uploaded-media-cache             MERGED upstream as #34753 (d99eb665e9); every file
 #                                       is byte-identical to upstream/develop
 #   ...and all 49 branches whose PR is MERGED.
+#   pr/leave-warning-restricted-room    MERGED upstream as #34659. Backup: backup/merged/leave-warning-restricted-room
+#   pr/desktop-cmd-w-hides-app          MERGED upstream as #33992. Backup: backup/merged/desktop-cmd-w-hides-app
+#   pr/query-user-id-validation         MERGED upstream as #34473. Backup: backup/merged/query-user-id-validation
+#   pr/jump-to-date-local-timezone      MERGED upstream as #34476. Backup: backup/merged/jump-to-date-local-timezone
+#   pr/keybinding-caps-lock             MERGED upstream as #34478. Backup: backup/merged/keybinding-caps-lock
 #   pr/search-cmdf-default              subset of pr/search-cmdf-toast
 #   pr/search-stepping                  subset of pr/search-from-filter
 #   pr/search-from-filter               subset of pr/search-order-toggle
@@ -67,11 +72,9 @@ pr/ignored-user-event-summary
 pr/invite-notification
 pr/rejoin-room-not-found
 pr/desktop-warn-before-quit
-pr/leave-warning-restricted-room
 pr/composer-resolve-emoji-shortcodes
 pr/desktop-autoupdate-location
 pr/search-all-rooms
-pr/desktop-cmd-w-hides-app
 pr/voice-message-clock-width
 pr/full-size-threads
 pr/desktop-media-perms
@@ -81,7 +84,6 @@ pr/markdown-list-paragraphs
 pr/export-last-n-renderable
 pr/export-thread-messages
 pr/export-utf8-bom
-pr/query-user-id-validation
 pr/spoiler-markdown
 pr/image-aspect-ratio-from-loaded
 pr/deserialize-loose-lists
@@ -115,8 +117,6 @@ pr/member-list-alphabetical-fallback
 pr/reply-tile-inner-links
 pr/room-list-sticky-baseline
 pr/preview-decryption-failure
-pr/jump-to-date-local-timezone
-pr/keybinding-caps-lock
 pr/mark-read-predecessor
 pr/mentions-skip-code-blocks
 pr/poll-edit-content

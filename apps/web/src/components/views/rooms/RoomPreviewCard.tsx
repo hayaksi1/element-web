@@ -47,13 +47,13 @@ const RoomPreviewCard: FC<IProps> = ({ room, onJoinButtonClicked, onRejectButton
     const cli = useContext(MatrixClientContext);
     const isVideoRoom = calcIsVideoRoom(room);
     const myMembership = useMyRoomMembership(room);
+
+    const [busy, setBusy] = useState(false);
     useDispatcher(defaultDispatcher, (payload) => {
         if (payload.action === Action.JoinRoomError && payload.roomId === room.roomId) {
             setBusy(false); // stop the spinner, join failed
         }
     });
-
-    const [busy, setBusy] = useState(false);
 
     const joinRule = useRoomState(room, (state) => state.getJoinRule());
     // Join rules under which a join can succeed without an invite. Restricted rooms admit members

@@ -123,6 +123,7 @@ interface IState {
 export default class Field extends React.PureComponent<PropShapes, IState> {
     private readonly id: string;
     private readonly _inputRef = createRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>();
+    private unmounted = false;
 
     /**
      * When props.inputRef is a callback ref, we will pass callbackRef to the DOM element.
@@ -156,6 +157,13 @@ export default class Field extends React.PureComponent<PropShapes, IState> {
             focused: true,
         });
     }, VALIDATION_THROTTLE_MS);
+
+    public componentWillUnmount(): void {
+        // Debounced validation resolves after the dialog has closed. The callback then
+        // setStates against a document that no longer exists and takes the test worker down.
+        this.unmounted = true;
+        this.validateOnChange.cancel();
+    }
 
     public constructor(props: PropShapes) {
         super(props);
@@ -210,15 +218,25 @@ export default class Field extends React.PureComponent<PropShapes, IState> {
     };
 
     public async validate({ focused, allowEmpty = true }: IValidateOpts): Promise<boolean | undefined> {
-        if (!this.props.onValidate) {
+        if (this.unmounted || !this.props.onValidate) {
             return;
         }
         const value = this.inputRef.current?.value ?? null;
-        const { valid, feedback } = await this.props.onValidate({
-            value,
-            focused: !!focused,
-            allowEmpty,
-        });
+        let valid: boolean | undefined;
+        let feedback: IValidationResult["feedback"];
+        try {
+            ({ valid, feedback } = await this.props.onValidate({
+                value,
+                focused: !!focused,
+                allowEmpty,
+            }));
+        } catch (err) {
+            // The caller's setState throws once the document is gone. That rejection is
+            // otherwise uncaught and the vitest worker exits.
+            if (this.unmounted) return;
+            throw err;
+        }
+        if (this.unmounted) return valid;
 
         // this method is async and so we may have been blurred since the method was called
         // if we have then hide the feedback as withValidation does

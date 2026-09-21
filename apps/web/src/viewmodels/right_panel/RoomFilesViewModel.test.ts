@@ -5,9 +5,7 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-// @vitest-environment happy-dom
-
-import { vi, describe, it, expect } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RoomFilesViewModel } from "./RoomFilesViewModel";
 import { FileCategory } from "../../utils/FileCategory";

@@ -233,8 +233,7 @@ describe("createMessageContent", () => {
 
             // Bob was already notified by the message being edited, so only Carol is new.
             expect(content["m.mentions"]).toEqual({ user_ids: ["@carol:element.io"] });
-            const newContent = content["m.new_content"] as unknown as Record<string, unknown>;
-            expect(newContent["m.mentions"]).toEqual({
+            expect((content["m.new_content"] as { "m.mentions"?: { user_ids: string[] } })["m.mentions"]).toEqual({
                 user_ids: ["@bob:element.io", "@carol:element.io"],
             });
         });

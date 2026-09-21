@@ -5,12 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import { expect, describe, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { desktopCapturer } from "electron";
+import { expect, describe, it, beforeEach, afterEach, vi } from "vitest";
+import { desktopCapturer, nativeImage, TouchBar } from "electron";
 
 import { getConfig } from "./config.js";
 import { consumeDisplayMediaCallback } from "./displayMediaCallback.js";
-import Store from "./store.js";
+import { clearData } from "./store.js";
 
 const { ipcHandlers, mockStore, send, randomArray } = vi.hoisted(() => ({
     ipcHandlers: {} as Record<string, (...args: unknown[]) => unknown>,
@@ -42,13 +42,16 @@ vi.mock("electron", () => ({
         }),
     },
     powerSaveBlocker: { isStarted: vi.fn(), start: vi.fn(), stop: vi.fn() },
-    TouchBar: class {},
+    TouchBar: class {
+        static TouchBarPopover = class {};
+        static TouchBarButton = vi.fn(function () {});
+    },
     nativeImage: { createFromBuffer: vi.fn() },
 }));
 
 vi.mock("./store.js", () => ({
     default: { instance: mockStore },
-    clearDataAndRelaunch: vi.fn(),
+    clearData: vi.fn(),
     SafeStorageDecryptionError: class SafeStorageDecryptionError extends Error {},
 }));
 vi.mock("./utils.js", () => ({ randomArray }));
@@ -161,6 +164,63 @@ describe("ipcCall: getDesktopCapturerSources", () => {
     });
 });
 
+describe("ipcCall: clearStorage", () => {
+    const session = { flushStorageData: vi.fn(), clearStorageData: vi.fn() };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(clearData).mockReset();
+        (global as unknown as { mainWindow: unknown }).mainWindow = { webContents: { send, session } };
+    });
+
+    it("clears data for the window's session without relaunching", async () => {
+        await callIpc("clearStorage", 15, []);
+
+        expect(clearData).toHaveBeenCalledExactlyOnceWith(session);
+        expect(send).toHaveBeenCalledWith("ipcReply", { id: 15, reply: null });
+    });
+});
+
+describe("ipcCall: breadcrumbs", () => {
+    const session = { fetch: vi.fn<typeof fetch>() };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+        vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 404 }));
+        (global as unknown as { mainWindow: unknown }).mainWindow = {
+            webContents: { send, session },
+            setTouchBar: vi.fn(),
+        };
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("loads avatars through the window session so authenticated media interception applies", async () => {
+        const avatarUrl = "https://example.org/_matrix/media/v3/thumbnail/example.org/avatar";
+        const bytes = new Uint8Array([1, 2, 3]);
+        session.fetch.mockResolvedValue(new Response(bytes));
+        const icon = {} as Electron.NativeImage;
+        vi.mocked(nativeImage.createFromBuffer).mockReturnValue(icon);
+
+        await callIpc("breadcrumbs", 16, [
+            [
+                { roomId: "!room:example.org", avatarUrl, initial: "R" },
+                { roomId: "!no-avatar:example.org", avatarUrl: null, initial: "N" },
+            ],
+        ]);
+
+        expect(session.fetch).toHaveBeenCalledExactlyOnceWith(avatarUrl);
+        expect(global.fetch).not.toHaveBeenCalled();
+        await vi.waitFor(() => {
+            expect(nativeImage.createFromBuffer).toHaveBeenCalledExactlyOnceWith(Buffer.from(bytes));
+            expect(vi.mocked(TouchBar.TouchBarButton).mock.instances[0]).toMatchObject({ icon, label: "" });
+        });
+    });
+});
+
 describe("ipcCall: callDisplayMediaCallback", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -189,49 +249,37 @@ describe("ipcCall: callDisplayMediaCallback", () => {
 });
 
 describe("setThemeColor", () => {
-    let handler: (ev: unknown, color: unknown) => void;
-    let set: ReturnType<typeof vi.fn>;
-    let get: ReturnType<typeof vi.fn>;
-    let setBackgroundColor: ReturnType<typeof vi.fn>;
-    let instanceSpy: ReturnType<typeof vi.spyOn>;
-
-    beforeAll(async () => {
-        await import("./ipc.js");
-        handler = ipcHandlers["setThemeColor"] as never;
-        expect(handler).toBeDefined();
-    });
+    const setBackgroundColor = vi.fn();
+    const handler = ipcHandlers["setThemeColor"] as (ev: unknown, color: unknown) => void;
 
     beforeEach(() => {
-        set = vi.fn();
-        get = vi.fn();
-        setBackgroundColor = vi.fn();
-        instanceSpy = vi.spyOn(Store, "instance", "get").mockReturnValue({ get, set } as unknown as Store);
+        vi.clearAllMocks();
+        mockStore.get.mockReturnValue(undefined);
         (global as unknown as { mainWindow: unknown }).mainWindow = { setBackgroundColor };
     });
 
     afterEach(() => {
-        instanceSpy.mockRestore();
         (global as unknown as { mainWindow: unknown }).mainWindow = null;
     });
 
     it("persists a valid colour and repaints the live window", () => {
         handler({}, "rgb(16, 19, 23)");
 
-        expect(set).toHaveBeenCalledWith("backgroundColor", "rgb(16, 19, 23)");
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "rgb(16, 19, 23)");
         expect(setBackgroundColor).toHaveBeenCalledWith("rgb(16, 19, 23)");
     });
 
     it("ignores an invalid colour", () => {
         handler({}, "javascript:alert(1)");
 
-        expect(set).not.toHaveBeenCalled();
+        expect(mockStore.set).not.toHaveBeenCalled();
         expect(setBackgroundColor).not.toHaveBeenCalled();
     });
 
     it("ignores a non-string payload", () => {
         handler({}, { malicious: true });
 
-        expect(set).not.toHaveBeenCalled();
+        expect(mockStore.set).not.toHaveBeenCalled();
         expect(setBackgroundColor).not.toHaveBeenCalled();
     });
 
@@ -239,15 +287,15 @@ describe("setThemeColor", () => {
         (global as unknown as { mainWindow: unknown }).mainWindow = null;
 
         expect(() => handler({}, "#101317")).not.toThrow();
-        expect(set).toHaveBeenCalledWith("backgroundColor", "#101317");
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "#101317");
     });
 
     it("does not re-persist or repaint when the colour is unchanged", () => {
-        get.mockReturnValue("#101317");
+        mockStore.get.mockReturnValue("#101317");
 
         handler({}, "#101317");
 
-        expect(set).not.toHaveBeenCalled();
+        expect(mockStore.set).not.toHaveBeenCalled();
         expect(setBackgroundColor).not.toHaveBeenCalled();
     });
 });

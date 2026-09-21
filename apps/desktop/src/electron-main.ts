@@ -32,6 +32,7 @@ import "./ipc.js";
 import "./seshat.js";
 import "./settings.js";
 import "./badge.js";
+import "./x509.js";
 import * as tray from "./tray.js";
 import Store from "./store.js";
 import { AutoLaunch, shouldStartHidden } from "./auto-launch.js";
@@ -378,7 +379,7 @@ app.on("ready", async () => {
         global.mainWindow = null;
     });
     global.mainWindow.on("close", (e) => {
-        // Capture the final geometry synchronously while the window is still alive - this is the only
+        // Capture the final geometry synchronously while the window is still alive — this is the only
         // reliable flush on the macOS hide-on-close path (where `closed` never fires) and also picks up
         // any geometry change still sitting in the debounce when the user quits. See window-state.ts.
         windowState.persist(global.mainWindow!);

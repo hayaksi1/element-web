@@ -11,16 +11,15 @@ import { EventType, MatrixEvent } from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
 import { VideoBodyViewState } from "@element-hq/web-shared-components";
 import { decode } from "blurhash";
-import { type Media } from "@element-hq/element-web-module-api";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import SettingsStore from "../../settings/SettingsStore";
 import { ImageSize } from "../../settings/enums/ImageSize";
-import { mediaFromContent } from "../../customisations/Media";
+import { type Media, mediaFromContent } from "../../customisations/Media";
 import { BLURHASH_FIELD } from "../../utils/image-media";
 import { type MediaEventHelper } from "../../utils/MediaEventHelper";
-import { VideoBodyViewModel } from "./VideoBodyViewModel";
 import { DecryptError, DownloadError } from "../../utils/DecryptFile";
+import { VideoBodyViewModel } from "./VideoBodyViewModel";
 
 vi.mock("../../customisations/Media", () => ({
     mediaFromContent: vi.fn(),
@@ -448,6 +447,20 @@ describe("VideoBodyViewModel", () => {
         global.Image = originalImage;
     });
 
+    it("names the video by its filename rather than its caption", () => {
+        const vm = createVm({
+            mxEvent: createEvent({
+                body: "a caption",
+                content: { filename: "holiday.mp4" },
+            }),
+        });
+
+        vm.setMediaVisible(true);
+
+        expect(vm.getSnapshot().videoTitle).toBe("holiday.mp4");
+        expect(vm.getSnapshot().videoLabel).toBe("holiday.mp4");
+    });
+
     it("resets encrypted media state when the event changes", async () => {
         const vm = createVm({
             mxEvent: createEvent({
@@ -486,20 +499,6 @@ describe("VideoBodyViewModel", () => {
 
         expect(vm.getSnapshot().videoLabel).toBe("second video");
         expect(vm.getSnapshot().src).toBe("data:video/mp4,");
-    });
-
-    it("names the video by its filename rather than its caption", () => {
-        const vm = createVm({
-            mxEvent: createEvent({
-                body: "a caption",
-                content: { filename: "holiday.mp4" },
-            }),
-        });
-
-        vm.setMediaVisible(true);
-
-        expect(vm.getSnapshot().videoTitle).toBe("holiday.mp4");
-        expect(vm.getSnapshot().videoLabel).toBe("holiday.mp4");
     });
 
     it("does not emit for unchanged targeted setters", () => {
