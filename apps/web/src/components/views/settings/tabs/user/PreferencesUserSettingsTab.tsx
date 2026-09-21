@@ -150,6 +150,7 @@ export default class PreferencesUserSettingsTab extends React.Component<EmptyObj
         "showJoinLeaves",
         "showDisplaynameChanges",
         "showChatEffects",
+        "Accessibility.disableSmoothScrolling",
         "showAvatarChanges",
         "Pill.shouldShowPillAvatar",
         "TextualBody.enableBigEmoji",
