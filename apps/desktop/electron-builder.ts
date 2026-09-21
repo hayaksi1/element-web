@@ -18,6 +18,8 @@ import {
 } from "electron-builder";
 import { LogMessageByKey } from "app-builder-lib/out/node-module-collector/moduleManager.js";
 
+import { INFO_PLIST_STRINGS_DIR, readBaseUsageDescriptions } from "./scripts/infoplist-strings.js";
+
 /**
  * This script has different outputs depending on your os platform.
  *
@@ -174,6 +176,14 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
         gatekeeperAssess: true,
         strictVerify: true,
         entitlements: "./build/entitlements.mac.plist",
+        // Under the hardened runtime macOS requires these Info.plist usage-description strings to
+        // raise the TCC consent prompt for camera/microphone; without them getUserMedia is denied
+        // before the user is ever asked (element-web#32373). The matching device entitlements live
+        // in build/entitlements.mac.plist, and the main process triggers the prompt via
+        // systemPreferences.askForMediaAccess in src/media-permissions.ts. These are the English
+        // source values: macOS prefers the translation in <lang>.lproj/InfoPlist.strings and falls
+        // back here per key, so a locale Localazy has not reached yet still gets a valid prompt.
+        extendInfo: readBaseUsageDescriptions(),
         icon: "build/icon.icon",
         mergeASARs: true,
         // The prebuilt seshat binaries are single-arch and present in both halves of the universal build,
@@ -225,23 +235,26 @@ const config: Omit<Writable<Configuration>, "electronFuses"> & {
         const arch = Arch[context.arch];
         const keep = platform === "darwin" ? /^seshat-darwin-/ : new RegExp(`^seshat-${platform}-${arch}$`);
 
-        const modulesDir = path.join(
-            context.packager.getResourcesDir(context.appOutDir),
-            "app.asar.unpacked",
-            "node_modules",
-            "@matrix-org",
-        );
-        let entries: string[];
+        const resourcesDir = context.packager.getResourcesDir(context.appOutDir);
+        const modulesDir = path.join(resourcesDir, "app.asar.unpacked", "node_modules", "@matrix-org");
         try {
-            entries = await fsp.readdir(modulesDir);
-        } catch {
-            return; // No unpacked seshat binaries in this build
-        }
-        for (const entry of entries) {
-            if (entry.startsWith("seshat-") && !keep.test(entry)) {
-                console.log(`Pruning ${entry} from ${platform}-${arch} build`);
-                await fsp.rm(path.join(modulesDir, entry), { recursive: true, force: true });
+            const entries = await fsp.readdir(modulesDir);
+            for (const entry of entries) {
+                if (entry.startsWith("seshat-") && !keep.test(entry)) {
+                    console.log(`Pruning ${entry} from ${platform}-${arch} build`);
+                    await fsp.rm(path.join(modulesDir, entry), { recursive: true, force: true });
+                }
             }
+        } catch {
+            // No unpacked seshat binaries in this build
+        }
+
+        // macOS resolves the camera/microphone consent-prompt text against
+        // Contents/Resources/<lang>.lproj/InfoPlist.strings for the user's system language, so the
+        // translations have to be inside the bundle rather than loaded at runtime. Copying them once the
+        // .app exists but before it is signed keeps them covered by the signature.
+        if (platform === "darwin") {
+            fs.cpSync(path.resolve(INFO_PLIST_STRINGS_DIR), resourcesDir, { recursive: true });
         }
     },
 };
