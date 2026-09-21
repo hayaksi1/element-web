@@ -742,6 +742,7 @@ export function mkStubRoom(
         getVersion: vi.fn().mockReturnValue("1"),
         getBumpStamp: vi.fn().mockReturnValue(0),
         getAccountData: vi.fn(),
+        guessDMUserId: vi.fn(),
         hasMembershipState: () => false,
         isElementVideoRoom: vi.fn().mockReturnValue(false),
         isSpaceRoom: vi.fn().mockReturnValue(false),

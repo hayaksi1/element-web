@@ -172,6 +172,7 @@ describe("Spotlight Dialog", () => {
         testDM = mkRoom(mockedClient, testDMRoomId);
         testDM.name = "Chat with Alice";
         vi.mocked(testDM.getMyMembership).mockReturnValue(KnownMembership.Join);
+        vi.mocked(testDM.guessDMUserId).mockReturnValue(testDMUserId);
 
         vi.mocked(DMRoomMap.shared().getUserIdForRoomId).mockImplementation((roomId: string) => {
             if (roomId === testDMRoomId) {
@@ -770,13 +771,13 @@ describe("Spotlight Dialog", () => {
 
         it("should move the selection by a page of results", async () => {
             const rooms = Array.from({ length: 12 }, (_, i) => mkRoom(mockedClient, `!spotlight${i}:example.com`));
-            mocked(mockedClient.getVisibleRooms).mockReturnValue(rooms);
+            vi.mocked(mockedClient.getVisibleRooms).mockReturnValue(rooms);
             // Five results of this height fit in a list this tall.
-            jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
-            jest.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
+            vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
+            vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
 
             const { container } = render(<SpotlightDialog initialText="spotlight" onFinished={() => null} />);
-            jest.advanceTimersByTime(200);
+            vi.advanceTimersByTime(200);
             await flushPromisesWithFakeTimers();
 
             const selectedIndex = (): number =>
@@ -796,13 +797,13 @@ describe("Spotlight Dialog", () => {
 
         it("should stop at the last result rather than moving nowhere", async () => {
             const rooms = Array.from({ length: 3 }, (_, i) => mkRoom(mockedClient, `!spotlight${i}:example.com`));
-            mocked(mockedClient.getVisibleRooms).mockReturnValue(rooms);
+            vi.mocked(mockedClient.getVisibleRooms).mockReturnValue(rooms);
             // A list far taller than it has results to put in it, so one page overshoots the end.
-            jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
-            jest.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(4000);
+            vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
+            vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(4000);
 
             const { container } = render(<SpotlightDialog initialText="spotlight" onFinished={() => null} />);
-            jest.advanceTimersByTime(200);
+            vi.advanceTimersByTime(200);
             await flushPromisesWithFakeTimers();
 
             const options = container.querySelectorAll("li.mx_SpotlightDialog_option");
