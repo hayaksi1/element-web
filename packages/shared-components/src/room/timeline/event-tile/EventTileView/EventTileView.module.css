@@ -1251,9 +1251,12 @@
         padding-block-start: var(--event-tile-thread-spacing-block-start);
 
         .line {
-            padding-block: 2px;
-            padding-inline-start: var(--event-tile-thread-spacing-inline-start);
-            margin-inline-end: var(--event-tile-thread-spacing-inline-end);
+            padding-block: var(--event-tile-thread-line-spacing-block, 2px);
+            padding-inline-start: var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start));
+            margin-inline-end: var(
+                --event-tile-thread-line-margin-inline-end,
+                var(--event-tile-thread-spacing-inline-end)
+            );
         }
     }
 
@@ -1261,9 +1264,12 @@
         padding-block-start: var(--event-tile-thread-spacing-block-start);
 
         .line {
-            padding-block: 2px;
-            padding-inline-start: var(--event-tile-thread-spacing-inline-start);
-            margin-inline-end: var(--event-tile-thread-spacing-inline-end);
+            padding-block: var(--event-tile-thread-line-spacing-block, 2px);
+            padding-inline-start: var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start));
+            margin-inline-end: var(
+                --event-tile-thread-line-margin-inline-end,
+                var(--event-tile-thread-spacing-inline-end)
+            );
         }
     }
 
@@ -1298,7 +1304,7 @@
         .senderDetails {
             align-items: center;
             gap: var(--cpd-space-4x);
-            padding-inline-start: var(--cpd-space-2x);
+            padding-inline-start: var(--event-tile-thread-sender-gutter, var(--cpd-space-2x));
         }
 
         .senderDetails .slotSender {
@@ -1321,8 +1327,11 @@
 
     &.layoutIrc {
         .slotFooter {
-            margin-inline-start: var(--event-tile-thread-spacing-inline-start);
-            margin-inline-end: var(--event-tile-thread-spacing-inline-end);
+            margin-inline-start: var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start));
+            margin-inline-end: var(
+                --event-tile-thread-line-margin-inline-end,
+                var(--event-tile-thread-spacing-inline-end)
+            );
         }
     }
 
@@ -1340,8 +1349,11 @@
         }
 
         .slotFooter {
-            margin-inline-start: var(--event-tile-thread-spacing-inline-start);
-            margin-inline-end: var(--event-tile-thread-spacing-inline-end);
+            margin-inline-start: var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start));
+            margin-inline-end: var(
+                --event-tile-thread-line-margin-inline-end,
+                var(--event-tile-thread-spacing-inline-end)
+            );
         }
     }
 
@@ -1381,7 +1393,7 @@
                Restore it for grouped timelines; bubble info events intentionally
                retain the zero line padding. */
             .line {
-                padding-inline-start: var(--event-tile-thread-spacing-inline-start);
+                padding-inline-start: var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start));
             }
 
             &.layoutGroup .senderDetails .slotAvatar {
@@ -1409,7 +1421,9 @@
             }
 
             .line .slotBody {
-                margin-inline-start: calc(var(--event-tile-thread-spacing-inline-start) + 14px + 6px);
+                margin-inline-start: calc(
+                    var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start)) + 14px + 6px
+                );
             }
 
             /* Bubble body slots are display: contents, so their margin is not
@@ -1417,7 +1431,9 @@
                body, while preserving the slot wrapper's styling contract. */
             .line .slotBody > * {
                 width: auto;
-                margin-inline-start: calc(var(--event-tile-thread-spacing-inline-start) + 14px + 6px);
+                margin-inline-start: calc(
+                    var(--event-tile-thread-gutter, var(--event-tile-thread-spacing-inline-start)) + 14px + 6px
+                );
             }
         }
     }
