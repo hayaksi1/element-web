@@ -7,7 +7,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 
-
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
@@ -34,7 +33,7 @@ describe("<ChatBackgroundPanel />", () => {
             name in settings
                 ? settings[name]
                 : (realGetValue as (...args: unknown[]) => unknown)(name, ...rest)) as typeof SettingsStore.getValue);
-        setValueSpy = jest
+        setValueSpy = vi
             .spyOn(SettingsStore, "setValue")
             .mockImplementation(async (name: string, _roomId, _level, value: unknown) => {
                 settings[name] = value;

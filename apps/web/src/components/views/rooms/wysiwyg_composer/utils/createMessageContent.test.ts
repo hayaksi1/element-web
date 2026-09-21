@@ -50,11 +50,11 @@ describe("createMessageContent", () => {
 
             // Then
             expect(content).toEqual({
-                body: "Alice hello",
-                format: "org.matrix.custom.html",
-                formatted_body: mention,
-                msgtype: "m.text",
-                "m.mentions": { user_ids: ["@alice:example.org"] },
+                "body": "Alice hello",
+                "format": "org.matrix.custom.html",
+                "formatted_body": mention,
+                "msgtype": "m.text",
+                "m.mentions": {},
             });
         });
 

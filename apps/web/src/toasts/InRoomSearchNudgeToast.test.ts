@@ -7,7 +7,6 @@ Please see LICENSE files in the repository root for full details.
 
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 
-
 import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
 import SettingsStore from "../settings/SettingsStore";
 import { SettingLevel } from "../settings/SettingLevel";
@@ -28,7 +27,7 @@ describe("showInRoomSearchNudgeIfNeeded", () => {
     };
 
     beforeEach(() => {
-        addOrReplaceToast = jest
+        addOrReplaceToast = vi
             .spyOn(ToastStore.sharedInstance(), "addOrReplaceToast")
             .mockImplementation(() => undefined);
         setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
