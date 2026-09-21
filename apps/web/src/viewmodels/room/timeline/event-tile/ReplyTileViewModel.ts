@@ -336,11 +336,11 @@ export class ReplyTileViewModel
      */
     public onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
         const clickTarget = event.target as HTMLElement;
-        if (
-            clickTarget.tagName.toLowerCase() !== "a" ||
-            clickTarget.closest("a") === null ||
-            clickTarget === event.currentTarget
-        ) {
+        // Ask for the enclosing anchor rather than testing the target itself: a link is regularly
+        // clicked on something nested inside it — the text of a pill, an emoji image, a bold run —
+        // and treating those as "not a link" swallowed the navigation.
+        const clickedAnchor = clickTarget.closest("a");
+        if (clickedAnchor === null || clickedAnchor === event.currentTarget) {
             event.preventDefault();
             if (this.props.toggleExpandedQuote && event.shiftKey) {
                 this.props.toggleExpandedQuote();

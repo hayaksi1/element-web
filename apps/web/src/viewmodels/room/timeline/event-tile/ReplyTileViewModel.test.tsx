@@ -12,6 +12,9 @@ import { EventType, type MatrixClient, MatrixEvent, MsgType } from "matrix-js-sd
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { stubClient } from "test-utils";
 
+import dis from "../../../../dispatcher/dispatcher";
+import { Action } from "../../../../dispatcher/actions";
+
 import { FileBodyFactory, VideoBodyFactory } from "../../../../components/views/messages/MBodyFactory";
 import { type IBodyProps } from "../../../../components/views/messages/IBodyProps";
 import MImageReplyBody from "../../../../components/views/messages/MImageReplyBody";
@@ -190,5 +193,44 @@ describe("ReplyTileViewModel", () => {
 
         expect(vm.getSnapshot().inline).toBe(true);
         expect(vm.getSnapshot().sender?.profileViewModel).toBeUndefined();
+    });
+
+    describe("clicking a reply", () => {
+        const clickFrom = (target: HTMLElement, currentTarget: HTMLElement): MouseEvent => {
+            const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+            Object.defineProperty(click, "target", { value: target });
+            Object.defineProperty(click, "currentTarget", { value: currentTarget });
+            return click;
+        };
+
+        it("follows a link the click landed inside rather than jumping to the replied-to message", () => {
+            const dispatch = vi.spyOn(dis, "dispatch");
+            const vm = new ReplyTileViewModel({ mxEvent: createEvent(), cli });
+            const outer = document.createElement("a");
+            const innerLink = document.createElement("a");
+            const inner = document.createElement("b");
+            innerLink.appendChild(inner);
+            outer.appendChild(innerLink);
+
+            const click = clickFrom(inner, outer);
+            vm.onClick(click as unknown as React.MouseEvent<HTMLAnchorElement>);
+
+            expect(click.defaultPrevented).toBe(false);
+            expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ action: Action.ViewRoom }));
+        });
+
+        it("jumps to the replied-to message when the click was not on a link", () => {
+            const dispatch = vi.spyOn(dis, "dispatch");
+            const vm = new ReplyTileViewModel({ mxEvent: createEvent(), cli });
+            const outer = document.createElement("a");
+            const plain = document.createElement("b");
+            outer.appendChild(plain);
+
+            const click = clickFrom(plain, outer);
+            vm.onClick(click as unknown as React.MouseEvent<HTMLAnchorElement>);
+
+            expect(click.defaultPrevented).toBe(true);
+            expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ action: Action.ViewRoom }));
+        });
     });
 });
