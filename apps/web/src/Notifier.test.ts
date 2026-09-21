@@ -31,6 +31,8 @@ import {
     MatrixEvent,
     SyncState,
     type AccountDataEvents,
+    type EventTimeline,
+    type EventTimelineSet,
 } from "matrix-js-sdk/src/matrix";
 import { KnownMembership } from "matrix-js-sdk/src/types";
 import { CallMembership, type SessionMembershipData, type MatrixRTCSession } from "matrix-js-sdk/src/matrixrtc";
@@ -152,6 +154,7 @@ describe("Notifier", () => {
             decryptEventIfNeeded: vi.fn(),
             getRoom: vi.fn(),
             getPushActionsForEvent: vi.fn(),
+            getNotifTimelineSet: vi.fn().mockReturnValue(null),
             // Mock required because TextForEvent now evaluates supportsVoip for RTCNotification to trigger OS popups.
             // The true/false value is arbitrary here, as this test only verifies the in-app toast creation, not the OS text output.
             supportsVoip: vi.fn().mockReturnValue(true),
@@ -253,6 +256,22 @@ describe("Notifier", () => {
 
             expect(MockPlatform.displayNotification).not.toHaveBeenCalled();
             expect(MockPlatform.loudNotification).not.toHaveBeenCalled();
+        });
+
+        it("only notifies once for a highlight which also lands on the notification timeline", () => {
+            // A highlight in an unencrypted room is added to the global notification timeline as
+            // well as to its own room's, and the client re-emits from both.
+            const notifTimelineSet = { threadListType: null } as unknown as EventTimelineSet;
+            mockClient.getNotifTimelineSet.mockReturnValue(notifTimelineSet);
+
+            mockClient!.emit(ClientEvent.Sync, SyncState.Syncing, null);
+            emitLiveEvent(event);
+            mockClient!.emit(RoomEvent.Timeline, event, testRoom, false, false, {
+                liveEvent: true,
+                timeline: { getTimelineSet: () => notifTimelineSet } as unknown as EventTimeline,
+            });
+
+            expect(MockPlatform.displayNotification).toHaveBeenCalledTimes(1);
         });
 
         it("does not create notifications for non-live events (scrollback)", () => {
