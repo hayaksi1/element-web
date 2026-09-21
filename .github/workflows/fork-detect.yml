@@ -1,0 +1,322 @@
+name: Fork detect
+
+# Detection half of the sync pipeline. Runs daily and answers one question: would a
+# rebuild conflict today?
+#
+# It fast-forwards the `develop` mirror and runs `.fork/sync-upstream.sh --detect`,
+# which performs the real accumulating merge in a throwaway worktree - the same code
+# path publish uses, minus the verification gates and minus the push. It is not a
+# `git merge-tree` scan: that cannot replay rerere or the relocation resolver, so it
+# reports conflicts on branches that merge perfectly well.
+#
+# Consequently detect needs NO node_modules. There is deliberately no `pnpm install`
+# and no `setup-playwright` here; those belong to publish. If detect ever installs
+# dependencies, the split has failed at its one job.
+#
+# Detect records each conflict, aborts that merge and continues to the next branch,
+# so one run reports every conflicting branch rather than hiding all of them behind
+# the first. The whole set lands in ONE fixed-title issue, `Sync conflicts`.
+#
+# It pushes nothing except `develop`. The rebuild is `fork-sync.yml`, twice a week.
+#
+# NOTE: scheduled workflows only ever run from the repository's DEFAULT branch.
+# `develop` is a pristine mirror of upstream and must never carry this file, so the
+# default branch must stay `master` in Settings -> General -> Default branch.
+
+on:
+    schedule:
+        # 06:23 UTC daily. Off the hour on purpose: GitHub drops scheduled runs at :00.
+        # Deliberately unrelated to the publish schedule so the two do not queue behind
+        # each other on the shared concurrency group any more often than necessary.
+        - cron: "23 6 * * *"
+    workflow_dispatch:
+
+# Shared with fork-sync.yml on purpose: a detect run must never start while a publish
+# run is mid-rebuild, because detect's real merges would race the real ones.
+concurrency:
+    group: fork-sync
+    cancel-in-progress: false
+
+permissions:
+    contents: write
+    issues: write
+
+jobs:
+    detect:
+        runs-on: ubuntu-latest
+        # 93 real merges measured at roughly 4 minutes on a runner. Bounded well above
+        # that so a hang dies rather than burning an hour, but not so tight that a slow
+        # runner reads as a conflict.
+        timeout-minutes: 30
+        steps:
+            - name: Check out the integration branch with full history
+              uses: actions/checkout@v4
+              with:
+                  ref: master
+                  fetch-depth: 0
+                  persist-credentials: true
+
+            - name: Configure git
+              # The identity is needed because detect makes real merge commits in its
+              # throwaway worktree. rerere matters more: without the recorded resolutions
+              # every conflict the fork has already resolved once is reported again.
+              run: |
+                  git config user.name "fork-sync[bot]"
+                  git config user.email "fork-sync@users.noreply.github.com"
+                  git config rerere.enabled true
+                  git config rerere.autoUpdate true
+
+            - name: Wire up the remotes the script expects
+              run: |
+                  # The script defaults to a remote named `gh` for the fork and `upstream`
+                  # for element-hq. On a runner the fork remote is `origin`.
+                  git remote add upstream https://github.com/element-hq/element-web.git || true
+                  git remote add gh "${{ github.server_url }}/${{ github.repository }}.git" || true
+                  git remote -v
+                  git fetch upstream --prune --tags
+                  git fetch origin --prune
+
+            - name: Materialise every branch the script needs
+              run: |
+                  set -euo pipefail
+                  # A checkout only gives us one branch. Create a local branch for develop
+                  # and for every ref listed in the two manifests. read_list's subset guard
+                  # refuses to run at all if a manifest branch has no local ref.
+                  create_local () {
+                      local ref="$1"
+                      if git show-ref --verify --quiet "refs/remotes/origin/$ref"; then
+                          git branch --force "$ref" "refs/remotes/origin/$ref"
+                      else
+                          echo "::warning::no origin/$ref - skipping"
+                      fi
+                  }
+                  create_local develop
+                  for f in .fork/features.txt .fork/contrib.txt; do
+                      [ -f "$f" ] || continue
+                      while IFS= read -r line || [ -n "$line" ]; do
+                          line="${line%%#*}"
+                          ref="$(echo "$line" | tr -d '[:space:]')"
+                          [ -z "$ref" ] && continue
+                          create_local "$ref"
+                      done < "$f"
+                  done
+                  git branch --list | head -200
+
+            - name: Fast-forward the develop mirror
+              # `develop` is a mirror, so this can only ever fast-forward. If it does not,
+              # someone committed to the trunk and the whole branch model is broken - fail
+              # loudly rather than detecting against a stale or divergent mirror.
+              run: |
+                  set -euo pipefail
+                  if ! git fetch --no-tags . upstream/develop:develop; then
+                      echo "::error::develop cannot fast-forward to upstream/develop - something was committed to the mirror. Fix it before any sync."
+                      exit 1
+                  fi
+                  git push gh develop:develop
+                  echo "develop = $(git rev-parse --short develop)"
+
+            - name: Detect
+              id: detect
+              # Capture the exit code instead of failing the step, so the report step below
+              # can run and update the issue. Exit-code contract, shared with publish:
+              #   0 clean, 2 a feature rebase conflicted, 3 a contrib merge conflicted.
+              # Detect records each conflict, aborts that merge and carries on, so 2 and 3
+              # mean "at least one" - the branch list comes from the log, not the code.
+              # 2 and 3 are the EXPECTED output of a detect run and must not redden the
+              # badge; anything else means detect itself broke.
+              run: |
+                  set +e
+                  FORK_REMOTE=gh .fork/sync-upstream.sh --detect 2>&1 | tee detect.log
+                  code=${PIPESTATUS[0]}
+                  echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+                  exit 0
+
+            - name: Collect every conflicting branch
+              id: collect
+              if: ${{ always() && steps.detect.outputs.exit_code != '' }}
+              # Two sources, in order of trust. The script writes .fork/detect-report.tsv
+              # (one `branch<TAB>path` per unresolved path, written even when clean so that
+              # "clean" and "never produced" stay distinguishable). Parsing its prose output
+              # is the fallback for when that file is absent.
+              #
+              # Belt and braces on purpose: the failure mode of the log parser is an EMPTY
+              # list - one stray colour code on those lines and a conflicted tree reads
+              # exactly like a clean one.
+              run: |
+                  set -euo pipefail
+                  if [ -f .fork/detect-report.tsv ]; then
+                      echo "source=report" >> "$GITHUB_OUTPUT"
+                      echo "reading the script's structured report"
+                      sed '/^[[:space:]]*$/d' .fork/detect-report.tsv | sort -u > conflicts.tsv
+                  else
+                      echo "source=log" >> "$GITHUB_OUTPUT"
+                      echo "::notice::no .fork/detect-report.tsv - falling back to parsing the log"
+                      # Strip ANSI first. The script colours its banner lines, and colour
+                      # codes have defeated greps in this repo before.
+                      sed -r 's/\x1B\[[0-9;]*[mK]//g' detect.log > detect.clean.log
+                      # One block per conflict, repeated now that detect continues past one:
+                      #     branch : pr/foo  (contrib)
+                      #     files  :
+                      #         path/one
+                      #         path/two
+                      awk '
+                          /^branch : / { b = $3; inf = 0; next }
+                          /^files  :/  { inf = 1; next }
+                          inf == 1 {
+                              if ($0 !~ /^[[:space:]]/ || $0 ~ /^[[:space:]]*$/) { inf = 0; next }
+                              p = $0
+                              gsub(/^[[:space:]]+|[[:space:]]+$/, "", p)
+                              if (p != "" && b != "") print b "\t" p
+                          }
+                      ' detect.clean.log | sort -u > conflicts.tsv
+                  fi
+                  echo "collected $(wc -l < conflicts.tsv) (branch, path) pair(s) across $(cut -f1 conflicts.tsv | sort -u | wc -l) branch(es)"
+                  cat conflicts.tsv
+
+            - name: Report the conflicts as one issue
+              if: ${{ steps.detect.outputs.exit_code == '2' || steps.detect.outputs.exit_code == '3' || steps.detect.outputs.exit_code == '4' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  # One fixed-title issue, forever. Not one per branch: a run can now report
+                  # several branches at once, and the fixes land as commits on pr/* branches
+                  # that cannot reference a fork issue anyway, so per-branch issues buy
+                  # nothing and cost a pile of open tabs.
+                  title="Sync conflicts"
+
+                  # The fingerprint is what makes "comment only when the set changed" work.
+                  # It is carried in the body, so the comparison survives a runner with no
+                  # memory of the last run.
+                  fingerprint="$(sha256sum conflicts.tsv | cut -c1-12)"
+
+                  {
+                      printf 'The daily detect run merged every branch in the manifests and **%s branch(es) conflicted**.\n\n' \
+                          "$(cut -f1 conflicts.tsv | sort -u | wc -l)"
+                      printf 'These are real merges, not a heuristic scan: rerere and the relocation resolver were both in play, so every conflict below is one a rebuild would actually hit. Detect records each one, aborts that merge and carries on, so this is the whole list rather than just the first.\n\n'
+                      printf 'Nothing was rebuilt and nothing but `develop` was pushed.\n\n'
+
+                      if [ ! -s conflicts.tsv ]; then
+                          printf '### Could not determine the branch list\n\n'
+                          printf 'The script reported a conflict (exit %s) but the branch list came back empty, read from `%s`. Treat this as a detect bug, not a clean tree, and read the `fork-detect-logs` artifact on the run linked below.\n\n' \
+                              "${{ steps.detect.outputs.exit_code }}" "${{ steps.collect.outputs.source }}"
+                      else
+                          printf '### Conflicting branches\n\n'
+                          for b in $(cut -f1 conflicts.tsv | sort -u); do
+                              if grep -qxF -- "$b" .fork/contrib.txt 2>/dev/null; then
+                                  note='open upstream PR head - **never rebase or amend it**; resolve in the integration merge and let rerere record it'
+                              else
+                                  note='fork-local feature branch - the durable fix is commits on the branch itself, not a cached resolution'
+                              fi
+                              printf '#### `%s`\n%s\n\n```\n' "$b" "$note"
+                              awk -F'\t' -v b="$b" '$1 == b { print $2 }' conflicts.tsv
+                              printf '```\n\n'
+                          done
+                      fi
+
+                      printf '### Resolve them locally\n```bash\n'
+                      printf 'git fetch upstream --prune && git fetch gh --prune\n'
+                      printf '.fork/sync-upstream.sh          # replays up to the first of these\n'
+                      printf '# resolve, then `git add <files>` and either\n'
+                      printf '#   git rebase --continue   (feature branch)\n'
+                      printf '#   git commit --no-edit    (integration merge)\n'
+                      printf '.fork/sync-upstream.sh --continue\n```\n\n'
+                      printf "Keep upstream's version of upstream logic and re-apply the fork's intent on top. "
+                      printf 'Do not use `-X ours` or `-X theirs`.\n\n'
+                      printf 'Once resolved, commit the rerere cache so none of this has to be resolved again:\n'
+                      printf '```bash\ngit switch feat/fork-tooling\ngit add .fork/rr-cache\ngit commit -m "Record conflict resolutions from this sync"\ngit push gh feat/fork-tooling\n```\n\n'
+                      printf '%s\n\n' "The branch matters: \`master\` is rebuilt from scratch every sync, so a cache committed there is deleted by the next run and the same conflicts return forever."
+                      printf '<sub>Last updated by run [%s](%s/%s/actions/runs/%s)</sub>\n' \
+                          "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+                      printf '\n<!-- fork-detect-fingerprint: %s -->\n' "$fingerprint"
+                  } > issue-body.md
+
+                  if [ ! -s conflicts.tsv ]; then
+                      echo "::warning::detect exited ${{ steps.detect.outputs.exit_code }} but the branch list (source: ${{ steps.collect.outputs.source }}) came back empty"
+                  fi
+
+                  # The job summary always works. An issue does not: losing the whole report
+                  # to "Resource not accessible by integration" is a worse outcome than not
+                  # having a tracking issue. Summary first, issue as a bonus, never fail here.
+                  {
+                      printf '## %s\n\n' "$title"
+                      cat issue-body.md
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" != "true" ]; then
+                      echo "::warning::Issues are disabled on this repository - conflicts reported in the job summary only."
+                      exit 0
+                  fi
+
+                  # --state all on purpose: the issue is closed whenever the tree is clean,
+                  # and the next conflict must reopen that same issue rather than open a new one.
+                  num="$(gh issue list --state all --search "\"$title\" in:title" \
+                         --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
+
+                  if [ -z "$num" ]; then
+                      gh issue create --title "$title" --body-file issue-body.md --label "fork-sync" \
+                        || gh issue create --title "$title" --body-file issue-body.md \
+                        || { echo "::warning::could not open the issue - conflicts are in the job summary"; exit 0; }
+                      echo "opened a new issue"
+                      exit 0
+                  fi
+
+                  previous="$(gh issue view "$num" --json body --jq .body 2>/dev/null \
+                              | sed -n 's/.*fork-detect-fingerprint: \([0-9a-f]*\).*/\1/p' | head -1 || true)"
+                  state="$(gh issue view "$num" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
+
+                  if [ "$state" = "CLOSED" ]; then
+                      gh issue reopen "$num" || echo "::warning::could not reopen issue #$num"
+                  fi
+                  gh issue edit "$num" --body-file issue-body.md \
+                    || echo "::warning::could not update the body of issue #$num"
+
+                  # A comment is a notification. Post one only when the set of conflicts
+                  # actually moved, or a stable conflict pings the owner every single night
+                  # and the issue becomes noise.
+                  if [ "$previous" != "$fingerprint" ]; then
+                      {
+                          printf 'The set of conflicting branches changed.\n\n'
+                          cat issue-body.md
+                      } > comment-body.md
+                      gh issue comment "$num" --body-file comment-body.md \
+                        || echo "::warning::could not comment on issue #$num"
+                  else
+                      echo "conflict set unchanged ($fingerprint) - body refreshed, no comment posted"
+                  fi
+
+            - name: Close the conflict issue on a clean run
+              if: ${{ steps.detect.outputs.exit_code == '0' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  title="Sync conflicts"
+                  num="$(gh issue list --state open --search "\"$title\" in:title" \
+                         --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
+                  [ -z "$num" ] && { echo "nothing open to close"; exit 0; }
+                  gh issue close "$num" --comment "Resolved: the detect run merged every branch in the manifests cleanly." \
+                    || echo "::warning::could not close issue #$num"
+
+            - name: Upload logs
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: fork-detect-logs
+                  path: detect.log
+                  if-no-files-found: ignore
+                  retention-days: 14
+
+            - name: Fail the run only if detect itself broke
+              # A conflict is the expected output of a detect run and belongs in the issue,
+              # not in a red badge - a badge that is red every night is a badge nobody reads.
+              # 0, 2 and 3 are all successful detections. Everything else is a real failure.
+              if: >-
+                  ${{ steps.detect.outputs.exit_code != '0'
+                      && steps.detect.outputs.exit_code != '2'
+                      && steps.detect.outputs.exit_code != '3'
+                      && steps.detect.outputs.exit_code != '4'
+                      && steps.detect.outputs.exit_code != '' }}
+              run: |
+                  echo "::error::sync-upstream.sh --detect exited ${{ steps.detect.outputs.exit_code }} - detect itself failed"
+                  exit 1

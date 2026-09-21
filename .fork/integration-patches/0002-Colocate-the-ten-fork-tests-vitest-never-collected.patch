@@ -1,0 +1,786 @@
+diff --git a/apps/web/test/unit-tests/KeyBindingsDefaults-test.ts b/apps/web/src/KeyBindingsDefaults.test.ts
+similarity index 61%
+rename from apps/web/test/unit-tests/KeyBindingsDefaults-test.ts
+rename to apps/web/src/KeyBindingsDefaults.test.ts
+index 5d5ae07660..584afc0183 100644
+--- a/apps/web/test/unit-tests/KeyBindingsDefaults-test.ts
++++ b/apps/web/src/KeyBindingsDefaults.test.ts
+@@ -5,22 +5,26 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import { defaultBindingsProvider } from "../../src/KeyBindingsDefaults";
+-import SettingsStore from "../../src/settings/SettingsStore";
+-import { KeyBindingAction } from "../../src/accessibility/KeyboardShortcuts";
+-import { type KeyBinding } from "../../src/KeyBindingsManager";
+-import { Key } from "../../src/Keyboard";
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, afterEach } from "vitest";
++
++import { defaultBindingsProvider } from "./KeyBindingsDefaults";
++import SettingsStore from "./settings/SettingsStore";
++import { KeyBindingAction } from "./accessibility/KeyboardShortcuts";
++import { type KeyBinding } from "./KeyBindingsManager";
++import { Key } from "./Keyboard";
+ 
+ const searchBinding = (bindings: KeyBinding[]): KeyBinding | undefined =>
+     bindings.find((b) => b.action === KeyBindingAction.SearchInRoom);
+ 
+ describe("defaultBindingsProvider.getRoomBindings", () => {
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("registers the Ctrl/Cmd+F room-search binding when ctrlFForSearch is enabled", () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
+ 
+         const binding = searchBinding(defaultBindingsProvider.getRoomBindings());
+ 
+@@ -29,7 +33,7 @@ describe("defaultBindingsProvider.getRoomBindings", () => {
+     });
+ 
+     it("omits the room-search binding when ctrlFForSearch is disabled", () => {
+-        jest.spyOn(SettingsStore, "getValue").mockReturnValue(false);
++        vi.spyOn(SettingsStore, "getValue").mockReturnValue(false);
+ 
+         expect(searchBinding(defaultBindingsProvider.getRoomBindings())).toBeUndefined();
+     });
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+similarity index 79%
+rename from apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
+rename to apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+index 4b457a730a..2b8a9391ed 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+@@ -5,19 +5,22 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Room, type RoomMember, SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import RoomSearchHeader from "../../../../../src/components/views/rooms/RoomSearchHeader";
+-import { type SearchMatch, SearchScope } from "../../../../../src/Searching";
+-import { RoomSearchNavigationViewModel } from "../../../../../src/viewmodels/search/RoomSearchNavigationViewModel";
+-import { SearchSessionStore } from "../../../../../src/stores/SearchSessionStore";
+-import { Action } from "../../../../../src/dispatcher/actions";
+-import defaultDispatcher from "../../../../../src/dispatcher/dispatcher";
+-import { stubClient } from "../../../../test-utils";
++import RoomSearchHeader from "./RoomSearchHeader";
++import { type SearchMatch, SearchScope } from "../../../Searching";
++import { RoomSearchNavigationViewModel } from "../../../viewmodels/search/RoomSearchNavigationViewModel";
++import { SearchSessionStore } from "../../../stores/SearchSessionStore";
++import { Action } from "../../../dispatcher/actions";
++import defaultDispatcher from "../../../dispatcher/dispatcher";
++import { stubClient, TestSDKContext } from "test-utils";
++import { SDKContext } from "../../../contexts/SDKContext";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+@@ -25,9 +28,9 @@ describe("RoomSearchHeader", () => {
+     const vms: RoomSearchNavigationViewModel[] = [];
+ 
+     const buildRoom = (members: RoomMember[] = [member("@me:server", "Me")]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, "@me:server");
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+@@ -44,27 +47,29 @@ describe("RoomSearchHeader", () => {
+     };
+ 
+     const makeVm = (): RoomSearchNavigationViewModel => {
+-        const vm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
++        const vm = new RoomSearchNavigationViewModel({ onActivateMatch: vi.fn() });
+         vms.push(vm);
+         return vm;
+     };
+ 
+     const renderHeader = (props: Partial<React.ComponentProps<typeof RoomSearchHeader>> = {}): void => {
+         render(
+-            <RoomSearchHeader
+-                room={buildRoom()}
+-                term=""
+-                onSearchChange={jest.fn()}
+-                onCancel={jest.fn()}
+-                isRoomEncrypted={false}
+-                scope={SearchScope.Room}
+-                onSearchScopeChange={jest.fn()}
+-                senders={[]}
+-                onSearchSendersChange={jest.fn()}
+-                order={SearchOrderBy.Recent}
+-                onSearchOrderChange={jest.fn()}
+-                {...props}
+-            />,
++            <SDKContext.Provider value={new TestSDKContext()}>
++                <RoomSearchHeader
++                    room={buildRoom()}
++                    term=""
++                    onSearchChange={vi.fn()}
++                    onCancel={vi.fn()}
++                    isRoomEncrypted={false}
++                    scope={SearchScope.Room}
++                    onSearchScopeChange={vi.fn()}
++                    senders={[]}
++                    onSearchSendersChange={vi.fn()}
++                    order={SearchOrderBy.Recent}
++                    onSearchOrderChange={vi.fn()}
++                    {...props}
++                />
++            </SDKContext.Provider>,
+         );
+     };
+ 
+@@ -75,11 +80,11 @@ describe("RoomSearchHeader", () => {
+     afterEach(() => {
+         while (vms.length) vms.pop()!.dispose();
+         SearchSessionStore.instance.clear({ abort: false });
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("does not run a search while typing, only committing it on Enter", async () => {
+-        const onSearchChange = jest.fn();
++        const onSearchChange = vi.fn();
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         const input = screen.getByPlaceholderText("Search messages…");
+@@ -95,8 +100,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("does nothing on Enter when the input is empty", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         await userEvent.keyboard("{Enter}");
+@@ -105,7 +110,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("cancels the search when the cancel button is clicked", async () => {
+-        const onCancel = jest.fn();
++        const onCancel = vi.fn();
+         renderHeader({ onCancel });
+ 
+         await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+@@ -113,7 +118,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("cancels the search when Escape is pressed in the input", async () => {
+-        const onCancel = jest.fn();
++        const onCancel = vi.fn();
+         renderHeader({ onCancel, autoFocus: true });
+ 
+         await userEvent.keyboard("{Escape}");
+@@ -121,8 +126,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("steps matches on Enter/Shift+Enter once the typed term is already searched", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         // term="abcd" means the box value (synced from term) matches what was already searched, so Enter steps.
+         renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
+ 
+@@ -140,8 +145,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("steps (not re-searches) when only surrounding whitespace differs from the searched term", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
+ 
+         // Box now holds "abcd " (a trailing space). Trimmed it equals the searched term, so Enter must step, not
+@@ -156,7 +161,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("commits the trimmed term when searching on Enter", async () => {
+-        const onSearchChange = jest.fn();
++        const onSearchChange = vi.fn();
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         await userEvent.type(screen.getByPlaceholderText("Search messages…"), "  gemini  ");
+@@ -201,7 +206,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("toggles the search scope to all rooms", async () => {
+-        const onSearchScopeChange = jest.fn();
++        const onSearchScopeChange = vi.fn();
+         renderHeader({ onSearchScopeChange });
+ 
+         await userEvent.click(screen.getByText("Search all rooms"));
+@@ -216,7 +221,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("returns to the results list when the search box is clicked while a match is focused", async () => {
+-        const onBackToResults = jest.fn();
++        const onBackToResults = vi.fn();
+         renderHeader({
+             onBackToResults,
+             // currentMatchIndex >= 0 means a match is focused in the live timeline (stepping), so the dropdown is
+@@ -236,7 +241,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("does not return to the results list when the search box is clicked while not stepping", async () => {
+-        const onBackToResults = jest.fn();
++        const onBackToResults = vi.fn();
+         renderHeader({
+             onBackToResults,
+             // No focused match (results list already visible) — clicking the box is a plain focus, not a return.
+diff --git a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+similarity index 88%
+rename from apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
+rename to apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+index 1c6f51ad7f..ca03650c3d 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+@@ -5,12 +5,15 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect } from "vitest";
+ import React from "react";
+-import { fireEvent, render, screen } from "jest-matrix-react";
++import { fireEvent, render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ 
+-import RoomSearchResults from "../../../../../src/components/views/rooms/RoomSearchResults";
+-import { type SearchResultPreview } from "../../../../../src/Searching";
++import RoomSearchResults from "./RoomSearchResults";
++import { type SearchResultPreview } from "../../../Searching";
+ 
+ const preview = (eventId: string, sender: string, body: string, ts: number): SearchResultPreview => ({
+     roomId: "!r:server",
+@@ -43,8 +46,8 @@ describe("RoomSearchResults", () => {
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+                 {...props}
+             />,
+@@ -52,7 +55,7 @@ describe("RoomSearchResults", () => {
+     };
+ 
+     it("renders a row per result with sender name and preview, reporting clicks by index", async () => {
+-        const onResultClick = jest.fn();
++        const onResultClick = vi.fn();
+         renderResults({ onResultClick });
+ 
+         expect(screen.getByText("Alice")).toBeInTheDocument();
+@@ -74,8 +77,8 @@ describe("RoomSearchResults", () => {
+                 previews={[]}
+                 inProgress={true}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+             />,
+         );
+@@ -93,8 +96,8 @@ describe("RoomSearchResults", () => {
+                 previews={previews}
+                 inProgress={true}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+             />,
+         );
+@@ -104,13 +107,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("loads the next page when scrolled near the bottom", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -122,13 +125,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more when the user is not near the bottom", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -140,13 +143,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more when there are no further pages", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -158,13 +161,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more while a page is already loading", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={true}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+diff --git a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+similarity index 91%
+rename from apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
+rename to apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+index 1eb8e80a3a..6a9c2b33b3 100644
+--- a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
++++ b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+@@ -5,21 +5,23 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, beforeEach, afterEach, type MockInstance } from "vitest";
+ import React from "react";
+-import { act, fireEvent, render, screen, waitFor } from "jest-matrix-react";
+-import { mocked } from "jest-mock";
++import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
+ import { type MatrixClient } from "matrix-js-sdk/src/matrix";
+ 
+-import { ChatBackgroundPanel } from "../../../../../src/components/views/settings/ChatBackgroundPanel";
+-import MatrixClientContext from "../../../../../src/contexts/MatrixClientContext";
+-import { stubClient } from "../../../../test-utils";
+-import SettingsStore from "../../../../../src/settings/SettingsStore";
+-import { SettingLevel } from "../../../../../src/settings/SettingLevel";
++import { ChatBackgroundPanel } from "./ChatBackgroundPanel";
++import MatrixClientContext from "../../../contexts/MatrixClientContext";
++import { stubClient } from "test-utils";
++import SettingsStore from "../../../settings/SettingsStore";
++import { SettingLevel } from "../../../settings/SettingLevel";
+ 
+ describe("<ChatBackgroundPanel />", () => {
+     let client: MatrixClient;
+     let settings: Record<string, unknown>;
+-    let setValueSpy: jest.SpyInstance;
++    let setValueSpy: MockInstance;
+ 
+     beforeEach(() => {
+         client = stubClient();
+@@ -28,18 +30,18 @@ describe("<ChatBackgroundPanel />", () => {
+             "RoomView.backgroundOpacity": 1,
+         };
+         const realGetValue = SettingsStore.getValue.bind(SettingsStore);
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
++        vi.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
+             name in settings
+                 ? settings[name]
+                 : (realGetValue as (...args: unknown[]) => unknown)(name, ...rest)) as typeof SettingsStore.getValue);
+-        setValueSpy = jest
++        setValueSpy = vi
+             .spyOn(SettingsStore, "setValue")
+             .mockImplementation(async (name: string, _roomId, _level, value: unknown) => {
+                 settings[name] = value;
+             });
+     });
+ 
+-    afterEach(() => jest.restoreAllMocks());
++    afterEach(() => vi.restoreAllMocks());
+ 
+     const renderPanel = (): ReturnType<typeof render> =>
+         render(
+@@ -165,7 +167,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("uploads a custom image and stores its mxc uri", async () => {
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+@@ -182,7 +184,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("shows an error when the upload fails", async () => {
+-        mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
++        vi.mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+@@ -202,7 +204,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("keeps the uploaded image in the rail after switching to a preset", async () => {
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+diff --git a/apps/web/test/unit-tests/components/views/spaces/SpaceSettingsGeneralTab-test.tsx b/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+similarity index 79%
+rename from apps/web/test/unit-tests/components/views/spaces/SpaceSettingsGeneralTab-test.tsx
+rename to apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+index ae715522d9..d93ec952b7 100644
+--- a/apps/web/test/unit-tests/components/views/spaces/SpaceSettingsGeneralTab-test.tsx
++++ b/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+@@ -5,13 +5,16 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, beforeEach } from "vitest";
+ import React from "react";
+-import { fireEvent, render, screen, waitFor } from "jest-matrix-react";
++import { fireEvent, render, screen, waitFor } from "test-utils-rtl";
+ import { type MatrixClient, Room } from "matrix-js-sdk/src/matrix";
+ 
+-import SpaceSettingsGeneralTab from "../../../../../src/components/views/spaces/SpaceSettingsGeneralTab";
+-import { stubClient } from "../../../../test-utils";
+-import DMRoomMap from "../../../../../src/utils/DMRoomMap";
++import SpaceSettingsGeneralTab from "./SpaceSettingsGeneralTab";
++import { stubClient } from "test-utils";
++import DMRoomMap from "../../../utils/DMRoomMap";
+ 
+ describe("<SpaceSettingsGeneralTab />", () => {
+     let client: MatrixClient;
+@@ -21,10 +24,10 @@ describe("<SpaceSettingsGeneralTab />", () => {
+ 
+     beforeEach(() => {
+         client = stubClient();
+-        jest.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
++        vi.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
+         space = new Room("!space:example.com", client, client.getSafeUserId());
+         space.name = "Test space";
+-        jest.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
++        vi.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
+     });
+ 
+     const renderTab = (): ReturnType<typeof render> =>
+diff --git a/apps/web/test/unit-tests/utils/FileCategory-test.ts b/apps/web/src/utils/FileCategory.test.ts
+similarity index 97%
+rename from apps/web/test/unit-tests/utils/FileCategory-test.ts
+rename to apps/web/src/utils/FileCategory.test.ts
+index b7e924016d..72b7d3cc68 100644
+--- a/apps/web/test/unit-tests/utils/FileCategory-test.ts
++++ b/apps/web/src/utils/FileCategory.test.ts
+@@ -5,6 +5,9 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, it, expect } from "vitest";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+ 
+ import {
+@@ -14,8 +17,8 @@ import {
+     eventMatchesCategory,
+     eventMatchesFileSearch,
+     buildFileEventFilter,
+-} from "../../../src/utils/FileCategory";
+-import { mkEvent } from "../../test-utils";
++} from "./FileCategory";
++import { mkEvent } from "test-utils";
+ 
+ const ROOM = "!room:server";
+ const USER = "@me:server";
+diff --git a/apps/web/test/unit-tests/utils/scrollBehavior-test.ts b/apps/web/src/utils/scrollBehavior.test.ts
+similarity index 88%
+rename from apps/web/test/unit-tests/utils/scrollBehavior-test.ts
+rename to apps/web/src/utils/scrollBehavior.test.ts
+index 8f8fd52ba2..dee4a6b6ed 100644
+--- a/apps/web/test/unit-tests/utils/scrollBehavior-test.ts
++++ b/apps/web/src/utils/scrollBehavior.test.ts
+@@ -5,21 +5,25 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import SettingsStore from "../../../src/settings/SettingsStore";
+-import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "../../../src/utils/scrollBehavior";
++// @vitest-environment happy-dom
+ 
+-jest.mock("../../../src/settings/SettingsStore");
++import { vi, describe, it, expect, beforeEach } from "vitest";
++
++import SettingsStore from "../settings/SettingsStore";
++import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";
++
++vi.mock("../settings/SettingsStore");
+ 
+ describe("scrollBehavior", () => {
+-    const mockedGetValue = jest.mocked(SettingsStore.getValue);
++    const mockedGetValue = vi.mocked(SettingsStore.getValue);
+ 
+     /** Set up matchMedia so that (prefers-reduced-motion: reduce) returns `matches`. */
+     const mockMatchMedia = (matches: boolean): void => {
+-        globalThis.matchMedia = jest.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
++        globalThis.matchMedia = vi.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
+     };
+ 
+     beforeEach(() => {
+-        jest.resetAllMocks();
++        vi.resetAllMocks();
+         mockedGetValue.mockReturnValue(false);
+         mockMatchMedia(false);
+     });
+diff --git a/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+similarity index 88%
+rename from apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
+rename to apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+index 4abae3557f..b9183f14ed 100644
+--- a/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
++++ b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+@@ -5,8 +5,12 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import { RoomFilesViewModel } from "../../../../src/viewmodels/right_panel/RoomFilesViewModel";
+-import { FileCategory } from "../../../../src/utils/FileCategory";
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect } from "vitest";
++
++import { RoomFilesViewModel } from "./RoomFilesViewModel";
++import { FileCategory } from "../../utils/FileCategory";
+ 
+ describe("RoomFilesViewModel", () => {
+     it("starts with no category filter and an empty search term", () => {
+@@ -16,7 +20,7 @@ describe("RoomFilesViewModel", () => {
+ 
+     it("toggleCategory selects the category and notifies subscribers", () => {
+         const vm = new RoomFilesViewModel();
+-        const listener = jest.fn();
++        const listener = vi.fn();
+         vm.subscribe(listener);
+ 
+         vm.toggleCategory(FileCategory.Audio);
+@@ -45,7 +49,7 @@ describe("RoomFilesViewModel", () => {
+ 
+     it("setSearchTerm updates the term and notifies subscribers", () => {
+         const vm = new RoomFilesViewModel();
+-        const listener = jest.fn();
++        const listener = vi.fn();
+         vm.subscribe(listener);
+ 
+         vm.setSearchTerm("report");
+diff --git a/apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts b/apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+similarity index 85%
+rename from apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts
+rename to apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+index 7cbffc6fbd..83a12bebfa 100644
+--- a/apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts
++++ b/apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+@@ -5,14 +5,14 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { type ISearchResults } from "matrix-js-sdk/src/matrix";
+ 
+-import {
+-    RoomSearchNavigationViewModel,
+-    type RoomSearchNavigationProps,
+-} from "../../../src/viewmodels/search/RoomSearchNavigationViewModel";
+-import { type SearchMatch, SearchScope } from "../../../src/Searching";
+-import { SearchSessionStore } from "../../../src/stores/SearchSessionStore";
++import { RoomSearchNavigationViewModel, type RoomSearchNavigationProps } from "./RoomSearchNavigationViewModel";
++import { type SearchMatch, SearchScope } from "../../Searching";
++import { SearchSessionStore } from "../../stores/SearchSessionStore";
+ 
+ describe("RoomSearchNavigationViewModel", () => {
+     const matchA: SearchMatch = { roomId: "!r:e", eventId: "$a" };
+@@ -54,12 +54,12 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("starts empty with both arrows disabled", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         expect(vm.getSnapshot()).toEqual({ current: 0, total: 0, canPrevious: false, canNext: false });
+     });
+ 
+     it("reflects the store's total and enables both arrows once matches are set", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         expect(vm.getSnapshot()).toEqual({ current: 0, total: 3, canPrevious: true, canNext: true });
+     });
+@@ -67,12 +67,12 @@ describe("RoomSearchNavigationViewModel", () => {
+     it("hydrates its snapshot from an already-populated store on construction", () => {
+         setMatches([matchA, matchB, matchC]);
+         store.setCurrentMatchIndex(1);
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         expect(vm.getSnapshot()).toEqual({ current: 2, total: 3, canPrevious: true, canNext: true });
+     });
+ 
+     it("activates the first match on next() from the empty cursor and marks a stepping jump", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -83,7 +83,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("steps forward through every match", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -94,7 +94,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps from the last match back to the first on next()", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -107,7 +107,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps to the last match on previous() from the empty cursor", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB]);
+         vm.previous();
+@@ -116,7 +116,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps from the first match to the last on previous()", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -127,7 +127,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("resets the cursor when the store gets a fresh result set", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+         vm.next();
+@@ -136,7 +136,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("does nothing when stepping with no matches", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         vm.next();
+         vm.previous();
+@@ -145,14 +145,14 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("reacts to an external store cursor change", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         store.setCurrentMatchIndex(2);
+         expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: true });
+     });
+ 
+     it("stops reacting to the store once disposed", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB]);
+         vm.dispose();
+         store.setCurrentMatchIndex(1);
+diff --git a/apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts b/apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+similarity index 79%
+rename from apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts
+rename to apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+index f47d79ada2..c53967f657 100644
+--- a/apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts
++++ b/apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+@@ -5,11 +5,13 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import { mocked } from "jest-mock";
++// @vitest-environment happy-dom
++
++import { vi, describe, it, expect, afterEach } from "vitest";
+ import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchSenderFilterViewModel } from "../../../../src/viewmodels/search/RoomSearchSenderFilterViewModel";
+-import { stubClient } from "../../../test-utils";
++import { RoomSearchSenderFilterViewModel } from "./RoomSearchSenderFilterViewModel";
++import { stubClient } from "test-utils";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+@@ -17,14 +19,14 @@ describe("RoomSearchSenderFilterViewModel", () => {
+     const myUserId = "@me:server";
+ 
+     const buildRoom = (members: RoomMember[]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, myUserId);
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("lists joined members excluding the current user, sorted by display name", () => {

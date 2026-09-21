@@ -1,0 +1,244 @@
+name: Fork sync
+
+# Publish half of the sync pipeline. Rebuilds the fork against upstream:
+#   develop --ff-only-> upstream/develop, feat/* rebased, master rebuilt.
+#
+# Detection is `fork-detect.yml`, which runs daily and only predicts conflicts. This
+# workflow does the real thing, so it never runs the preflight.
+#
+# NOTE: scheduled workflows only ever run from the repository's DEFAULT branch. `develop`
+# is a pristine mirror of upstream and must never carry this file, so the default branch
+# must be set to `master` in Settings -> General -> Default branch.
+
+on:
+    schedule:
+        # 03:17 UTC on Mondays and Thursdays. Off the hour on purpose: GitHub drops
+        # scheduled runs at :00. Twice weekly rather than daily because the daily job of
+        # noticing an upstream conflict now belongs to fork-detect.yml.
+        - cron: "17 3 * * 1,4"
+    workflow_dispatch:
+        inputs:
+            dry_run_only:
+                description: "Only report what would change; do not rebuild or push"
+                type: boolean
+                default: false
+
+# Shared with fork-detect.yml on purpose: a detect run must never start while this
+# rebuild is in flight.
+concurrency:
+    group: fork-sync
+    cancel-in-progress: false
+
+permissions:
+    contents: write
+    issues: write
+
+jobs:
+    sync:
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        steps:
+            - name: Check out the integration branch with full history
+              uses: actions/checkout@v4
+              with:
+                  ref: master
+                  fetch-depth: 0
+                  persist-credentials: true
+
+            - name: Configure git
+              run: |
+                  git config user.name "fork-sync[bot]"
+                  git config user.email "fork-sync@users.noreply.github.com"
+                  git config rerere.enabled true
+                  git config rerere.autoUpdate true
+
+            - name: Wire up the remotes the script expects
+              run: |
+                  # The script defaults to a remote named `gh` for the fork and `upstream`
+                  # for element-hq. On a runner the fork remote is `origin`.
+                  git remote add upstream https://github.com/element-hq/element-web.git || true
+                  git remote add gh "${{ github.server_url }}/${{ github.repository }}.git" || true
+                  git remote -v
+                  git fetch upstream --prune --tags
+                  git fetch origin --prune
+
+            - name: Materialise every branch the script needs
+              run: |
+                  set -euo pipefail
+                  # A checkout only gives us one branch. Create a local branch for develop
+                  # and for every ref listed in the two manifests.
+                  create_local () {
+                      local ref="$1"
+                      if git show-ref --verify --quiet "refs/remotes/origin/$ref"; then
+                          git branch --force "$ref" "refs/remotes/origin/$ref"
+                      else
+                          echo "::warning::no origin/$ref - skipping"
+                      fi
+                  }
+                  create_local develop
+                  for f in .fork/features.txt .fork/contrib.txt; do
+                      [ -f "$f" ] || continue
+                      while IFS= read -r line || [ -n "$line" ]; do
+                          line="${line%%#*}"
+                          ref="$(echo "$line" | tr -d '[:space:]')"
+                          [ -z "$ref" ] && continue
+                          create_local "$ref"
+                      done < "$f"
+                  done
+                  git branch --list | head -200
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: .node-version
+
+            - name: Enable pnpm
+              run: corepack enable
+
+            # The unit gate runs a handful of suites in vitest browser mode, so the runner
+            # needs real browsers. Install deps first: the action resolves the playwright
+            # version through pnpm. The rebuild may move the lockfile, but the script's own
+            # install gate re-runs afterwards and the browsers live in ~/.cache, not node_modules.
+            - name: Install dependencies
+              run: pnpm install
+
+            - name: Setup playwright
+              uses: ./.github/actions/setup-playwright
+              with:
+                  write-cache: "true"
+
+            - name: Dry run
+              id: dryrun
+              run: .fork/sync-upstream.sh --dry-run 2>&1 | tee dry-run.log
+
+            - name: Sync
+              id: sync
+              if: ${{ github.event_name == 'schedule' || !inputs.dry_run_only }}
+              # Capture the exit code instead of failing the step, so the conflict-report
+              # step below can run and open an issue.
+              run: |
+                  set +e
+                  FORK_REMOTE=gh .fork/sync-upstream.sh 2>&1 | tee sync.log
+                  code=${PIPESTATUS[0]}
+                  echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+                  # Record which branch we died on, for the issue title.
+                  branch="$(sed -n 's/^branch : \([^ ]*\).*/\1/p' sync.log | tail -1)"
+                  echo "branch=${branch:-unknown}" >> "$GITHUB_OUTPUT"
+                  {
+                      echo "files<<FORKEOF"
+                      sed -n '/^files  :/,/^$/p' sync.log | sed '1d' | sed '/^$/d' | head -50
+                      echo "FORKEOF"
+                  } >> "$GITHUB_OUTPUT"
+                  exit 0
+
+            - name: Report a conflict as an issue
+              if: ${{ steps.sync.outputs.exit_code == '2' || steps.sync.outputs.exit_code == '3' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  BRANCH: ${{ steps.sync.outputs.branch }}
+                  FILES: ${{ steps.sync.outputs.files }}
+                  CODE: ${{ steps.sync.outputs.exit_code }}
+              run: |
+                  set -euo pipefail
+                  # One fixed-title issue, shared with fork-detect.yml. Two workflows
+                  # managing two titles defeats the "one place to look" property the split
+                  # rests on, and each one's close-on-clean would silently fail to close the
+                  # other's issue. The branch lives in the body, not the title.
+                  title="Sync conflicts"
+                  kind="feature rebase"
+                  resume_hint="git rebase --continue"
+                  contrib_note=""
+                  if [ "$CODE" = "3" ]; then
+                      kind="integration merge"
+                      resume_hint="git commit --no-edit"
+                      # The script already knows which manifest the branch came from; say it
+                      # rather than hedging, because the two cases have opposite rules.
+                      if grep -qxF -- "${BRANCH}" .fork/contrib.txt 2>/dev/null; then
+                          contrib_note="\`${BRANCH}\` is an upstream contribution branch. **Do not rebase or amend it** - it is the head of an open PR, and rewriting it detaches the review threads. Resolve in the integration merge only; rerere records the resolution and replays it on every later rebuild."
+                      else
+                          contrib_note="\`${BRANCH}\` is a fork-only feature branch, so the durable fix is commits on that branch, not a cached resolution."
+                      fi
+                  fi
+
+                  {
+                      printf 'The nightly fork sync stopped on a **%s conflict** in `%s`.\n\n' "$kind" "$BRANCH"
+                      printf '### Conflicting files\n```\n%s\n```\n\n' "$FILES"
+                      printf '### Resolve it locally\n```bash\n'
+                      printf 'git fetch upstream --prune && git fetch gh --prune\n'
+                      printf '.fork/sync-upstream.sh          # replays up to the same point\n'
+                      printf '# resolve the files above, then:\n'
+                      printf 'git add <files>\n%s\n' "$resume_hint"
+                      printf '.fork/sync-upstream.sh --continue\n```\n\n'
+                      printf "Keep upstream's version of upstream logic and re-apply the fork's intent on top. "
+                      printf 'Do not use `-X ours` or `-X theirs`.\n\n'
+                      [ -n "$contrib_note" ] && printf '%s\n\n' "$contrib_note"
+                      printf 'Once resolved, commit the rerere cache so this never has to be resolved again:\n'
+                      printf '```bash\ngit switch feat/fork-tooling\ngit add .fork/rr-cache\ngit commit -m "Record conflict resolutions from this sync"\ngit push gh feat/fork-tooling\n```\n\n'
+                      printf '%s\n\n' "The branch matters: \`master\` is rebuilt from scratch every sync, so a cache committed there is deleted by the next run and the same conflict returns forever."
+                      printf '<sub>Run [%s](%s/%s/actions/runs/%s)</sub>\n' \
+                          "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+                  } > issue-body.md
+
+                  # The job summary always works. An issue does not: a fork has Issues
+                  # disabled by default, and losing the whole conflict report to
+                  # "Resource not accessible by integration" is a worse outcome than not
+                  # having a tracking issue. So write the summary first, then try the
+                  # issue as a bonus and never fail the step over it.
+                  {
+                      printf '## %s\n\n' "$title"
+                      cat issue-body.md
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" != "true" ]; then
+                      echo "::warning::Issues are disabled on this repository - conflict reported in the job summary only."
+                      exit 0
+                  fi
+
+                  # --state all: the issue is closed whenever a run comes back clean, so the
+                  # next conflict must reopen that same issue rather than open a second one.
+                  existing="$(gh issue list --state all --search "\"$title\" in:title" \
+                              --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
+                  if [ -n "$existing" ]; then
+                      if [ "$(gh issue view "$existing" --json state --jq .state 2>/dev/null)" = "CLOSED" ]; then
+                          gh issue reopen "$existing" || echo "::warning::could not reopen issue #$existing"
+                      fi
+                      # Publish knows things detect cannot - it stopped mid-rebuild, so it has
+                      # the exact resume commands. Write that richer body over detect's.
+                      gh issue edit "$existing" --body-file issue-body.md \
+                        || echo "::warning::could not update the body of issue #$existing"
+                      gh issue comment "$existing" --body-file issue-body.md \
+                        || echo "::warning::could not comment on issue #$existing"
+                  else
+                      gh issue create --title "$title" --body-file issue-body.md --label "fork-sync" 2>/dev/null \
+                        || gh issue create --title "$title" --body-file issue-body.md \
+                        || echo "::warning::could not open an issue - conflict is in the job summary"
+                  fi
+
+            - name: Close stale conflict issues on a clean run
+              if: ${{ steps.sync.outputs.exit_code == '0' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  title="Sync conflicts"
+                  num="$(gh issue list --state open --search "\"$title\" in:title" \
+                         --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1 || true)"
+                  [ -z "$num" ] && { echo "nothing open to close"; exit 0; }
+                  gh issue close "$num" --comment "Resolved: the rebuild completed cleanly and every gate passed." \
+                    || echo "::warning::could not close issue #$num"
+
+            - name: Upload logs
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: fork-sync-logs
+                  path: |
+                      dry-run.log
+                      sync.log
+                  if-no-files-found: ignore
+                  retention-days: 14
+
+            - name: Fail the run if the sync did not succeed
+              if: ${{ steps.sync.outputs.exit_code != '0' && steps.sync.outputs.exit_code != '' }}
+              run: |
+                  echo "::error::sync-upstream.sh exited ${{ steps.sync.outputs.exit_code }}"
+                  exit 1
