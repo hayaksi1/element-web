@@ -38,7 +38,7 @@ import PublicIcon from "@vector-im/compound-design-tokens/assets/web/icons/publi
 import ErrorIcon from "@vector-im/compound-design-tokens/assets/web/icons/error";
 import ErrorSolidIcon from "@vector-im/compound-design-tokens/assets/web/icons/error-solid";
 import ChevronDownIcon from "@vector-im/compound-design-tokens/assets/web/icons/chevron-down";
-import { JoinRule, type Room } from "matrix-js-sdk/src/matrix";
+import { JoinRule, type Room, SearchOrderBy } from "matrix-js-sdk/src/matrix";
 import { Box, Flex, HistoryVisibilityBadge, LinkedText, StatusTextView } from "@element-hq/web-shared-components";
 
 import BaseCard from "./BaseCard.tsx";
@@ -50,14 +50,21 @@ import { topicToHtml } from "../../../HtmlUtils.tsx";
 import { useRoomSummaryCardViewModel } from "../../viewmodels/right_panel/RoomSummaryCardViewModel";
 import { useRoomTopicViewModel } from "../../viewmodels/right_panel/RoomSummaryCardTopicViewModel";
 import { useRoomName } from "../../../hooks/useRoomName.ts";
+import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter.tsx";
+import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate.tsx";
+import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle.tsx";
 
 interface IProps {
     room: Room;
     permalinkCreator: RoomPermalinkCreator;
     onSearchChange?: (term: string) => void;
     onSearchCancel?: () => void;
+    onSearchSendersChange?: (senders: string[]) => void;
+    onSearchOrderChange?: (order: SearchOrderBy) => void;
     focusRoomSearch?: boolean;
     searchTerm?: string;
+    searchSenders?: string[];
+    searchOrder?: SearchOrderBy;
 }
 
 const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null => {
@@ -127,8 +134,12 @@ const RoomSummaryCardView: React.FC<IProps> = ({
     permalinkCreator,
     onSearchChange,
     onSearchCancel,
+    onSearchSendersChange,
+    onSearchOrderChange,
     focusRoomSearch,
     searchTerm = "",
+    searchSenders = [],
+    searchOrder = SearchOrderBy.Recent,
 }) => {
     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
     // XXX: this name should be part of the view model
@@ -208,19 +219,42 @@ const RoomSummaryCardView: React.FC<IProps> = ({
 
     const header = onSearchChange && (
         <Form.Root className="mx_RoomSummaryCard_search" onSubmit={(e) => e.preventDefault()}>
-            <Search
-                placeholder={_t("room|search|placeholder")}
-                name="room_message_search"
-                onChange={(e) => {
-                    setSearchValue(e.currentTarget.value);
-                    onSearchChange(e.currentTarget.value);
-                }}
-                value={searchValue}
-                className="mx_no_textinput"
-                ref={vm.searchInputRef}
-                autoFocus={focusRoomSearch}
-                onKeyDown={vm.onUpdateSearchInput}
-            />
+            <Flex align="center" gap="var(--cpd-space-2x)">
+                <Box flex="1" className="mx_RoomSummaryCard_searchInput">
+                    <Search
+                        placeholder={_t("room|search|placeholder")}
+                        name="room_message_search"
+                        onChange={(e) => {
+                            setSearchValue(e.currentTarget.value);
+                            onSearchChange(e.currentTarget.value);
+                        }}
+                        value={searchValue}
+                        className="mx_no_textinput"
+                        ref={vm.searchInputRef}
+                        autoFocus={focusRoomSearch}
+                        onKeyDown={vm.onUpdateSearchInput}
+                    />
+                </Box>
+                {/* "from:"/sender filter; renders only when the room has other members to filter by. */}
+                {onSearchSendersChange && (
+                    <RoomSearchSenderFilter
+                        key={room.roomId}
+                        room={room}
+                        senders={searchSenders}
+                        onSearchSendersChange={onSearchSendersChange}
+                    />
+                )}
+                {/* "jump to date" calendar; renders only when jump-to-date is enabled (MSC3030). */}
+                <RoomSearchJumpToDate key={room.roomId} roomId={room.roomId} />
+                {/* Recent/Relevant result-order toggle. */}
+                {onSearchOrderChange && (
+                    <RoomSearchOrderToggle
+                        key={room.roomId}
+                        order={searchOrder}
+                        onSearchOrderChange={onSearchOrderChange}
+                    />
+                )}
+            </Flex>
         </Form.Root>
     );
 

@@ -25,11 +25,39 @@ import { isNotUndefined } from "./Typeguards";
 
 const SEARCH_LIMIT = 10;
 
+// When a `from:`/sender filter is active the Seshat (local) leg cannot filter by sender at query time
+// (its ISearchArgs has no sender field), so we post-filter the returned page client-side. A page of only
+// SEARCH_LIMIT raw results could shrink to zero after dropping other senders, so we over-fetch from Seshat
+// to give the post-filter enough candidates to still fill a page. The homeserver leg filters natively via
+// IRoomEventFilter.senders and needs no over-fetch.
+const SESHAT_SENDER_OVERFETCH_LIMIT = SEARCH_LIMIT * 5;
+
+/**
+ * Drop Seshat results whose matched event was not sent by one of the selected senders, in place.
+ *
+ * The homeserver `/search` leg filters by sender natively (IRoomEventFilter.senders); the local Seshat
+ * leg cannot, so we filter the raw response client-side before it is merged/paginated. Filtering at the
+ * raw `IResultRoomEvents` level (matching `result.result.sender`, a full MXID) keeps the merge math in one
+ * place. A no-op when `senders` is empty.
+ *
+ * `localResult.count` is deliberately left untouched: Seshat reports it as the term-only match total across all
+ * pages, whereas the post-filter only sees the current (over-fetched) page, so it cannot be turned into an exact
+ * sender-filtered total here. The header summary already treats this count as a backend estimate distinct from the
+ * exact "k of N loaded" stepper, so the Seshat leg keeps that same estimate semantics.
+ */
+function filterSeshatResultsBySender(localResult: IResultRoomEvents | undefined, senders?: string[]): void {
+    if (!localResult?.results || !senders || senders.length === 0) return;
+    const allowed = new Set(senders);
+    localResult.results = localResult.results.filter((r) => allowed.has(r.result.sender));
+}
+
 async function serverSideSearch(
     client: MatrixClient,
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<{ response: ISearchResponse; query: ISearchRequestBody }> {
     const filter: IRoomEventFilter = {
         limit: SEARCH_LIMIT,
@@ -37,12 +65,20 @@ async function serverSideSearch(
 
     if (roomId !== undefined) filter.rooms = [roomId];
 
+    // Scope to the given senders (the `from:` filter). The homeserver applies this natively; it is independent of
+    // `rooms`, so an all-rooms search narrows by sender alone. The filter rides inside `body` below, which is stored
+    // as `_query` and replayed on every paginated request, so server-side pagination keeps the sender scope with no
+    // extra work.
+    if (senders && senders.length > 0) filter.senders = senders;
+
     const body: ISearchRequestBody = {
         search_categories: {
             room_events: {
                 search_term: term,
                 filter: filter,
-                order_by: SearchOrderBy.Recent,
+                // Recency by default; the search header's order toggle can request relevance. The order rides
+                // inside `body` (stored as `_query`) so server-side pagination replays it.
+                order_by: order,
                 event_context: {
                     before_limit: 1,
                     after_limit: 1,
@@ -62,8 +98,10 @@ async function serverSideSearchProcess(
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
-    const result = await serverSideSearch(client, term, roomId, abortSignal);
+    const result = await serverSideSearch(client, term, roomId, abortSignal, senders, order);
 
     // The js-sdk method backPaginateRoomEventsSearch() uses _query internally
     // so we're reusing the concept here since we want to delegate the
@@ -92,11 +130,18 @@ async function combinedSearch(
     client: MatrixClient,
     searchTerm: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
 ): Promise<ISearchResults> {
-    // Create two promises, one for the local search, one for the
-    // server-side search.
-    const serverSidePromise = serverSideSearch(client, searchTerm, undefined, abortSignal);
-    const localPromise = localSearch(searchTerm);
+    // Create two promises, one for the local search, one for the server-side search.
+    //
+    // Both legs are intentionally left on the recency default (no order param): the sliding-window merge below
+    // (combineEvents/compareOldestEvents, which pages the next leg by oldest timestamp) only preserves global order
+    // when both sources are recency-sorted, so the search header's relevance order is NOT honoured on this combined
+    // (local index + homeserver) all-rooms path — it would corrupt cross-page order. (A homeserver-only all-rooms
+    // search has a single source and does honour relevance — see eventSearch's no-index branch.) Honouring relevance
+    // in the merge needs a merge-by-rank redesign (deferred).
+    const serverSidePromise = serverSideSearch(client, searchTerm, undefined, abortSignal, senders);
+    const localPromise = localSearch(searchTerm, undefined, senders);
 
     // Wait for both promises to resolve.
     await Promise.all([serverSidePromise, localPromise]);
@@ -130,6 +175,9 @@ async function combinedSearch(
         oldestEventFrom: "server",
         results: [],
         highlights: [],
+        // Remember the sender filter so combinedPagination can re-apply the post-filter to later Seshat pages
+        // (the server leg keeps it via the stored _query).
+        senderFilter: senders,
     };
 
     // Combine our results.
@@ -153,16 +201,22 @@ async function combinedSearch(
 async function localSearch(
     searchTerm: string,
     roomId?: string,
-    processResult = true,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<{ response: IResultRoomEvents; query: ISearchArgs }> {
     const eventIndex = EventIndexPeg.get();
 
+    const hasSenderFilter = !!senders && senders.length > 0;
     const searchArgs: ISearchArgs = {
         search_term: searchTerm,
         before_limit: 1,
         after_limit: 1,
-        limit: SEARCH_LIMIT,
-        order_by_recency: true,
+        // Over-fetch when a sender filter is active so the client-side post-filter still has enough candidates to
+        // fill a page; Seshat has no native sender filter.
+        limit: hasSenderFilter ? SESHAT_SENDER_OVERFETCH_LIMIT : SEARCH_LIMIT,
+        // Recency unless the order toggle requested relevance: with order_by_recency false, Seshat/tantivy orders
+        // results by its full-text relevance (BM25) score instead of timestamp.
+        order_by_recency: order !== SearchOrderBy.Rank,
         room_id: undefined,
     };
 
@@ -195,6 +249,9 @@ async function localSearch(
         }
     }
 
+    // Apply the `from:`/sender filter Seshat cannot do at query time.
+    filterSeshatResultsBySender(localResult, senders);
+
     searchArgs.next_batch = localResult.next_batch;
 
     const result = {
@@ -210,21 +267,28 @@ export interface ISeshatSearchResults extends ISearchResults {
     cachedEvents?: ISearchResult[];
     oldestEventFrom?: "local" | "server";
     serverSideNextBatch?: string;
+    // The active `from:`/sender filter (full MXIDs), carried so each Seshat pagination page can re-apply the
+    // client-side post-filter Seshat cannot do at query time. The homeserver leg keeps the filter via the stored
+    // `_query` body and needs no carry here.
+    senderFilter?: string[];
 }
 
 async function localSearchProcess(
     client: MatrixClient,
     searchTerm: string,
     roomId?: string,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISeshatSearchResults> {
     const emptyResult = {
         results: [],
         highlights: [],
+        senderFilter: senders,
     } as ISeshatSearchResults;
 
     if (searchTerm === "") return emptyResult;
 
-    const result = await localSearch(searchTerm, roomId);
+    const result = await localSearch(searchTerm, roomId, senders, order);
 
     emptyResult.seshatQuery = result.query;
 
@@ -255,6 +319,10 @@ async function localPagination(
     if (!localResult) {
         throw new Error("Local search pagination failed");
     }
+
+    // Re-apply the `from:`/sender post-filter to this page; the over-fetch limit is already baked into the stored
+    // seshatQuery.
+    filterSeshatResultsBySender(localResult, searchResult.senderFilter);
 
     searchResult.seshatQuery.next_batch = localResult.next_batch;
 
@@ -581,6 +649,9 @@ async function combinedPagination(
     // the local indexes turn or the server has exhausted its results.
     if (searchArgs?.next_batch && (!searchResult.serverSideNextBatch || oldestEventFrom === "server")) {
         localResult = await eventIndex!.search(searchArgs);
+        // Re-apply the `from:`/sender post-filter to this Seshat page; the server leg keeps the filter natively
+        // via the stored _query body.
+        filterSeshatResultsBySender(localResult, searchResult.senderFilter);
     }
 
     // Fetch events from the server if we have a token for it and if it's the
@@ -621,23 +692,25 @@ async function eventIndexSearch(
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
     let searchPromise: Promise<ISearchResults>;
 
     if (roomId !== undefined) {
         if (await client.getCrypto()?.isEncryptionEnabledInRoom(roomId)) {
-            // The search is for a single encrypted room, use our local
-            // search method.
-            searchPromise = localSearchProcess(client, term, roomId);
+            // The search is for a single encrypted room, use our local search method. Single Seshat source, so the
+            // requested order is honoured (recency vs Seshat relevance).
+            searchPromise = localSearchProcess(client, term, roomId, senders, order);
         } else {
-            // The search is for a single non-encrypted room, use the
-            // server-side search.
-            searchPromise = serverSideSearchProcess(client, term, roomId, abortSignal);
+            // The search is for a single non-encrypted room, use the server-side search. Single source, so the
+            // backend order is honoured verbatim — thread the requested order through.
+            searchPromise = serverSideSearchProcess(client, term, roomId, abortSignal, senders, order);
         }
     } else {
-        // Search across all rooms, combine a server side search and a
-        // local search.
-        searchPromise = combinedSearch(client, term, abortSignal);
+        // Search across all rooms, combine a server side search and a local search. The combined merge re-sorts by
+        // recency, so `order` is intentionally NOT threaded here (forced recency, see combinedSearch).
+        searchPromise = combinedSearch(client, term, abortSignal, senders);
     }
 
     return searchPromise;
@@ -684,13 +757,15 @@ export default function eventSearch(
     term: string,
     roomId?: string,
     abortSignal?: AbortSignal,
+    senders?: string[],
+    order: SearchOrderBy = SearchOrderBy.Recent,
 ): Promise<ISearchResults> {
     const eventIndex = EventIndexPeg.get();
 
     if (eventIndex === null) {
-        return serverSideSearchProcess(client, term, roomId, abortSignal);
+        return serverSideSearchProcess(client, term, roomId, abortSignal, senders, order);
     } else {
-        return eventIndexSearch(client, term, roomId, abortSignal);
+        return eventIndexSearch(client, term, roomId, abortSignal, senders, order);
     }
 }
 
@@ -700,6 +775,104 @@ export default function eventSearch(
 export enum SearchScope {
     Room = "Room",
     All = "All",
+}
+
+/**
+ * The location of a single search match, used for stepping through matches in the live timeline.
+ */
+export interface SearchMatch {
+    /**
+     * The room the matched event belongs to.
+     */
+    roomId: string;
+    /**
+     * The id of the matched event.
+     */
+    eventId: string;
+}
+
+/**
+ * Build a chronologically ordered list of match locations from a set of search results, for in-timeline
+ * stepping.
+ *
+ * Matches are ordered newest-first by event timestamp so that the up/down arrows mean a consistent
+ * "newer/older" independent of how the backend happened to order the raw results. This explicit client-side
+ * sort guarantees a single chronological order on the merged stepping list regardless of the backend's
+ * ordering, so stepping stays "newer/older" in every case.
+ * `Array.prototype.sort` is stable, so matches sharing a timestamp keep their backend order; a match whose
+ * event has no timestamp sinks to the end (treated as oldest). Results whose matched event is missing an event
+ * id or room id are skipped — they cannot be jumped to in the timeline.
+ */
+export function extractSearchMatches(results: ISearchResults): SearchMatch[] {
+    const matches: Array<SearchMatch & { ts: number }> = [];
+    for (const result of results.results ?? []) {
+        const event = result.context.getEvent();
+        const eventId = event.getId();
+        const roomId = event.getRoomId();
+        if (eventId && roomId) {
+            // getTs() is typed as number but masks a possibly-absent origin_server_ts with a non-null
+            // assertion; default to 0 so an undated match can never produce a NaN comparison and corrupt order.
+            matches.push({ roomId, eventId, ts: event.getTs() ?? 0 });
+        }
+    }
+    matches.sort((a, b) => b.ts - a.ts);
+    return matches.map(({ roomId, eventId }) => ({ roomId, eventId }));
+}
+
+/**
+ * A single search result enriched for the Telegram-style results dropdown: the jumpable location
+ * ({@link SearchMatch}) plus the data a compact row needs — sender MXID, the matched message body and timestamp.
+ */
+export interface SearchResultPreview extends SearchMatch {
+    /** The MXID of the matched event's sender. */
+    sender: string;
+    /** The matched message body (plain text) shown as the row preview. */
+    body: string;
+    /** The matched event's origin-server timestamp (ms), used to render the row date. */
+    ts: number;
+}
+
+/**
+ * Build the ordered list of result previews for the search results dropdown.
+ *
+ * Ordered identically to {@link extractSearchMatches} (newest-first by timestamp, stable, undated last, results
+ * missing an event/room id skipped) so that preview row index `i` maps to match `i` — letting a row click reuse the
+ * existing {@link SearchMatch}-based live-timeline stepping. Pure: the backend results are not mutated.
+ */
+export function extractSearchResultPreviews(results: ISearchResults): SearchResultPreview[] {
+    const previews: SearchResultPreview[] = [];
+    for (const result of results.results ?? []) {
+        const event = result.context.getEvent();
+        const eventId = event.getId();
+        const roomId = event.getRoomId();
+        if (eventId && roomId) {
+            previews.push({
+                roomId,
+                eventId,
+                sender: event.getSender() ?? "",
+                body: event.getContent().body ?? "",
+                // Default an absent timestamp to 0 so it sorts last and never produces a NaN comparison.
+                ts: event.getTs() ?? 0,
+            });
+        }
+    }
+    previews.sort((a, b) => b.ts - a.ts);
+    return previews;
+}
+
+/**
+ * Build the ordered list of terms to highlight in matched message bodies for a set of search results.
+ *
+ * Mirrors the enrichment the results list applies (see RoomSearchView): the literal search term is always
+ * highlighted even if the backend (Synapse/Seshat) did not echo it back, and terms are ordered longest-first so
+ * that overlapping highlights favour the more specific term. Pure — the backend `highlights` array is not mutated.
+ */
+export function extractSearchHighlights(results: ISearchResults, term: string): string[] {
+    const highlights = [...(results.highlights ?? [])];
+    if (!highlights.includes(term)) {
+        highlights.push(term);
+    }
+    return highlights.sort((a, b) => b.length - a.length);
 }
 
 /**
@@ -723,6 +896,17 @@ export interface SearchInfo {
      */
     scope: SearchScope;
     /**
+     * The active `from:`/sender filter (full MXIDs), or undefined/empty for no sender filter. Mirrors
+     * {@link SearchSessionParams.senders} into the per-room-view render state.
+     */
+    senders?: string[];
+    /**
+     * The requested result ordering — {@link SearchOrderBy.Recent} (default) or {@link SearchOrderBy.Rank}
+     * (relevance). Mirrors {@link SearchSessionParams.order} into the per-room-view render state. Honoured by
+     * single-backend searches; an all-rooms search that merges a local index (combinedSearch) stays recency.
+     */
+    order?: SearchOrderBy;
+    /**
      * The promise for the search results.
      */
     promise: Promise<ISearchResults>;
@@ -738,6 +922,29 @@ export interface SearchInfo {
      * The total count of matching results as returned by the backend.
      */
     count?: number;
+    /**
+     * Whether more result pages remain to be paginated in (the backend returned a `next_batch` token). Drives the
+     * Telegram-style results dropdown's infinite scroll.
+     */
+    hasMore?: boolean;
+    /**
+     * Ordered list of match locations (display order) used to step through matches in the live timeline.
+     */
+    matches?: SearchMatch[];
+    /**
+     * Ordered list of result previews (parallel to {@link matches}) rendered as rows in the Telegram-style results
+     * dropdown. See {@link extractSearchResultPreviews}.
+     */
+    previews?: SearchResultPreview[];
+    /**
+     * Index into {@link matches} of the currently-focused match, or -1/undefined when no match is active.
+     */
+    currentMatchIndex?: number;
+    /**
+     * Terms to highlight in matched message bodies (longest-first), used to highlight the focused match in the
+     * live timeline while stepping. See {@link extractSearchHighlights}.
+     */
+    highlights?: string[];
     /**
      * Describe the error if any occured.
      */
