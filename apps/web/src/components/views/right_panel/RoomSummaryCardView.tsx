@@ -129,6 +129,8 @@ const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null
     );
 };
 
+const NO_SEARCH_SENDERS: string[] = [];
+
 const RoomSummaryCardView: React.FC<IProps> = ({
     room,
     permalinkCreator,
@@ -138,7 +140,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
     onSearchOrderChange,
     focusRoomSearch,
     searchTerm = "",
-    searchSenders = [],
+    searchSenders = NO_SEARCH_SENDERS,
     searchOrder = SearchOrderBy.Recent,
 }) => {
     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);

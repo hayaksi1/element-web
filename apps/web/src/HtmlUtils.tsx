@@ -10,7 +10,7 @@ Please see LICENSE files in the repository root for full details.
 */
 
 import React, { type JSX, type Key, type LegacyRef, type ReactNode } from "react";
-import { sanitizeHtml, type HtmlSanitizeOptions } from "@element-hq/element-web-shared-utils";
+import { sanitizeHtml, sanitizeHtmlText, type HtmlSanitizeOptions } from "@element-hq/element-web-shared-utils";
 import classNames from "classnames";
 import katex from "katex";
 import { decode } from "html-entities";
@@ -416,7 +416,8 @@ export function bodyToNode(content: IContent, highlights?: string[], opts: Event
         // Look at the text the message renders as rather than the markup carrying it. A message
         // bridged in from elsewhere, or sent with /html, arrives wrapped in a paragraph or a span,
         // and those tags alone were enough to stop it counting as a message of nothing but emoji.
-        const contentBody = eventInfo.safeBody !== undefined ? getHtmlText(eventInfo.safeBody) : eventInfo.strippedBody;
+        const contentBody =
+            eventInfo.safeBody !== undefined ? sanitizeHtmlText(eventInfo.safeBody) : eventInfo.strippedBody;
         let contentBodyTrimmed = contentBody !== undefined ? contentBody.trim() : "";
 
         // Remove zero width joiner, zero width spaces and other spaces in body

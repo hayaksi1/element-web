@@ -50,10 +50,11 @@ describe("createMessageContent", () => {
 
             // Then
             expect(content).toEqual({
-                body: "Alice hello",
-                format: "org.matrix.custom.html",
-                formatted_body: mention,
-                msgtype: "m.text",
+                "body": "Alice hello",
+                "format": "org.matrix.custom.html",
+                "formatted_body": mention,
+                "msgtype": "m.text",
+                "m.mentions": {},
             });
         });
 
@@ -232,7 +233,7 @@ describe("createMessageContent", () => {
 
             // Bob was already notified by the message being edited, so only Carol is new.
             expect(content["m.mentions"]).toEqual({ user_ids: ["@carol:element.io"] });
-            expect(content["m.new_content"]!["m.mentions"]).toEqual({
+            expect((content["m.new_content"] as { "m.mentions"?: { user_ids: string[] } })["m.mentions"]).toEqual({
                 user_ids: ["@bob:element.io", "@carol:element.io"],
             });
         });

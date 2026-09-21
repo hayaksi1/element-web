@@ -192,6 +192,7 @@ export class UrlPreviewGroupViewModel
         const content = this.props.mxEvent.getContent();
         const urlPreviewKind = this.props.urlPreviewKind;
         if (
+            previews === undefined &&
             content.msgtype === MsgType.Text &&
             (urlPreviewKind === "bundledonly" || urlPreviewKind === "preferbundled")
         ) {

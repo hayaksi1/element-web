@@ -315,8 +315,9 @@ describe("EventTileViewModel", () => {
             }),
         );
 
+        // The shared-media panel is not a conversation, so bubble layout does not collapse it either.
         expect(fileSnapshot.event.isContinuation).toBe(false);
-        expect(bubbleSnapshot.event.isContinuation).toBe(true);
+        expect(bubbleSnapshot.event.isContinuation).toBe(false);
     });
 
     it("derives line classes from event type, message type, and media eligibility", () => {

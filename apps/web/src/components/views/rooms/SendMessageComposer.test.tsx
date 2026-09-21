@@ -9,9 +9,10 @@ Please see LICENSE files in the repository root for full details.
 // @vitest-environment happy-dom
 
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, waitFor } from "test-utils-rtl";
 import { type MatrixClient, MsgType } from "matrix-js-sdk/src/matrix";
+import { KnownMembership } from "matrix-js-sdk/src/types";
 import userEvent from "@testing-library/user-event";
 import { createTestClient, mkEvent, mkStubRoom, stubClient, mockPlatformPeg } from "test-utils";
 import { addTextToComposer } from "./__mocks__/composer.ts";
@@ -33,6 +34,9 @@ import { MessageComposerUrlPreviewViewModel } from "../../../viewmodels/composer
 import { SDKContext } from "../../../contexts/SDKContext.ts";
 import { UrlPreviewApi } from "../../../modules/UrlPreviewApi.ts";
 import { attachUrlPreviews } from "../../../utils/messages";
+import Modal from "../../../Modal";
+import SettingsStore from "../../../settings/SettingsStore";
+import { UNSTABLE_BOT_COMMANDS_EVENT_TYPE } from "../../../slash-commands/botCommands";
 
 vi.mock("../../../utils/local-room", () => ({
     doMaybeLocalRoomAction: vi.fn(),
@@ -57,6 +61,8 @@ describe("<SendMessageComposer/>", () => {
         showApps: false,
         isPeeking: false,
         showRightPanel: true,
+        searchHeaderActive: false,
+        fullSizeThreadViewEnabled: false,
         joining: false,
         atEndOfLiveTimeline: true,
         showTopUnreadMessagesBar: false,
@@ -352,6 +358,23 @@ describe("<SendMessageComposer/>", () => {
             );
         });
 
+        it("only runs a slash command once when enter is pressed twice", async () => {
+            // Commands run against the client from the peg rather than the one passed as a prop.
+            const client = stubClient();
+            // Nothing resolves this, so the command is still running when the second enter arrives.
+            vi.mocked(client.setRoomTopic).mockReturnValue(new Promise<never>(() => {}));
+
+            mockPlatformPeg({ overrideBrowserShortcuts: vi.fn().mockReturnValue(false) });
+            const { container } = getComponent();
+
+            addTextToComposer(container, "/topic Nice topic");
+            const composer = container.querySelector(".mx_SendMessageComposer")!;
+            fireEvent.keyDown(composer, { key: "Enter" });
+            fireEvent.keyDown(composer, { key: "Enter" });
+
+            await waitFor(() => expect(client.setRoomTopic).toHaveBeenCalledTimes(1));
+        });
+
         it("correctly sends a reply using a slash command", async () => {
             stubClient();
             vi.mocked(doMaybeLocalRoomAction).mockImplementation(
@@ -449,6 +472,86 @@ describe("<SendMessageComposer/>", () => {
             );
 
             expect(defaultDispatcher.dispatch).not.toHaveBeenCalledWith({ action: `effects.confetti` });
+        });
+
+        describe("bot commands (MSC4332)", () => {
+            /** Have a joined bot in the room advertise `/deploy` as one of its commands. */
+            const advertiseDeployCommand = (): void => {
+                const commandsEvent = mkEvent({
+                    type: UNSTABLE_BOT_COMMANDS_EVENT_TYPE,
+                    room: "myfakeroom",
+                    user: "@hermes:example.org",
+                    skey: "@hermes:example.org",
+                    content: { sigil: "/", commands: [{ syntax: "deploy {env}" }] },
+                    event: true,
+                });
+                vi.mocked(mockRoom.currentState.getStateEvents).mockImplementation((type: string): any =>
+                    type === UNSTABLE_BOT_COMMANDS_EVENT_TYPE ? [commandsEvent] : [],
+                );
+                vi.mocked(mockRoom.getMember).mockReturnValue({
+                    membership: KnownMembership.Join,
+                    rawDisplayName: "Hermes",
+                } as any);
+            };
+
+            let settingsSpy: ReturnType<typeof vi.spyOn>;
+            let modalSpy: ReturnType<typeof vi.spyOn>;
+
+            beforeEach(() => {
+                const realGetValue = SettingsStore.getValue.bind(SettingsStore);
+                settingsSpy = vi
+                    .spyOn(SettingsStore, "getValue")
+                    .mockImplementation((name: any, ...rest: any[]): any =>
+                        name === "feature_msc4332_bot_commands" ? true : realGetValue(name, ...rest),
+                    );
+                // shouldSendAnyway() resolves from this dialog; answering "no" aborts the send,
+                // which makes "was the user interrupted?" observable via sendMessage.
+                modalSpy = vi.spyOn(Modal, "createDialog").mockReturnValue({
+                    finished: Promise.resolve([false]),
+                    close: vi.fn(),
+                } as any);
+
+                vi.mocked(doMaybeLocalRoomAction).mockImplementation(
+                    <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>) => fn(roomId),
+                );
+                mockPlatformPeg({ overrideBrowserShortcuts: vi.fn().mockReturnValue(false) });
+                vi.mocked(mockClient.sendMessage).mockClear();
+            });
+
+            afterEach(() => {
+                settingsSpy.mockRestore();
+                modalSpy.mockRestore();
+                vi.mocked(mockRoom.currentState.getStateEvents).mockImplementation(() => [] as any);
+                vi.mocked(mockRoom.getMember).mockReset();
+            });
+
+            it("sends a command advertised by a bot without warning about it", async () => {
+                advertiseDeployCommand();
+                const { container } = getComponent();
+
+                addTextToComposer(container, "/deploy prod");
+                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
+
+                await waitFor(() =>
+                    expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
+                        "body": "/deploy prod",
+                        "msgtype": MsgType.Text,
+                        "m.mentions": {},
+                    }),
+                );
+                expect(modalSpy).not.toHaveBeenCalled();
+            });
+
+            it("still warns about a command no bot has advertised", async () => {
+                advertiseDeployCommand();
+                const { container } = getComponent();
+
+                addTextToComposer(container, "/notacommand");
+                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
+
+                await waitFor(() => expect(modalSpy).toHaveBeenCalled());
+                expect(mockClient.sendMessage).not.toHaveBeenCalled();
+            });
         });
     });
 

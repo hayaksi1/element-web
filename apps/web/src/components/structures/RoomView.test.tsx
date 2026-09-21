@@ -87,7 +87,7 @@ import { TimelineRenderingType } from "../../contexts/RoomContext";
 import { ModuleApi } from "../../modules/Api";
 import MatrixClientBackedController from "../../settings/controllers/MatrixClientBackedController.ts";
 import { type ComposerInsertPayload, ComposerType } from "../../dispatcher/payloads/ComposerInsertPayload.ts";
-import { mkThread } from "../../../test/test-utils/threads";
+import { mkThread } from "../../test/test-utils/threads";
 import { WIDGET_LAYOUT_EVENT_TYPE } from "../../stores/widgets/WidgetLayoutStore";
 
 // Used by group calls
@@ -1052,7 +1052,7 @@ describe("RoomView", () => {
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
 
             const roomViewRef = createRef<RoomView>();
-            const { container, getByText, findByLabelText } = await mountRoomView(roomViewRef);
+            const { container, findByLabelText } = await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
             // @ts-ignore - triggering a search organically is a lot of work
             act(() =>
@@ -1100,7 +1100,7 @@ describe("RoomView", () => {
                 expect(container.querySelector(".mx_RoomView_searchResultsPanel")).toBeVisible();
             });
 
-            const searchResultTile = getByText("search term").closest(".mx_EventTile");
+            const searchResultTile = container.querySelector(".mx_EventTile_searchHighlight")?.closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
 
             const unhover = stubElementHover(searchResultTile!);
@@ -1122,7 +1122,7 @@ describe("RoomView", () => {
             const eventMapper = (obj: Partial<IEvent>) => new MatrixEvent(obj);
 
             const roomViewRef = createRef<RoomView>();
-            const { container, getByText, findByLabelText } = await mountRoomView(roomViewRef);
+            const { container, findByLabelText } = await mountRoomView(roomViewRef);
             await waitFor(() => expect(roomViewRef.current).toBeTruthy());
             // @ts-ignore - triggering a search organically is a lot of work
             act(() =>
@@ -1171,7 +1171,7 @@ describe("RoomView", () => {
             });
             const prom = untilDispatch(Action.ViewRoom, defaultDispatcher);
 
-            const searchResultTile = getByText("search term").closest(".mx_EventTile");
+            const searchResultTile = container.querySelector(".mx_EventTile_searchHighlight")?.closest(".mx_EventTile");
             expect(searchResultTile).not.toBeNull();
 
             const unhover = stubElementHover(searchResultTile!);

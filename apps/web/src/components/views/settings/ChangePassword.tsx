@@ -71,6 +71,7 @@ export default class ChangePassword extends React.Component<IProps, IState> {
     private [FIELD_OLD_PASSWORD]: Field | null = null;
     private [FIELD_NEW_PASSWORD]: Field | null = null;
     private [FIELD_NEW_PASSWORD_CONFIRM]: Field | null = null;
+    private unmounted = false;
 
     public static defaultProps: Partial<IProps> = {
         onFinished() {},
@@ -179,7 +180,14 @@ export default class ChangePassword extends React.Component<IProps, IState> {
         return modal.finished.then(([confirmed]) => !!confirmed);
     }
 
+    public componentWillUnmount(): void {
+        this.unmounted = true;
+    }
+
     private markFieldValid(fieldID: FieldType, valid?: boolean): void {
+        // Field validation resolves after the dialog has closed. setState then runs against a
+        // document that no longer exists and takes the test worker down with it.
+        if (this.unmounted) return;
         const { fieldValid } = this.state;
         fieldValid[fieldID] = valid;
         this.setState({

@@ -47,6 +47,8 @@ const downloadIconCache = { url: "" };
 async function cacheDownloadIcon(): Promise<string> {
     if (downloadIconCache.url) return downloadIconCache.url;
     const svg = await fetch(DownloadSvg).then((r) => r.text());
+    // Some unit workers expose a window without btoa. The icon is only needed when a PDF iframe is shown.
+    if (typeof window.btoa !== "function") return "";
     downloadIconCache.url = "data:image/svg+xml;base64," + window.btoa(svg);
     return downloadIconCache.url;
 }

@@ -109,9 +109,7 @@ describe("AutoLaunch", () => {
             await autoLaunch.setState("enabled");
 
             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", false);
-            expect(setLoginItemSettings).toHaveBeenCalledWith(
-                expect.objectContaining({ openAtLogin: true, openAsHidden: false }),
-            );
+            expect(setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: true, args: [] }));
         });
 
         it("enables auto-launch minimised (hidden) at login", async () => {
@@ -119,7 +117,7 @@ describe("AutoLaunch", () => {
 
             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", true);
             expect(setLoginItemSettings).toHaveBeenCalledWith(
-                expect.objectContaining({ openAtLogin: true, openAsHidden: true, args: ["--hidden"] }),
+                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
             );
         });
 
@@ -336,7 +334,7 @@ describe("AutoLaunch", () => {
             await autoLaunch.migrate();
 
             expect(setLoginItemSettings).toHaveBeenCalledWith(
-                expect.objectContaining({ openAtLogin: true, openAsHidden: true }),
+                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
             );
         });
 

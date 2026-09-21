@@ -277,7 +277,7 @@ describe("ForwardDialog", () => {
     it("disables buttons for rooms which have been replaced", async () => {
         const supersededRoom = mkStubRoom("a", "a", mockClient);
         // A tombstone does not change the power levels, so the room still says we may send to it.
-        supersededRoom.currentState.getStateEvents = jest.fn((type, key) =>
+        supersededRoom.currentState.getStateEvents = vi.fn((type, key) =>
             type === EventType.RoomTombstone && key === ""
                 ? mkEvent({
                       event: true,

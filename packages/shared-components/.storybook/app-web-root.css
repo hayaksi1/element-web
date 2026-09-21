@@ -38,8 +38,7 @@ Please see LICENSE files in the repository root for full details.
         pre,
         code {
             font-family:
-                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji",
-                "Noto Color Emoji";
+                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
             font-size: 100% !important;
         }
     }

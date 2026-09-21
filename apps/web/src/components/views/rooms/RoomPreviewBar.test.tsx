@@ -178,7 +178,7 @@ describe("<RoomPreviewBar />", () => {
 
     it("renders joining message when rejoining after being kicked", () => {
         const room = createRoom(roomId, otherUserId);
-        jest.spyOn(room, "getMember").mockReturnValue(makeMockRoomMember({ isKicked: true }));
+        vi.spyOn(room, "getMember").mockReturnValue(makeMockRoomMember({ isKicked: true }));
         const component = getComponent({ room, joining: true });
 
         expect(isSpinnerRendered(component)).toBeTruthy();
