@@ -5,6 +5,8 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
 import { describe, it, expect } from "vitest";
 
 import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";

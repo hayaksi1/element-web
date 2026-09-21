@@ -5,6 +5,8 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+// @vitest-environment happy-dom
+
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 
 import React from "react";
