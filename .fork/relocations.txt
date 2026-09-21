@@ -28,3 +28,4 @@ apps/web/test/unit-tests/components/views/rooms/ReplyTile-test.tsx -> apps/web/s
 apps/web/test/unit-tests/editor/mock.ts -> apps/web/src/editor/__mocks__/index.ts
 apps/web/test/test-utils/test-utils.ts -> apps/web/src/test/test-utils/test-utils.ts
 apps/web/test/unit-tests/components/views/dialogs/SpotlightDialog-test.tsx -> apps/web/src/components/views/dialogs/spotlight/SpotlightDialog.test.tsx
+apps/web/src/autocomplete/BotCommandProvider.test.tsx -> apps/web/src/autocomplete/BotCommandProvider.test.ts

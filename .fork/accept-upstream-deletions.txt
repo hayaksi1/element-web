@@ -60,3 +60,12 @@ apps/web/res/css/views/rooms/_EventBubbleTile.pcss
 # rule now lives in getIsContinuation() in EventTileDerivedState.ts, so the branch's
 # assertions describe a renderer that no longer exists.
 apps/web/test/unit-tests/components/views/rooms/EventTile-test.tsx
+
+# These files match upstream on the shipped master. The old branch diff does not
+# change the current file: upstream already has the behaviour, or the assertions
+# describe a renderer that moved. Keeping the upstream blob is the fork's result.
+packages/shared-components/src/room/timeline/event-tile/body/MImageBodyView/ImageBodyView.tsx
+packages/shared-components/src/room/timeline/event-tile/body/MImageBodyView/__snapshots__/ImageBodyView.test.tsx.snap
+apps/web/src/components/structures/RoomSearchView.test.tsx
+apps/web/src/components/views/right_panel/RoomSummaryCardView.test.tsx
+apps/web/src/components/views/rooms/RoomHeader/RoomHeader.test.tsx
