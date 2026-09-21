@@ -56,6 +56,7 @@ import RoomContext, { TimelineRenderingType } from "../../../contexts/RoomContex
 import DocumentPosition from "../../../editor/position";
 import { ComposerType } from "../../../dispatcher/payloads/ComposerInsertPayload";
 import { getSlashCommand, isSlashCommand, runSlashCommand, shouldSendAnyway } from "../../../editor/commands";
+import { isBotCommandText } from "../../../slash-commands/botCommands";
 import { KeyBindingAction } from "../../../accessibility/KeyboardShortcuts";
 import { PosthogAnalytics } from "../../../PosthogAnalytics";
 import { addReplyToMessageContent } from "../../../utils/Reply";
@@ -406,7 +407,10 @@ export class SendMessageComposer extends React.Component<ISendMessageComposerPro
                 } else {
                     shouldSend = false;
                 }
-            } else {
+            } else if (!isBotCommandText(this.props.room, commandText)) {
+                // A bot in this room may advertise `/` as its command sigil (MSC4332), which makes
+                // its commands indistinguishable from ours here. Those are meant for the bot, so
+                // don't second-guess them; everything else still gets the confirmation.
                 const sendAnyway = await shouldSendAnyway(commandText);
                 // re-focus the composer after QuestionDialog is closed
                 dis.dispatch({
