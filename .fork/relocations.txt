@@ -1,0 +1,31 @@
+# Explicit path relocations, for moves the sync script cannot derive.
+#
+# When upstream moves a file that a contribution branch also modifies, git raises a
+# conflict. resolve_relocations() works out where the file went, in this order:
+#   1. this file
+#   2. git rename detection between the merge base and the integration branch
+#   3. the co-location transform apps/web/test/unit-tests/X/Y-test.tsx
+#      -> apps/web/src/X/Y.test.tsx
+#
+# Add an entry here only when 2 and 3 both fail -- typically when upstream moved the
+# file to a different directory AND rewrote it enough that similarity detection misses.
+#
+# One mapping per line: <old path> -> <new path>
+# Blank lines and # comments are ignored.
+
+# Example (already handled by rename detection, shown for format only):
+# apps/web/test/viewmodels/message-body/TextualBodyViewModel-test.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/body/TextualBodyViewModel.test.ts
+
+# Upstream moved this one into a notifications/ subdirectory as well as renaming it, so the
+# co-location transform guesses apps/web/src/stores/RoomNotificationStateStore.test.ts and
+# rename detection does not pair them either.
+apps/web/test/unit-tests/stores/RoomNotificationStateStore-test.ts -> apps/web/src/stores/notifications/RoomNotificationStateStore.test.ts
+
+# Upstream rewrote ReplyTile into a view model in a different directory. Similarity
+# detection does not pair them, and the co-location transform only rewrites test paths.
+apps/web/src/components/views/rooms/ReplyTile.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/ReplyTileViewModel.ts
+apps/web/test/unit-tests/components/views/rooms/ReplyTile-test.tsx -> apps/web/src/viewmodels/room/timeline/event-tile/ReplyTileViewModel.test.tsx
+apps/web/test/unit-tests/editor/mock.ts -> apps/web/src/editor/__mocks__/index.ts
+apps/web/test/test-utils/test-utils.ts -> apps/web/src/test/test-utils/test-utils.ts
+apps/web/test/unit-tests/components/views/dialogs/SpotlightDialog-test.tsx -> apps/web/src/components/views/dialogs/spotlight/SpotlightDialog.test.tsx
+apps/web/src/autocomplete/BotCommandProvider.test.tsx -> apps/web/src/autocomplete/BotCommandProvider.test.ts

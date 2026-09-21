@@ -1,0 +1,101 @@
+/*
+Copyright 2024 New Vector Ltd.
+Copyright 2016 OpenMarket Ltd
+
+SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
+Please see LICENSE files in the repository root for full details.
+*/
+
+.mx_FilePanel {
+    order: 2;
+    flex: 1 1 0;
+    overflow-y: auto;
+    display: flex;
+
+    .mx_RoomView_messageListWrapper {
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .mx_RoomView_MessageList {
+        width: 100%;
+        /* Each tile carries its own padding and the rows sit flush against each other, with no divider. */
+        gap: 0;
+    }
+
+    /* A chat timeline pins the newest message to the bottom (`justify-content: flex-end` in _RoomView.pcss),
+       so a short list floats down away from the header. The shared-media list is a filtered result set and
+       has to read top-down, starting directly under the search and filter chips. The .mx_ScrollPanel
+       qualifier is needed to out-specify that rule. */
+    .mx_ScrollPanel .mx_RoomView_MessageList {
+        justify-content: flex-start;
+    }
+<<<<<<<
+=======
+
+    /* FIXME: rather than having EventTile's default CSS be for MessagePanel,
+   we should make EventTile a base CSS class and customise it specifically
+   for usage in {Message,File,Notification}Panel. */
+
+    /* Overrides for the attachment body tiles */
+    .mx_EventTile {
+        word-break: break-word;
+        padding: var(--cpd-space-4x);
+        box-sizing: border-box;
+
+        /* The panel is only ~320px wide, so the bubble layout's default gutters (49px start / 60px end,
+           sized for a full-width timeline) leave too little room for the media. They can't go to zero
+           though: bubble layout positions the avatar *outside* the tile box (left: -36px when received,
+           right: -38px when sent), so a gutter has to stay wide enough to keep the avatar on screen —
+           but only on the side the avatar is actually on. */
+        &[data-layout="bubble"] {
+            --maxWidth: 100%;
+
+            padding-inline: var(--cpd-space-2x);
+
+            /* Default 70% is meant for a full-width timeline and would squeeze media to ~90px here. */
+            .mx_DisambiguatedProfile,
+            .mx_EventTile_line {
+                --EventBubbleTile_line-max-width: 100%;
+            }
+
+            &[data-self="false"] {
+                --EventTile_bubble-margin-inline-start: 40px;
+                --EventTile_bubble-margin-inline-end: 0;
+            }
+
+            &[data-self="true"] {
+                --EventTile_bubble-margin-inline-start: 0;
+                --EventTile_bubble-margin-inline-end: 40px;
+            }
+        }
+
+        .mx_EventTile_line {
+            padding-inline-start: 0;
+        }
+
+        .mx_ImageBody {
+            gap: 0;
+        }
+
+        /* anchor link as wrapper */
+        .mx_EventTile_senderDetailsLink {
+            text-decoration: none;
+            margin-bottom: var(--cpd-space-1x);
+            display: block;
+
+            .mx_EventTile_senderDetails {
+                display: flex;
+                gap: var(--cpd-space-2x);
+                align-items: center;
+            }
+        }
+    }
+
+    .mx_EventTile_line {
+        margin-inline-end: 0;
+        padding-inline-start: 0;
+    }
+>>>>>>>
+}

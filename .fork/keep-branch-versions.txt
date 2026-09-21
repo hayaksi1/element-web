@@ -1,0 +1,6 @@
+# Modify/delete paths whose branch version is the one this fork ships.
+# Upstream deleted the file. Taking that deletion would drop the feature.
+# One path per line. Blank lines and # comments are ignored.
+
+apps/web/src/vector/mobile_guide/shouldRedirectToMobileGuide.ts
+apps/web/src/vector/mobile_guide/shouldRedirectToMobileGuide.test.ts
