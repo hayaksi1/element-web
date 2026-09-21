@@ -1,0 +1,2019 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
+Date: Mon, 21 Sep 2026 21:30:00 +0300
+Subject: [PATCH] Collect the relocated fork tests and restore the dropped cases
+
+The vitest move left fork tests under apps/web/src with a -test suffix,
+which no runner collects, and four merges kept none of the branch's
+tests: slash-command double enter, bot-command autocomplete, compact
+message actions, video filename titles, and escaped entities in a
+formatted body. Threads open full-size on this build, login items no
+longer pass the removed openAsHidden flag, and the preferences snapshot
+matches the settings that render.
+
+Emoji-only HTML goes through sanitizeHtmlText, which is where
+getHtmlText moved. Collected suites that still called jest now call vi.
+
+This replaces 0001, 0002, 0005 and 0006. 0003 edited a jest config
+upstream has deleted. 0004 still applies and stays.
+
+---
+diff --git a/apps/desktop/src/auto-launch.test.ts b/apps/desktop/src/auto-launch.test.ts
+index e1d13bff2f..c023bb16d3 100644
+--- a/apps/desktop/src/auto-launch.test.ts
++++ b/apps/desktop/src/auto-launch.test.ts
+@@ -109,9 +109,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.setState("enabled");
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", false);
+-            expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: false }),
+-            );
++            expect(setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: true, args: [] }));
+         });
+ 
+         it("enables auto-launch minimised (hidden) at login", async () => {
+@@ -119,7 +117,7 @@ describe("AutoLaunch", () => {
+ 
+             expect(storeSet).toHaveBeenCalledWith("openAtLoginMinimised", true);
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true, args: ["--hidden"] }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+@@ -336,7 +334,7 @@ describe("AutoLaunch", () => {
+             await autoLaunch.migrate();
+ 
+             expect(setLoginItemSettings).toHaveBeenCalledWith(
+-                expect.objectContaining({ openAtLogin: true, openAsHidden: true }),
++                expect.objectContaining({ openAtLogin: true, args: ["--hidden"] }),
+             );
+         });
+ 
+diff --git a/apps/desktop/src/auto-launch.ts b/apps/desktop/src/auto-launch.ts
+index 666d59f54f..291b115cbe 100644
+--- a/apps/desktop/src/auto-launch.ts
++++ b/apps/desktop/src/auto-launch.ts
+@@ -85,8 +85,9 @@ function linuxDesktopEntry(minimised: boolean): string {
+  * Whether the app should start hidden (minimised to tray) for this launch.
+  *
+  * On Windows/Linux the login item passes `--hidden`, surfaced here as `argsHidden`. On macOS the
+- * native loginItem API cannot pass arguments and `openAsHidden` is a no-op on macOS 13+, so we
+- * instead derive it from `wasOpenedAtLogin` plus the stored minimised preference.
++ * native loginItem API cannot pass arguments and has no minimised flag (`openAsHidden` was a no-op
++ * on macOS 13+ and Electron 44 removed it), so we instead derive it from `wasOpenedAtLogin` plus
++ * the stored minimised preference.
+  */
+ export function shouldStartHidden(argsHidden: boolean): boolean {
+     if (argsHidden) return true;
+@@ -125,7 +126,8 @@ export class AutoLaunch {
+      * On Windows a Squirrel install lives in a versioned `app-x.y.z` directory, so the login item
+      * must point at the stable `Update.exe` (`--processStart`) rather than the versioned executable,
+      * otherwise it breaks on the next update. MSI installs have no `Update.exe`, so there we launch
+-     * the executable directly (its location is stable across updates). `openAsHidden` is macOS-only.
++     * the executable directly (its location is stable across updates). macOS carries no minimised
++     * flag here; {@link shouldStartHidden} derives it from the stored preference instead.
+      *
+      * @param minimised - whether the app should start hidden/minimised.
+      */
+@@ -146,7 +148,6 @@ export class AutoLaunch {
+ 
+         return {
+             openAtLogin: true,
+-            openAsHidden: minimised, // macOS-only, no-op on macOS 13+ (see shouldStartHidden); ignored on Linux
+             args: minimised ? ["--hidden"] : [],
+         };
+     }
+diff --git a/apps/web/src/HtmlUtils.test.tsx b/apps/web/src/HtmlUtils.test.tsx
+index bdb7dd1f67..5860b6dd73 100644
+--- a/apps/web/src/HtmlUtils.test.tsx
++++ b/apps/web/src/HtmlUtils.test.tsx
+@@ -12,6 +12,7 @@ import React, { type ReactElement } from "react";
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { render, screen } from "test-utils-rtl";
+ import parse from "html-react-parser";
++import { type IContent } from "matrix-js-sdk/src/matrix";
+ import { getMockClientWithEventEmitter } from "test-utils";
+ 
+ import { bodyToHtml, bodyToNode, formatEmojis, sanitizedHtmlNode, topicToHtml } from "./HtmlUtils";
+@@ -235,6 +236,42 @@ describe("bodyToHtml", () => {
+             expect(html).toMatchSnapshot();
+         });
+     });
++
++    describe("escaped entities in a formatted body", () => {
++        function formatted(formattedBody: string): IContent {
++            return {
++                body: "irrelevant",
++                msgtype: "m.text",
++                formatted_body: formattedBody,
++                format: "org.matrix.custom.html",
++            };
++        }
++
++        // Rendering the result is what shows the bug: the browser decodes the string one more time,
++        // so a body which is short of a level of escaping loses characters on screen.
++        function renderedText(formattedBody: string): string {
++            const el = document.createElement("div");
++            el.innerHTML = bodyToHtml(formatted(formattedBody), [], { linkify: true });
++            return el.textContent!;
++        }
++
++        it("keeps an escaped ampersand which is itself the start of an entity", () => {
++            expect(renderedText("literal &amp;amp; <code>&amp;amp;</code>")).toEqual("literal &amp; &amp;");
++        });
++
++        it("does not turn an ampersand in a code block into the character it could have started", () => {
++            expect(renderedText("<pre><code>&amp;gtk::Label</code></pre>")).toEqual("&gtk::Label");
++        });
++
++        it("leaves a numeric character reference alone", () => {
++            expect(renderedText("<p>&#38;lt;</p>")).toEqual("&lt;");
++        });
++
++        it("still linkifies a URL whose query string contains an escaped ampersand", () => {
++            const html = bodyToHtml(formatted("<p>https://example.org/?a=1&amp;b=2</p>"), [], { linkify: true });
++            expect(html).toContain('href="https://example.org/?a=1&amp;b=2"');
++        });
++    });
+ });
+ 
+ describe("formatEmojis", () => {
+diff --git a/apps/web/src/HtmlUtils.tsx b/apps/web/src/HtmlUtils.tsx
+index 8f14ca9cee..9efd77d7b7 100644
+--- a/apps/web/src/HtmlUtils.tsx
++++ b/apps/web/src/HtmlUtils.tsx
+@@ -10,7 +10,7 @@ Please see LICENSE files in the repository root for full details.
+ */
+ 
+ import React, { type JSX, type Key, type LegacyRef, type ReactNode } from "react";
+-import { sanitizeHtml, type HtmlSanitizeOptions } from "@element-hq/element-web-shared-utils";
++import { sanitizeHtml, sanitizeHtmlText, type HtmlSanitizeOptions } from "@element-hq/element-web-shared-utils";
+ import classNames from "classnames";
+ import katex from "katex";
+ import { decode } from "html-entities";
+@@ -416,7 +416,8 @@ export function bodyToNode(content: IContent, highlights?: string[], opts: Event
+         // Look at the text the message renders as rather than the markup carrying it. A message
+         // bridged in from elsewhere, or sent with /html, arrives wrapped in a paragraph or a span,
+         // and those tags alone were enough to stop it counting as a message of nothing but emoji.
+-        const contentBody = eventInfo.safeBody !== undefined ? getHtmlText(eventInfo.safeBody) : eventInfo.strippedBody;
++        const contentBody =
++            eventInfo.safeBody !== undefined ? sanitizeHtmlText(eventInfo.safeBody) : eventInfo.strippedBody;
+         let contentBodyTrimmed = contentBody !== undefined ? contentBody.trim() : "";
+ 
+         // Remove zero width joiner, zero width spaces and other spaces in body
+diff --git a/apps/web/src/components/views/dialogs/ForwardDialog.test.tsx b/apps/web/src/components/views/dialogs/ForwardDialog.test.tsx
+index 079b0ea215..832bd17ba8 100644
+--- a/apps/web/src/components/views/dialogs/ForwardDialog.test.tsx
++++ b/apps/web/src/components/views/dialogs/ForwardDialog.test.tsx
+@@ -277,7 +277,7 @@ describe("ForwardDialog", () => {
+     it("disables buttons for rooms which have been replaced", async () => {
+         const supersededRoom = mkStubRoom("a", "a", mockClient);
+         // A tombstone does not change the power levels, so the room still says we may send to it.
+-        supersededRoom.currentState.getStateEvents = jest.fn((type, key) =>
++        supersededRoom.currentState.getStateEvents = vi.fn((type, key) =>
+             type === EventType.RoomTombstone && key === ""
+                 ? mkEvent({
+                       event: true,
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+similarity index 89%
+rename from apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+index a729f81e4e..9cc58494d0 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
+@@ -5,18 +5,21 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++
++
+ import React from "react";
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+-import { render, screen, fireEvent } from "jest-matrix-react";
++import { render, screen, fireEvent } from "test-utils-rtl";
+ 
+-import { RoomFilesView } from "../../../../../src/components/views/right_panel/RoomFilesView";
+-import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "../../../../test-utils";
+-import { SDKContextClass } from "../../../../../src/contexts/SDKContextClass";
+-import { RightPanelPhases } from "../../../../../src/stores/right-panel/RightPanelStorePhases";
++import { RoomFilesView } from "./RoomFilesView";
++import { clientAndSDKContextRenderOptions, mkEvent, stubClient } from "test-utils";
++import { SDKContextClass } from "../../../contexts/SDKContextClass";
++import { RightPanelPhases } from "../../../stores/right-panel/RightPanelStorePhases";
+ 
+ // Stub TimelinePanel so we can capture the `eventFilter` predicate it is handed without rendering a real timeline.
+ let mockLastTimelineProps: { eventFilter?: (ev: MatrixEvent) => boolean } = {};
+-jest.mock("../../../../../src/components/structures/TimelinePanel", () => ({
++vi.mock("../../structures/TimelinePanel", () => ({
+     __esModule: true,
+     default: (props: { eventFilter?: (ev: MatrixEvent) => boolean }) => {
+         mockLastTimelineProps = props;
+@@ -37,11 +40,11 @@ const renderView = (): void => {
+     render(
+         <RoomFilesView
+             timelineSet={{} as never}
+-            onPaginationRequest={jest.fn()}
++            onPaginationRequest={vi.fn()}
+             empty={<div />}
+-            onClose={jest.fn()}
++            onClose={vi.fn()}
+             isRoomEncrypted={false}
+-            onMeasurement={jest.fn()}
++            onMeasurement={vi.fn()}
+         />,
+         // The card reads the right panel store off the SDK context.
+         clientAndSDKContextRenderOptions(SDKContextClass.instance.client!, SDKContextClass.instance),
+@@ -52,7 +55,7 @@ describe("RoomFilesView", () => {
+     beforeEach(() => {
+         // Restored here rather than in an afterEach so it lands after React Testing Library has unmounted the
+         // previous render, never in the middle of one.
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+         stubClient();
+         mockLastTimelineProps = {};
+     });
+@@ -76,7 +79,7 @@ describe("RoomFilesView", () => {
+     });
+ 
+     it("offers a back button when the right panel has a card to go back to", () => {
+-        jest.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
++        vi.spyOn(SDKContextClass.instance.rightPanelStore, "roomPhaseHistory", "get").mockReturnValue([
+             { phase: RightPanelPhases.RoomSummary, state: {} },
+             { phase: RightPanelPhases.FilePanel, state: {} },
+         ]);
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+similarity index 70%
+rename from apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+index cef119c958..9e313eb7b8 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
+@@ -5,26 +5,28 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++
++
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen, waitFor } from "jest-matrix-react";
++import { render, screen, waitFor } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Direction } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchJumpToDate } from "../../../../../src/components/views/right_panel/RoomSearchJumpToDate";
+-import SettingsStore from "../../../../../src/settings/SettingsStore";
+-import { UIFeature } from "../../../../../src/settings/UIFeature";
+-import dispatcher from "../../../../../src/dispatcher/dispatcher";
+-import { Action } from "../../../../../src/dispatcher/actions";
+-import { MatrixClientPeg } from "../../../../../src/MatrixClientPeg";
+-import { SdkContextClass } from "../../../../../src/contexts/SDKContext";
++import { RoomSearchJumpToDate } from "./RoomSearchJumpToDate";
++import SettingsStore from "../../../settings/SettingsStore";
++import { UIFeature } from "../../../settings/UIFeature";
++import dispatcher from "../../../dispatcher/dispatcher";
++import { Action } from "../../../dispatcher/actions";
++import { MatrixClientPeg } from "../../../MatrixClientPeg";
++import { SdkContextClass } from "../../../contexts/SDKContext";
+ 
+-jest.mock("../../../../../src/settings/SettingsStore");
+-jest.mock("../../../../../src/contexts/SDKContext", () => ({
++vi.mock("../../../settings/SettingsStore");
++vi.mock("../../../contexts/SDKContext", () => ({
+     SdkContextClass: {
+         instance: {
+             roomViewStore: {
+-                getRoomId: jest.fn(),
++                getRoomId: vi.fn(),
+             },
+         },
+     },
+@@ -32,10 +34,10 @@ jest.mock("../../../../../src/contexts/SDKContext", () => ({
+ 
+ describe("RoomSearchJumpToDate", () => {
+     const roomId = "!room:example.org";
+-    const mockTimestampToEvent = jest.fn();
++    const mockTimestampToEvent = vi.fn();
+ 
+     const setFeatureEnabled = (enabled: boolean): void => {
+-        mocked(SettingsStore).getValue.mockImplementation((key): any => {
++        vi.mocked(SettingsStore).getValue.mockImplementation((key): any => {
+             if (key === "feature_jump_to_date") return enabled;
+             if (String(key) === UIFeature.TimelineEnableRelativeDates) return true;
+             return undefined;
+@@ -44,19 +46,19 @@ describe("RoomSearchJumpToDate", () => {
+ 
+     beforeEach(() => {
+         setFeatureEnabled(true);
+-        mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
+-        mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
++        vi.mocked(SettingsStore).watchSetting.mockReturnValue("watch-ref" as any);
++        vi.mocked(SettingsStore).unwatchSetting.mockImplementation(() => {});
+ 
+         mockTimestampToEvent.mockReset();
+-        jest.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
++        vi.spyOn(MatrixClientPeg, "safeGet").mockReturnValue({
+             timestampToEvent: mockTimestampToEvent,
+         } as any);
+-        jest.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
++        vi.spyOn(dispatcher, "dispatch").mockImplementation(() => {});
++        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomId);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the calendar trigger when jump-to-date is enabled", () => {
+@@ -93,7 +95,7 @@ describe("RoomSearchJumpToDate", () => {
+         // control by room id to force a fresh VM on room switch. Prove that keyed remount targets the new room.
+         const roomB = "!roomB:example.org";
+         mockTimestampToEvent.mockResolvedValue({ event_id: "$eventB", origin_server_ts: 0 });
+-        mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
++        vi.mocked(SdkContextClass.instance.roomViewStore.getRoomId).mockReturnValue(roomB);
+ 
+         const { rerender } = render(<RoomSearchJumpToDate key={roomId} roomId={roomId} />);
+         rerender(<RoomSearchJumpToDate key={roomB} roomId={roomB} />);
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+similarity index 87%
+rename from apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+index 4fb76db5b3..fa055b83c9 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchOrderToggle-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchOrderToggle.test.tsx
+@@ -5,21 +5,24 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
++
++
+ import React from "react";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchOrderToggle } from "../../../../../src/components/views/right_panel/RoomSearchOrderToggle";
++import { RoomSearchOrderToggle } from "./RoomSearchOrderToggle";
+ 
+ describe("RoomSearchOrderToggle", () => {
+     it("renders the order toggle trigger", () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />);
+         expect(screen.getByTestId("search-order-toggle-button")).toBeInTheDocument();
+     });
+ 
+     it("selecting Most relevant requests relevance (Rank) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -29,7 +32,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("selecting Most recent requests recency (Recent) order", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={onChange} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+@@ -39,7 +42,7 @@ describe("RoomSearchOrderToggle", () => {
+     });
+ 
+     it("checks the radio matching the active order (controlled)", async () => {
+-        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        render(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+ 
+         await userEvent.click(screen.getByTestId("search-order-toggle-button"));
+ 
+@@ -49,13 +52,13 @@ describe("RoomSearchOrderToggle", () => {
+ 
+     it("shows the active-order indicator only for a non-default (relevance) order", () => {
+         const { rerender } = render(
+-            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={jest.fn()} />,
++            <RoomSearchOrderToggle order={SearchOrderBy.Recent} onSearchOrderChange={vi.fn()} />,
+         );
+         // Default (recency): no indicator dot, and the accessible name is the neutral label.
+         expect(screen.getByTestId("search-order-toggle-button")).not.toHaveAttribute("data-indicator");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results");
+ 
+-        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={jest.fn()} />);
++        rerender(<RoomSearchOrderToggle order={SearchOrderBy.Rank} onSearchOrderChange={vi.fn()} />);
+         // Relevance: the indicator dot is shown and the active state is folded into the accessible name.
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAttribute("data-indicator", "default");
+         expect(screen.getByTestId("search-order-toggle-button")).toHaveAccessibleName("Sort results (by relevance)");
+diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+similarity index 88%
+rename from apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
+rename to apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+index c423c9478a..4605e54eb3 100644
+--- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
+@@ -5,27 +5,29 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, afterEach, vi } from "vitest";
++
++
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
+ 
+-import { RoomSearchSenderFilter } from "../../../../../src/components/views/right_panel/RoomSearchSenderFilter";
+-import { stubClient } from "../../../../test-utils";
++import { RoomSearchSenderFilter } from "./RoomSearchSenderFilter";
++import { stubClient } from "test-utils";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+ describe("RoomSearchSenderFilter", () => {
+     const buildRoom = (members: RoomMember[]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, "@me:server");
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("renders the filter trigger when the room has other members", () => {
+@@ -33,7 +35,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -45,7 +47,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@me:server", "Me")])}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -53,7 +55,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("selecting a member adds them to the sender filter", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -69,7 +71,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("toggling an already-selected member off removes them", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+@@ -113,7 +115,7 @@ describe("RoomSearchSenderFilter", () => {
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
+                 senders={["@alice:server", "@bob:server"]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+             />,
+         );
+ 
+@@ -121,7 +123,7 @@ describe("RoomSearchSenderFilter", () => {
+     });
+ 
+     it("clears all selected senders via the clear action", async () => {
+-        const onChange = jest.fn();
++        const onChange = vi.fn();
+         render(
+             <RoomSearchSenderFilter
+                 room={buildRoom([member("@alice:server", "Alice")])}
+diff --git a/apps/web/src/components/views/room_settings/AliasSettings-test.ts b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+similarity index 91%
+rename from apps/web/src/components/views/room_settings/AliasSettings-test.ts
+rename to apps/web/src/components/views/room_settings/AliasSettings.test.ts
+index cf5779756d..7d8a7481d7 100644
+--- a/apps/web/src/components/views/room_settings/AliasSettings-test.ts
++++ b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
+@@ -5,9 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++import { describe, it, expect } from "vitest";
++
++
+ import { MatrixError } from "matrix-js-sdk/src/matrix";
+ 
+-import { getAliasCreationErrorMessage } from "../../../../../src/components/views/room_settings/AliasSettings";
++import { getAliasCreationErrorMessage } from "./AliasSettings";
+ 
+ describe("getAliasCreationErrorMessage", () => {
+     it.each([
+diff --git a/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx b/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
+index 9b1ed5707b..120127c97f 100644
+--- a/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
++++ b/apps/web/src/components/views/rooms/BasicMessageComposer.test.tsx
+@@ -120,7 +120,7 @@ describe("BasicMessageComposer", () => {
+     });
+ 
+     it("should resolve emoji shortcodes once they are closed", async () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((settingName: string) => {
+             return settingName === "MessageComposerInput.autoReplaceEmoji";
+         });
+         userEvent.setup();
+@@ -155,7 +155,7 @@ describe("BasicMessageComposer", () => {
+     });
+ 
+     it("should leave emoji shortcodes alone when replacement is switched off", async () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation(() => false);
+         userEvent.setup();
+         const model = new EditorModel([], pc, renderer);
+         render(<BasicMessageComposer model={model} room={room} />, {
+diff --git a/apps/web/src/components/views/rooms/RoomPreviewBar.test.tsx b/apps/web/src/components/views/rooms/RoomPreviewBar.test.tsx
+index d6d7d42fa7..09bf5ec5fa 100644
+--- a/apps/web/src/components/views/rooms/RoomPreviewBar.test.tsx
++++ b/apps/web/src/components/views/rooms/RoomPreviewBar.test.tsx
+@@ -178,7 +178,7 @@ describe("<RoomPreviewBar />", () => {
+ 
+     it("renders joining message when rejoining after being kicked", () => {
+         const room = createRoom(roomId, otherUserId);
+-        jest.spyOn(room, "getMember").mockReturnValue(makeMockRoomMember({ isKicked: true }));
++        vi.spyOn(room, "getMember").mockReturnValue(makeMockRoomMember({ isKicked: true }));
+         const component = getComponent({ room, joining: true });
+ 
+         expect(isSpinnerRendered(component)).toBeTruthy();
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+similarity index 83%
+rename from apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
+rename to apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+index 4b457a730a..8d134c3995 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader-test.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchHeader.test.tsx
+@@ -5,19 +5,21 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++
++
+ import React from "react";
+-import { mocked } from "jest-mock";
+-import { render, screen } from "jest-matrix-react";
++import { render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ import { Room, type RoomMember, SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import RoomSearchHeader from "../../../../../src/components/views/rooms/RoomSearchHeader";
+-import { type SearchMatch, SearchScope } from "../../../../../src/Searching";
+-import { RoomSearchNavigationViewModel } from "../../../../../src/viewmodels/search/RoomSearchNavigationViewModel";
+-import { SearchSessionStore } from "../../../../../src/stores/SearchSessionStore";
+-import { Action } from "../../../../../src/dispatcher/actions";
+-import defaultDispatcher from "../../../../../src/dispatcher/dispatcher";
+-import { stubClient } from "../../../../test-utils";
++import RoomSearchHeader from "./RoomSearchHeader";
++import { type SearchMatch, SearchScope } from "../../../Searching";
++import { RoomSearchNavigationViewModel } from "../../../viewmodels/search/RoomSearchNavigationViewModel";
++import { SearchSessionStore } from "../../../stores/SearchSessionStore";
++import { Action } from "../../../dispatcher/actions";
++import defaultDispatcher from "../../../dispatcher/dispatcher";
++import { stubClient } from "test-utils";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+@@ -25,9 +27,9 @@ describe("RoomSearchHeader", () => {
+     const vms: RoomSearchNavigationViewModel[] = [];
+ 
+     const buildRoom = (members: RoomMember[] = [member("@me:server", "Me")]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, "@me:server");
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+@@ -44,7 +46,7 @@ describe("RoomSearchHeader", () => {
+     };
+ 
+     const makeVm = (): RoomSearchNavigationViewModel => {
+-        const vm = new RoomSearchNavigationViewModel({ onActivateMatch: jest.fn() });
++        const vm = new RoomSearchNavigationViewModel({ onActivateMatch: vi.fn() });
+         vms.push(vm);
+         return vm;
+     };
+@@ -54,15 +56,15 @@ describe("RoomSearchHeader", () => {
+             <RoomSearchHeader
+                 room={buildRoom()}
+                 term=""
+-                onSearchChange={jest.fn()}
+-                onCancel={jest.fn()}
++                onSearchChange={vi.fn()}
++                onCancel={vi.fn()}
+                 isRoomEncrypted={false}
+                 scope={SearchScope.Room}
+-                onSearchScopeChange={jest.fn()}
++                onSearchScopeChange={vi.fn()}
+                 senders={[]}
+-                onSearchSendersChange={jest.fn()}
++                onSearchSendersChange={vi.fn()}
+                 order={SearchOrderBy.Recent}
+-                onSearchOrderChange={jest.fn()}
++                onSearchOrderChange={vi.fn()}
+                 {...props}
+             />,
+         );
+@@ -75,11 +77,11 @@ describe("RoomSearchHeader", () => {
+     afterEach(() => {
+         while (vms.length) vms.pop()!.dispose();
+         SearchSessionStore.instance.clear({ abort: false });
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("does not run a search while typing, only committing it on Enter", async () => {
+-        const onSearchChange = jest.fn();
++        const onSearchChange = vi.fn();
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         const input = screen.getByPlaceholderText("Search messages…");
+@@ -95,8 +97,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("does nothing on Enter when the input is empty", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         await userEvent.keyboard("{Enter}");
+@@ -105,7 +107,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("cancels the search when the cancel button is clicked", async () => {
+-        const onCancel = jest.fn();
++        const onCancel = vi.fn();
+         renderHeader({ onCancel });
+ 
+         await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+@@ -113,7 +115,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("cancels the search when Escape is pressed in the input", async () => {
+-        const onCancel = jest.fn();
++        const onCancel = vi.fn();
+         renderHeader({ onCancel, autoFocus: true });
+ 
+         await userEvent.keyboard("{Escape}");
+@@ -121,8 +123,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("steps matches on Enter/Shift+Enter once the typed term is already searched", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         // term="abcd" means the box value (synced from term) matches what was already searched, so Enter steps.
+         renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
+ 
+@@ -140,8 +142,8 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("steps (not re-searches) when only surrounding whitespace differs from the searched term", async () => {
+-        const onSearchChange = jest.fn();
+-        const dispatchSpy = jest.spyOn(defaultDispatcher, "dispatch");
++        const onSearchChange = vi.fn();
++        const dispatchSpy = vi.spyOn(defaultDispatcher, "dispatch");
+         renderHeader({ term: "abcd", onSearchChange, autoFocus: true });
+ 
+         // Box now holds "abcd " (a trailing space). Trimmed it equals the searched term, so Enter must step, not
+@@ -156,7 +158,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("commits the trimmed term when searching on Enter", async () => {
+-        const onSearchChange = jest.fn();
++        const onSearchChange = vi.fn();
+         renderHeader({ onSearchChange, autoFocus: true });
+ 
+         await userEvent.type(screen.getByPlaceholderText("Search messages…"), "  gemini  ");
+@@ -201,7 +203,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("toggles the search scope to all rooms", async () => {
+-        const onSearchScopeChange = jest.fn();
++        const onSearchScopeChange = vi.fn();
+         renderHeader({ onSearchScopeChange });
+ 
+         await userEvent.click(screen.getByText("Search all rooms"));
+@@ -216,7 +218,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("returns to the results list when the search box is clicked while a match is focused", async () => {
+-        const onBackToResults = jest.fn();
++        const onBackToResults = vi.fn();
+         renderHeader({
+             onBackToResults,
+             // currentMatchIndex >= 0 means a match is focused in the live timeline (stepping), so the dropdown is
+@@ -236,7 +238,7 @@ describe("RoomSearchHeader", () => {
+     });
+ 
+     it("does not return to the results list when the search box is clicked while not stepping", async () => {
+-        const onBackToResults = jest.fn();
++        const onBackToResults = vi.fn();
+         renderHeader({
+             onBackToResults,
+             // No focused match (results list already visible) — clicking the box is a plain focus, not a return.
+diff --git a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+similarity index 88%
+rename from apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
+rename to apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+index 1c6f51ad7f..e220845a49 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
+@@ -5,12 +5,15 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
++
++
+ import React from "react";
+-import { fireEvent, render, screen } from "jest-matrix-react";
++import { fireEvent, render, screen } from "test-utils-rtl";
+ import userEvent from "@testing-library/user-event";
+ 
+-import RoomSearchResults from "../../../../../src/components/views/rooms/RoomSearchResults";
+-import { type SearchResultPreview } from "../../../../../src/Searching";
++import RoomSearchResults from "./RoomSearchResults";
++import { type SearchResultPreview } from "../../../Searching";
+ 
+ const preview = (eventId: string, sender: string, body: string, ts: number): SearchResultPreview => ({
+     roomId: "!r:server",
+@@ -43,8 +46,8 @@ describe("RoomSearchResults", () => {
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+                 {...props}
+             />,
+@@ -52,7 +55,7 @@ describe("RoomSearchResults", () => {
+     };
+ 
+     it("renders a row per result with sender name and preview, reporting clicks by index", async () => {
+-        const onResultClick = jest.fn();
++        const onResultClick = vi.fn();
+         renderResults({ onResultClick });
+ 
+         expect(screen.getByText("Alice")).toBeInTheDocument();
+@@ -74,8 +77,8 @@ describe("RoomSearchResults", () => {
+                 previews={[]}
+                 inProgress={true}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+             />,
+         );
+@@ -93,8 +96,8 @@ describe("RoomSearchResults", () => {
+                 previews={previews}
+                 inProgress={true}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
+-                onLoadMore={jest.fn()}
++                onResultClick={vi.fn()}
++                onLoadMore={vi.fn()}
+                 getSenderName={getSenderName}
+             />,
+         );
+@@ -104,13 +107,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("loads the next page when scrolled near the bottom", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -122,13 +125,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more when the user is not near the bottom", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -140,13 +143,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more when there are no further pages", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={false}
+                 hasMore={false}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+@@ -158,13 +161,13 @@ describe("RoomSearchResults", () => {
+     });
+ 
+     it("does not load more while a page is already loading", () => {
+-        const onLoadMore = jest.fn();
++        const onLoadMore = vi.fn();
+         const { container } = render(
+             <RoomSearchResults
+                 previews={previews}
+                 inProgress={true}
+                 hasMore={true}
+-                onResultClick={jest.fn()}
++                onResultClick={vi.fn()}
+                 onLoadMore={onLoadMore}
+                 getSenderName={getSenderName}
+             />,
+diff --git a/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx b/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx
+index 31c5c2ffd1..424ffc5695 100644
+--- a/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx
++++ b/apps/web/src/components/views/rooms/SendMessageComposer.test.tsx
+@@ -9,9 +9,10 @@ Please see LICENSE files in the repository root for full details.
+ // @vitest-environment happy-dom
+ 
+ import React from "react";
+-import { describe, it, expect, vi, beforeEach } from "vitest";
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+ import { fireEvent, render, waitFor } from "test-utils-rtl";
+ import { type MatrixClient, MsgType } from "matrix-js-sdk/src/matrix";
++import { KnownMembership } from "matrix-js-sdk/src/types";
+ import userEvent from "@testing-library/user-event";
+ import { createTestClient, mkEvent, mkStubRoom, stubClient, mockPlatformPeg } from "test-utils";
+ import { addTextToComposer } from "./__mocks__/composer.ts";
+@@ -33,6 +34,9 @@ import { MessageComposerUrlPreviewViewModel } from "../../../viewmodels/composer
+ import { SDKContext } from "../../../contexts/SDKContext.ts";
+ import { UrlPreviewApi } from "../../../modules/UrlPreviewApi.ts";
+ import { attachUrlPreviews } from "../../../utils/messages";
++import Modal from "../../../Modal";
++import SettingsStore from "../../../settings/SettingsStore";
++import { UNSTABLE_BOT_COMMANDS_EVENT_TYPE } from "../../../slash-commands/botCommands";
+ 
+ vi.mock("../../../utils/local-room", () => ({
+     doMaybeLocalRoomAction: vi.fn(),
+@@ -57,6 +61,8 @@ describe("<SendMessageComposer/>", () => {
+         showApps: false,
+         isPeeking: false,
+         showRightPanel: true,
++        searchHeaderActive: false,
++        fullSizeThreadViewEnabled: false,
+         joining: false,
+         atEndOfLiveTimeline: true,
+         showTopUnreadMessagesBar: false,
+@@ -352,6 +358,23 @@ describe("<SendMessageComposer/>", () => {
+             );
+         });
+ 
++        it("only runs a slash command once when enter is pressed twice", async () => {
++            // Commands run against the client from the peg rather than the one passed as a prop.
++            const client = stubClient();
++            // Nothing resolves this, so the command is still running when the second enter arrives.
++            vi.mocked(client.setRoomTopic).mockReturnValue(new Promise<never>(() => {}));
++
++            mockPlatformPeg({ overrideBrowserShortcuts: vi.fn().mockReturnValue(false) });
++            const { container } = getComponent();
++
++            addTextToComposer(container, "/topic Nice topic");
++            const composer = container.querySelector(".mx_SendMessageComposer")!;
++            fireEvent.keyDown(composer, { key: "Enter" });
++            fireEvent.keyDown(composer, { key: "Enter" });
++
++            await waitFor(() => expect(client.setRoomTopic).toHaveBeenCalledTimes(1));
++        });
++
+         it("correctly sends a reply using a slash command", async () => {
+             stubClient();
+             vi.mocked(doMaybeLocalRoomAction).mockImplementation(
+@@ -450,6 +473,86 @@ describe("<SendMessageComposer/>", () => {
+ 
+             expect(defaultDispatcher.dispatch).not.toHaveBeenCalledWith({ action: `effects.confetti` });
+         });
++
++        describe("bot commands (MSC4332)", () => {
++            /** Have a joined bot in the room advertise `/deploy` as one of its commands. */
++            const advertiseDeployCommand = (): void => {
++                const commandsEvent = mkEvent({
++                    type: UNSTABLE_BOT_COMMANDS_EVENT_TYPE,
++                    room: "myfakeroom",
++                    user: "@hermes:example.org",
++                    skey: "@hermes:example.org",
++                    content: { sigil: "/", commands: [{ syntax: "deploy {env}" }] },
++                    event: true,
++                });
++                vi.mocked(mockRoom.currentState.getStateEvents).mockImplementation((type: string): any =>
++                    type === UNSTABLE_BOT_COMMANDS_EVENT_TYPE ? [commandsEvent] : [],
++                );
++                vi.mocked(mockRoom.getMember).mockReturnValue({
++                    membership: KnownMembership.Join,
++                    rawDisplayName: "Hermes",
++                } as any);
++            };
++
++            let settingsSpy: ReturnType<typeof vi.spyOn>;
++            let modalSpy: ReturnType<typeof vi.spyOn>;
++
++            beforeEach(() => {
++                const realGetValue = SettingsStore.getValue.bind(SettingsStore);
++                settingsSpy = vi
++                    .spyOn(SettingsStore, "getValue")
++                    .mockImplementation((name: any, ...rest: any[]): any =>
++                        name === "feature_msc4332_bot_commands" ? true : realGetValue(name, ...rest),
++                    );
++                // shouldSendAnyway() resolves from this dialog; answering "no" aborts the send,
++                // which makes "was the user interrupted?" observable via sendMessage.
++                modalSpy = vi.spyOn(Modal, "createDialog").mockReturnValue({
++                    finished: Promise.resolve([false]),
++                    close: vi.fn(),
++                } as any);
++
++                vi.mocked(doMaybeLocalRoomAction).mockImplementation(
++                    <T,>(roomId: string, fn: (actualRoomId: string) => Promise<T>) => fn(roomId),
++                );
++                mockPlatformPeg({ overrideBrowserShortcuts: vi.fn().mockReturnValue(false) });
++                vi.mocked(mockClient.sendMessage).mockClear();
++            });
++
++            afterEach(() => {
++                settingsSpy.mockRestore();
++                modalSpy.mockRestore();
++                vi.mocked(mockRoom.currentState.getStateEvents).mockImplementation(() => [] as any);
++                vi.mocked(mockRoom.getMember).mockReset();
++            });
++
++            it("sends a command advertised by a bot without warning about it", async () => {
++                advertiseDeployCommand();
++                const { container } = getComponent();
++
++                addTextToComposer(container, "/deploy prod");
++                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
++
++                await waitFor(() =>
++                    expect(mockClient.sendMessage).toHaveBeenCalledWith("myfakeroom", null, {
++                        "body": "/deploy prod",
++                        "msgtype": MsgType.Text,
++                        "m.mentions": {},
++                    }),
++                );
++                expect(modalSpy).not.toHaveBeenCalled();
++            });
++
++            it("still warns about a command no bot has advertised", async () => {
++                advertiseDeployCommand();
++                const { container } = getComponent();
++
++                addTextToComposer(container, "/notacommand");
++                fireEvent.keyDown(container.querySelector(".mx_SendMessageComposer")!, { key: "Enter" });
++
++                await waitFor(() => expect(modalSpy).toHaveBeenCalled());
++                expect(mockClient.sendMessage).not.toHaveBeenCalled();
++            });
++        });
+     });
+ 
+     describe("isQuickReaction", () => {
+diff --git a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
+index b2c9027875..5c42ee62ba 100644
+--- a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
++++ b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
+@@ -50,10 +50,11 @@ describe("createMessageContent", () => {
+ 
+             // Then
+             expect(content).toEqual({
+-                body: "Alice hello",
+-                format: "org.matrix.custom.html",
+-                formatted_body: mention,
+-                msgtype: "m.text",
++                "body": "Alice hello",
++                "format": "org.matrix.custom.html",
++                "formatted_body": mention,
++                "msgtype": "m.text",
++                "m.mentions": {},
+             });
+         });
+ 
+diff --git a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+similarity index 91%
+rename from apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
+rename to apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+index 1eb8e80a3a..b71a357cc5 100644
+--- a/apps/web/src/components/views/settings/ChatBackgroundPanel-test.tsx
++++ b/apps/web/src/components/views/settings/ChatBackgroundPanel.test.tsx
+@@ -5,21 +5,22 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
++
+ import React from "react";
+-import { act, fireEvent, render, screen, waitFor } from "jest-matrix-react";
+-import { mocked } from "jest-mock";
++import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
+ import { type MatrixClient } from "matrix-js-sdk/src/matrix";
+ 
+-import { ChatBackgroundPanel } from "../../../../../src/components/views/settings/ChatBackgroundPanel";
+-import MatrixClientContext from "../../../../../src/contexts/MatrixClientContext";
+-import { stubClient } from "../../../../test-utils";
+-import SettingsStore from "../../../../../src/settings/SettingsStore";
+-import { SettingLevel } from "../../../../../src/settings/SettingLevel";
++import { ChatBackgroundPanel } from "./ChatBackgroundPanel";
++import MatrixClientContext from "../../../contexts/MatrixClientContext";
++import { stubClient } from "test-utils";
++import SettingsStore from "../../../settings/SettingsStore";
++import { SettingLevel } from "../../../settings/SettingLevel";
+ 
+ describe("<ChatBackgroundPanel />", () => {
+     let client: MatrixClient;
+     let settings: Record<string, unknown>;
+-    let setValueSpy: jest.SpyInstance;
++    let setValueSpy: MockInstance;
+ 
+     beforeEach(() => {
+         client = stubClient();
+@@ -28,18 +29,18 @@ describe("<ChatBackgroundPanel />", () => {
+             "RoomView.backgroundOpacity": 1,
+         };
+         const realGetValue = SettingsStore.getValue.bind(SettingsStore);
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
++        vi.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
+             name in settings
+                 ? settings[name]
+                 : (realGetValue as (...args: unknown[]) => unknown)(name, ...rest)) as typeof SettingsStore.getValue);
+-        setValueSpy = jest
++        setValueSpy = vi
+             .spyOn(SettingsStore, "setValue")
+             .mockImplementation(async (name: string, _roomId, _level, value: unknown) => {
+                 settings[name] = value;
+             });
+     });
+ 
+-    afterEach(() => jest.restoreAllMocks());
++    afterEach(() => vi.restoreAllMocks());
+ 
+     const renderPanel = (): ReturnType<typeof render> =>
+         render(
+@@ -165,7 +166,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("uploads a custom image and stores its mxc uri", async () => {
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+@@ -182,7 +183,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("shows an error when the upload fails", async () => {
+-        mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
++        vi.mocked(client.uploadContent).mockRejectedValue(new Error("boom"));
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+@@ -202,7 +203,7 @@ describe("<ChatBackgroundPanel />", () => {
+     });
+ 
+     it("keeps the uploaded image in the rail after switching to a preset", async () => {
+-        mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
++        vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/uploaded" });
+         renderPanel();
+         const file = new File(["x"], "wallpaper.png", { type: "image/png" });
+         fireEvent.change(screen.getByTestId("chatBackgroundUpload"), { target: { files: [file] } });
+diff --git a/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap b/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+index 369c7ca66a..5961839c85 100644
+--- a/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
++++ b/apps/web/src/components/views/settings/tabs/user/__snapshots__/PreferencesUserSettingsTab.test.tsx.snap
+@@ -312,6 +312,12 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     >
+                       Use Ctrl + F to search timeline
+                     </label>
++                    <span
++                      class="_message_1o4d9_86 _help-message_1o4d9_92"
++                      id="radix-react-use-id-2"
++                    >
++                      When enabled, the search shortcut opens in-room message search instead of your browser's find-on-page. Searching encrypted rooms requires the desktop app with message search enabled.
++                    </span>
+                   </div>
+                 </div>
+               </div>
+@@ -469,7 +475,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-2"
++                      id="radix-react-use-id-3"
+                     >
+                       Requires your server to support MSC4133
+                     </span>
+@@ -538,7 +544,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-3"
++                      id="radix-react-use-id-4"
+                     >
+                       Your server doesn't support disabling sending read receipts.
+                     </span>
+@@ -663,7 +669,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-4"
++                      id="radix-react-use-id-5"
+                     >
+                       <span>
+                         Start messages with 
+@@ -1149,7 +1155,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                 <h2
+                   class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
+                 >
+-                  Timeline
++                  Threads
+                 </h2>
+               </div>
+               <div
+@@ -1184,10 +1190,37 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_7Az0xw4Bs4Tt"
+                     >
+-                      Show typing notifications
++                      Show threads in the main chat area
+                     </label>
++                    <span
++                      class="_message_1o4d9_86 _help-message_1o4d9_92"
++                      id="radix-react-use-id-6"
++                    >
++                      Opening a thread replaces the conversation instead of opening the right-hand panel.
++                    </span>
+                   </div>
+                 </div>
++              </div>
++            </div>
++          </form>
++          <form
++            class="_root_1o4d9_17"
++          >
++            <div
++              class="mx_SettingsSubsection"
++            >
++              <div
++                class="mx_SettingsSubsectionHeading"
++              >
++                <h2
++                  class="mx_Heading_h4 mx_SettingsSubsectionHeading_heading"
++                >
++                  Timeline
++                </h2>
++              </div>
++              <div
++                class="mx_SettingsSubsection_content"
++              >
+                 <div
+                   class="_inline-field_1o4d9_33"
+                 >
+@@ -1217,7 +1250,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_8jmzPIlPoBCv"
+                     >
+-                      Show a placeholder for removed messages
++                      Show typing notifications
+                     </label>
+                   </div>
+                 </div>
+@@ -1250,7 +1283,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_enFRaTjdsFou"
+                     >
+-                      Show read receipts sent by other users
++                      Show a placeholder for removed messages
+                     </label>
+                   </div>
+                 </div>
+@@ -1283,7 +1316,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_bfwnd5rz4XNX"
+                     >
+-                      Show join/leave messages (invites/removes/bans unaffected)
++                      Show read receipts sent by other users
+                     </label>
+                   </div>
+                 </div>
+@@ -1316,7 +1349,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_gs5uWEzYzZrS"
+                     >
+-                      Show display name changes
++                      Show join/leave messages (invites/removes/bans unaffected)
+                     </label>
+                   </div>
+                 </div>
+@@ -1349,7 +1382,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_qWg7OgID1yRR"
+                     >
+-                      Show chat effects (animations when receiving e.g. confetti)
++                      Show display name changes
+                     </label>
+                   </div>
+                 </div>
+@@ -1382,7 +1415,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_pOPewl7rtMbV"
+                     >
+-                      Show profile picture changes
++                      Show chat effects (animations when receiving e.g. confetti)
+                     </label>
+                   </div>
+                 </div>
+@@ -1396,7 +1429,6 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_container_udcm8_10"
+                     >
+                       <input
+-                        checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+                         id="mx_SettingsFlag_cmt3PZSyNp3v"
+@@ -1415,7 +1447,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_cmt3PZSyNp3v"
+                     >
+-                      Show avatars in user, room and event mentions
++                      Disable smooth scrolling (reduces motion)
+                     </label>
+                   </div>
+                 </div>
+@@ -1448,7 +1480,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_dJJz3lHUv9XX"
+                     >
+-                      Enable big emoji in chat
++                      Show profile picture changes
+                     </label>
+                   </div>
+                 </div>
+@@ -1481,7 +1513,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_SBSSOZDRlzlA"
+                     >
+-                      Jump to the bottom of the timeline when you send a message
++                      Show avatars in user, room and event mentions
+                     </label>
+                   </div>
+                 </div>
+@@ -1513,6 +1545,72 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     <label
+                       class="_label_1o4d9_60"
+                       for="mx_SettingsFlag_FLEpLCb0jpp6"
++                    >
++                      Enable big emoji in chat
++                    </label>
++                  </div>
++                </div>
++                <div
++                  class="_inline-field_1o4d9_33"
++                >
++                  <div
++                    class="_inline-field-control_1o4d9_45"
++                  >
++                    <div
++                      class="_container_udcm8_10"
++                    >
++                      <input
++                        checked=""
++                        class="_input_udcm8_24"
++                        disabled=""
++                        id="mx_SettingsFlag_NQFWldEwbV3q"
++                        role="switch"
++                        type="checkbox"
++                      />
++                      <div
++                        class="_ui_udcm8_34"
++                      />
++                    </div>
++                  </div>
++                  <div
++                    class="_inline-field-body_1o4d9_39"
++                  >
++                    <label
++                      class="_label_1o4d9_60"
++                      for="mx_SettingsFlag_NQFWldEwbV3q"
++                    >
++                      Jump to the bottom of the timeline when you send a message
++                    </label>
++                  </div>
++                </div>
++                <div
++                  class="_inline-field_1o4d9_33"
++                >
++                  <div
++                    class="_inline-field-control_1o4d9_45"
++                  >
++                    <div
++                      class="_container_udcm8_10"
++                    >
++                      <input
++                        checked=""
++                        class="_input_udcm8_24"
++                        disabled=""
++                        id="mx_SettingsFlag_5ZjibYJT2HFm"
++                        role="switch"
++                        type="checkbox"
++                      />
++                      <div
++                        class="_ui_udcm8_34"
++                      />
++                    </div>
++                  </div>
++                  <div
++                    class="_inline-field-body_1o4d9_39"
++                  >
++                    <label
++                      class="_label_1o4d9_60"
++                      for="mx_SettingsFlag_5ZjibYJT2HFm"
+                     >
+                       Show current profile picture and name for users in message history
+                     </label>
+@@ -1550,7 +1648,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                     >
+                       <input
+                         class="_input_udcm8_24"
+-                        id="react-use-id-5"
++                        id="react-use-id-7"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1564,7 +1662,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="react-use-id-5"
++                      for="react-use-id-7"
+                     >
+                       Hide avatars of room and inviter
+                     </label>
+@@ -1578,13 +1676,13 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                 >
+                   <label
+                     class="_label_1o4d9_60"
+-                    for="radix-react-use-id-6"
++                    for="radix-react-use-id-8"
+                   >
+                     Show media in timeline
+                   </label>
+                   <span
+                     class="_message_1o4d9_86 _help-message_1o4d9_92 mx_MediaPreviewAccountSetting_RadioHelp"
+-                    id="radix-react-use-id-7"
++                    id="radix-react-use-id-9"
+                   >
+                     A hidden media can always be shown by tapping on it
+                   </span>
+@@ -1697,7 +1795,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                         checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="react-use-id-8"
++                        id="react-use-id-10"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1711,13 +1809,13 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="react-use-id-8"
++                      for="react-use-id-10"
+                     >
+                       Allow users to invite you to rooms
+                     </label>
+                     <span
+                       class="_message_1o4d9_86 _help-message_1o4d9_92"
+-                      id="radix-react-use-id-9"
++                      id="radix-react-use-id-11"
+                     >
+                       Your server does not implement this feature.
+                     </span>
+@@ -1762,7 +1860,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                       <input
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="mx_SettingsFlag_NQFWldEwbV3q"
++                        id="mx_SettingsFlag_mTnTitfNlxc2"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1776,7 +1874,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="mx_SettingsFlag_NQFWldEwbV3q"
++                      for="mx_SettingsFlag_mTnTitfNlxc2"
+                     >
+                       Show NSFW content
+                     </label>
+@@ -1816,7 +1914,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                         checked=""
+                         class="_input_udcm8_24"
+                         disabled=""
+-                        id="mx_SettingsFlag_5ZjibYJT2HFm"
++                        id="mx_SettingsFlag_XGIAmbtYRSKz"
+                         role="switch"
+                         type="checkbox"
+                       />
+@@ -1830,7 +1928,7 @@ exports[`PreferencesUserSettingsTab > should render 1`] = `
+                   >
+                     <label
+                       class="_label_1o4d9_60"
+-                      for="mx_SettingsFlag_5ZjibYJT2HFm"
++                      for="mx_SettingsFlag_XGIAmbtYRSKz"
+                     >
+                       Prompt before sending invites to potentially invalid matrix IDs
+                     </label>
+diff --git a/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab-test.tsx b/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+similarity index 80%
+rename from apps/web/src/components/views/spaces/SpaceSettingsGeneralTab-test.tsx
+rename to apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+index ae715522d9..6090edff16 100644
+--- a/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab-test.tsx
++++ b/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
+@@ -5,13 +5,16 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
++import { describe, it, expect, beforeEach, vi } from "vitest";
++
++
+ import React from "react";
+-import { fireEvent, render, screen, waitFor } from "jest-matrix-react";
++import { fireEvent, render, screen, waitFor } from "test-utils-rtl";
+ import { type MatrixClient, Room } from "matrix-js-sdk/src/matrix";
+ 
+-import SpaceSettingsGeneralTab from "../../../../../src/components/views/spaces/SpaceSettingsGeneralTab";
+-import { stubClient } from "../../../../test-utils";
+-import DMRoomMap from "../../../../../src/utils/DMRoomMap";
++import SpaceSettingsGeneralTab from "./SpaceSettingsGeneralTab";
++import { stubClient } from "test-utils";
++import DMRoomMap from "../../../utils/DMRoomMap";
+ 
+ describe("<SpaceSettingsGeneralTab />", () => {
+     let client: MatrixClient;
+@@ -21,10 +24,10 @@ describe("<SpaceSettingsGeneralTab />", () => {
+ 
+     beforeEach(() => {
+         client = stubClient();
+-        jest.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
++        vi.spyOn(DMRoomMap, "shared").mockReturnValue(new DMRoomMap(client));
+         space = new Room("!space:example.com", client, client.getSafeUserId());
+         space.name = "Test space";
+-        jest.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
++        vi.spyOn(space.currentState, "maySendStateEvent").mockReturnValue(true);
+     });
+ 
+     const renderTab = (): ReturnType<typeof render> =>
+diff --git a/apps/web/src/settings/ChatBackgrounds-test.ts b/apps/web/src/settings/ChatBackgrounds.test.ts
+similarity index 97%
+rename from apps/web/src/settings/ChatBackgrounds-test.ts
+rename to apps/web/src/settings/ChatBackgrounds.test.ts
+index 3656c5b72f..7bb35f054f 100644
+--- a/apps/web/src/settings/ChatBackgrounds-test.ts
++++ b/apps/web/src/settings/ChatBackgrounds.test.ts
+@@ -5,6 +5,9 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, vi } from "vitest";
++
++
+ import { type MatrixClient } from "matrix-js-sdk/src/matrix";
+ 
+ import {
+@@ -14,11 +17,11 @@ import {
+     getChatBackgroundPreset,
+     MIN_CHAT_BACKGROUND_OPACITY,
+     resolveChatBackground,
+-} from "../../../src/settings/ChatBackgrounds";
++} from "./ChatBackgrounds";
+ 
+ describe("ChatBackgrounds", () => {
+     const clientWith = (httpUrl: string | null): MatrixClient =>
+-        ({ mxcUrlToHttp: jest.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
++        ({ mxcUrlToHttp: vi.fn().mockReturnValue(httpUrl) }) as unknown as MatrixClient;
+ 
+     describe("CHAT_BACKGROUND_PRESETS", () => {
+         it("exposes the bundled presets", () => {
+diff --git a/apps/web/src/settings/ForkSettingDefaults.test.ts b/apps/web/src/settings/ForkSettingDefaults.test.ts
+new file mode 100644
+index 0000000000..dcfec07193
+--- /dev/null
++++ b/apps/web/src/settings/ForkSettingDefaults.test.ts
+@@ -0,0 +1,18 @@
++/*
++Copyright 2026 hayaksi1
++
++SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
++Please see LICENSE files in the repository root for full details.
++*/
++
++// @vitest-environment happy-dom
++
++import { describe, expect, it } from "vitest";
++
++import { SETTINGS } from "./Settings.tsx";
++
++describe("fork setting defaults", () => {
++    it("opens threads full-size in the main split out of the box", () => {
++        expect(SETTINGS["Threads.fullSizeView"].default).toBe(true);
++    });
++});
+diff --git a/apps/web/src/settings/Settings.tsx b/apps/web/src/settings/Settings.tsx
+index ec39d125d9..d69603e01d 100644
+--- a/apps/web/src/settings/Settings.tsx
++++ b/apps/web/src/settings/Settings.tsx
+@@ -1389,7 +1389,7 @@ export const SETTINGS: Settings = {
+         supportedLevels: LEVELS_ACCOUNT_SETTINGS,
+         displayName: _td("settings|preferences|threads_full_size_view"),
+         description: _td("settings|preferences|threads_full_size_view_description"),
+-        default: false,
++        default: true,
+     },
+     "Performance.addSendMessageTimingMetadata": {
+         supportedLevels: [SettingLevel.CONFIG],
+diff --git a/apps/web/src/stores/SearchSessionStore-test.ts b/apps/web/src/stores/SearchSessionStore.test.ts
+similarity index 96%
+rename from apps/web/src/stores/SearchSessionStore-test.ts
+rename to apps/web/src/stores/SearchSessionStore.test.ts
+index b5f94cb451..4611b27cbb 100644
+--- a/apps/web/src/stores/SearchSessionStore-test.ts
++++ b/apps/web/src/stores/SearchSessionStore.test.ts
+@@ -5,12 +5,15 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++
++
+ import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+-import { SearchSessionStore, SearchSessionStoreEvent } from "../../../src/stores/SearchSessionStore";
+-import { type SearchMatch, SearchScope } from "../../../src/Searching";
+-import defaultDispatcher from "../../../src/dispatcher/dispatcher";
+-import { Action } from "../../../src/dispatcher/actions";
++import { SearchSessionStore, SearchSessionStoreEvent } from "./SearchSessionStore";
++import { type SearchMatch, SearchScope } from "../Searching";
++import defaultDispatcher from "../dispatcher/dispatcher";
++import { Action } from "../dispatcher/actions";
+ 
+ const match = (roomId: string, eventId: string): SearchMatch => ({ roomId, eventId });
+ 
+@@ -62,7 +65,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("emits Update when a session starts", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             start();
+             expect(listener).toHaveBeenCalledTimes(1);
+@@ -94,7 +97,7 @@ describe("SearchSessionStore", () => {
+         });
+ 
+         it("is a no-op when there is no active session", () => {
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
+             expect(store.hasActiveSession()).toBe(false);
+@@ -130,7 +133,7 @@ describe("SearchSessionStore", () => {
+         it("moves the cursor and emits Update", () => {
+             start();
+             store.updateResults({ inProgress: false, matches: [match("!a:server", "$1"), match("!b:server", "$2")] });
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.setCurrentMatchIndex(1);
+             expect(store.currentMatchIndex).toBe(1);
+@@ -190,7 +193,7 @@ describe("SearchSessionStore", () => {
+ 
+         it("does not emit Update when toggled (it is not view state)", () => {
+             start();
+-            const listener = jest.fn();
++            const listener = vi.fn();
+             store.on(SearchSessionStoreEvent.Update, listener);
+             store.beginSteppingJump("$e");
+             store.consumeSteppingJump();
+diff --git a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+index aa9bb53693..a35082c50a 100644
+--- a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
++++ b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
+@@ -8,7 +8,7 @@ Please see LICENSE files in the repository root for full details.
+ 
+ // @vitest-environment happy-dom
+ 
+-import { describe, it, expect, beforeAll } from "vitest";
++import { describe, it, expect, beforeAll, vi } from "vitest";
+ import { RelationType } from "matrix-js-sdk/src/matrix";
+ import { mkEvent, stubClient } from "test-utils";
+ 
+@@ -45,7 +45,7 @@ describe("MessageEventPreview", () => {
+                 room: "!room:example.com",
+                 type: "m.room.message",
+             });
+-            jest.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
++            vi.spyOn(event, "isDecryptionFailure").mockReturnValue(true);
+ 
+             expect(preview.getTextFor(event)).toBe(`${userId}: Unable to decrypt message`);
+         });
+diff --git a/apps/web/src/toasts/InRoomSearchNudgeToast-test.ts b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+similarity index 81%
+rename from apps/web/src/toasts/InRoomSearchNudgeToast-test.ts
+rename to apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+index 757e0c0d1a..e4f4709bf5 100644
+--- a/apps/web/src/toasts/InRoomSearchNudgeToast-test.ts
++++ b/apps/web/src/toasts/InRoomSearchNudgeToast.test.ts
+@@ -5,10 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import { showInRoomSearchNudgeIfNeeded } from "../../../src/toasts/InRoomSearchNudgeToast";
+-import SettingsStore from "../../../src/settings/SettingsStore";
+-import { SettingLevel } from "../../../src/settings/SettingLevel";
+-import ToastStore from "../../../src/stores/ToastStore";
++import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
++
++import { showInRoomSearchNudgeIfNeeded } from "./InRoomSearchNudgeToast";
++import SettingsStore from "../settings/SettingsStore";
++import { SettingLevel } from "../settings/SettingLevel";
++import ToastStore from "../stores/ToastStore";
+ 
+ const TOAST_KEY = "in-room-search-nudge";
+ 
+@@ -17,22 +19,22 @@ const TOAST_KEY = "in-room-search-nudge";
+ const ctrlF = (): KeyboardEvent => new KeyboardEvent("keydown", { key: "f", ctrlKey: true });
+ 
+ describe("showInRoomSearchNudgeIfNeeded", () => {
+-    let addOrReplaceToast: jest.SpyInstance;
+-    let setValue: jest.SpyInstance;
++    let addOrReplaceToast: MockInstance;
++    let setValue: MockInstance;
+ 
+     const mockSettings = (values: Record<string, boolean>): void => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => !!values[name as string]);
+     };
+ 
+     beforeEach(() => {
+-        addOrReplaceToast = jest
++        addOrReplaceToast = vi
+             .spyOn(ToastStore.sharedInstance(), "addOrReplaceToast")
+             .mockImplementation(() => undefined);
+-        setValue = jest.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
++        setValue = vi.spyOn(SettingsStore, "setValue").mockResolvedValue(undefined);
+     });
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("shows the one-time toast on Ctrl/Cmd+F when in-room search is disabled and not yet shown", () => {
+diff --git a/apps/web/src/utils/FileCategory-test.ts b/apps/web/src/utils/FileCategory.test.ts
+similarity index 98%
+rename from apps/web/src/utils/FileCategory-test.ts
+rename to apps/web/src/utils/FileCategory.test.ts
+index b7e924016d..e4df9cf378 100644
+--- a/apps/web/src/utils/FileCategory-test.ts
++++ b/apps/web/src/utils/FileCategory.test.ts
+@@ -5,6 +5,9 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { describe, it, expect } from "vitest";
++
++
+ import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
+ 
+ import {
+@@ -14,7 +17,7 @@ import {
+     eventMatchesCategory,
+     eventMatchesFileSearch,
+     buildFileEventFilter,
+-} from "../../../src/utils/FileCategory";
++} from "./FileCategory";
+ import { mkEvent } from "../../test-utils";
+ 
+ const ROOM = "!room:server";
+diff --git a/apps/web/src/utils/scrollBehavior-test.ts b/apps/web/src/utils/scrollBehavior.test.ts
+similarity index 89%
+rename from apps/web/src/utils/scrollBehavior-test.ts
+rename to apps/web/src/utils/scrollBehavior.test.ts
+index 8f8fd52ba2..6554090442 100644
+--- a/apps/web/src/utils/scrollBehavior-test.ts
++++ b/apps/web/src/utils/scrollBehavior.test.ts
+@@ -5,21 +5,24 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import SettingsStore from "../../../src/settings/SettingsStore";
+-import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "../../../src/utils/scrollBehavior";
++import { describe, it, expect, beforeEach, vi } from "vitest";
+ 
+-jest.mock("../../../src/settings/SettingsStore");
++
++import SettingsStore from "../settings/SettingsStore";
++import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";
++
++vi.mock("../settings/SettingsStore");
+ 
+ describe("scrollBehavior", () => {
+-    const mockedGetValue = jest.mocked(SettingsStore.getValue);
++    const mockedGetValue = vi.mocked(SettingsStore.getValue);
+ 
+     /** Set up matchMedia so that (prefers-reduced-motion: reduce) returns `matches`. */
+     const mockMatchMedia = (matches: boolean): void => {
+-        globalThis.matchMedia = jest.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
++        globalThis.matchMedia = vi.fn().mockReturnValue({ matches }) as unknown as typeof globalThis.matchMedia;
+     };
+ 
+     beforeEach(() => {
+-        jest.resetAllMocks();
++        vi.resetAllMocks();
+         mockedGetValue.mockReturnValue(false);
+         mockMatchMedia(false);
+     });
+diff --git a/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.test.ts b/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.test.ts
+index f393957c06..2dab8b15cf 100644
+--- a/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.test.ts
++++ b/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.test.ts
+@@ -258,7 +258,7 @@ describe("UrlPreviewGroupViewModel", () => {
+     });
+     it("should count bundled previews rather than the links in the message", async () => {
+         const { vm } = getViewModel({
+-            urlPreviewBundleEnabled: true,
++            urlPreviewKind: "preferbundled",
+             content: {
+                 msgtype: MsgType.Text,
+                 body: BUNDLE_PREVIEW_ONE.matched_url,
+diff --git a/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.ts b/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.ts
+index 80109084e3..bd9d9bff70 100644
+--- a/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.ts
++++ b/apps/web/src/viewmodels/message-body/UrlPreviewGroupViewModel.ts
+@@ -192,6 +192,7 @@ export class UrlPreviewGroupViewModel
+         const content = this.props.mxEvent.getContent();
+         const urlPreviewKind = this.props.urlPreviewKind;
+         if (
++            previews === undefined &&
+             content.msgtype === MsgType.Text &&
+             (urlPreviewKind === "bundledonly" || urlPreviewKind === "preferbundled")
+         ) {
+diff --git a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+index 707bbc6e1c..49affcadd9 100644
+--- a/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
++++ b/apps/web/src/viewmodels/message-body/VideoBodyViewModel.test.ts
+@@ -447,6 +447,20 @@ describe("VideoBodyViewModel", () => {
+         global.Image = originalImage;
+     });
+ 
++    it("names the video by its filename rather than its caption", () => {
++        const vm = createVm({
++            mxEvent: createEvent({
++                body: "a caption",
++                content: { filename: "holiday.mp4" },
++            }),
++        });
++
++        vm.setMediaVisible(true);
++
++        expect(vm.getSnapshot().videoTitle).toBe("holiday.mp4");
++        expect(vm.getSnapshot().videoLabel).toBe("holiday.mp4");
++    });
++
+     it("resets encrypted media state when the event changes", async () => {
+         const vm = createVm({
+             mxEvent: createEvent({
+diff --git a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+index c2fca0b7d3..c8517bd446 100644
+--- a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
++++ b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
+@@ -367,13 +367,13 @@ describe("RoomListViewModel", () => {
+             });
+ 
+             // Open the room at the top of the list.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room1:server");
+             dispatcher.dispatch({ action: Action.ActiveRoomChanged, newRoomId: "!room1:server" });
+             await flushPromises();
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // Reading it demotes it in the store, but sticky keeps it where the user is looking.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room2, room3, room1] }],
+             });
+@@ -386,7 +386,7 @@ describe("RoomListViewModel", () => {
+ 
+             // Moving to the next room down has to fall back to the store's order, in which the room
+             // being left is last. Reusing the pinned order would record room2 at index 1.
+-            jest.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
++            vi.spyOn(SDKContextClass.instance.roomViewStore, "getRoomId").mockReturnValue("!room2:server");
+             dispatcher.dispatch({
+                 action: Action.ActiveRoomChanged,
+                 oldRoomId: "!room1:server",
+@@ -401,7 +401,7 @@ describe("RoomListViewModel", () => {
+             expect(viewModel.getSnapshot().roomListState.activeRoomIndex).toBe(0);
+ 
+             // So when room2 is read in turn, the still-unread room3 does not jump above it.
+-            jest.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
++            vi.spyOn(RoomListStoreV3.instance, "getSortedRoomsInActiveSpace").mockReturnValue({
+                 spaceId: "home",
+                 sections: [{ tag: CHATS_TAG, rooms: [room3, room2, room1] }],
+             });
+diff --git a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
+index 576d884592..df632415c2 100644
+--- a/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
++++ b/apps/web/src/viewmodels/room/EventTileActionBarViewModel.test.ts
+@@ -35,6 +35,7 @@ import PosthogTrackers from "../../PosthogTrackers";
+ import Modal from "../../Modal";
+ import ErrorDialog from "../../components/views/dialogs/ErrorDialog";
+ import SettingsStore from "../../settings/SettingsStore";
++import { SettingLevel } from "../../settings/SettingLevel";
+ import { ModuleApi } from "../../modules/Api";
+ import { canCancel, canEditContent, editEvent, isContentActionable } from "../../utils/EventUtils";
+ import { shouldDisplayReply } from "../../utils/Reply";
+@@ -140,6 +141,9 @@ describe("EventTileActionBarViewModel", () => {
+         getLiveTimeline: Mock;
+     };
+     let getHintsForMessageSpy: Mock;
++    // Most of this suite pins the full action bar, i.e. the behaviour with `compactMessageActions` off.
++    // The dedicated describe block at the end flips it on.
++    let compactMessageActions: boolean;
+ 
+     const createMessageEvent = (overrides: Partial<ConstructorParameters<typeof MatrixEvent>[0]> = {}): MatrixEvent =>
+         new MatrixEvent({
+@@ -193,6 +197,13 @@ describe("EventTileActionBarViewModel", () => {
+         vi.spyOn(SettingsStore, "watchSetting").mockImplementation((name, scope) => `${name}:${scope ?? "global"}`);
+         vi.spyOn(SettingsStore, "unwatchSetting").mockImplementation(() => {});
+ 
++        compactMessageActions = false;
++        const realGetValue = SettingsStore.getValue.bind(SettingsStore);
++        vi.spyOn(SettingsStore, "getValue").mockImplementation(((name: string, ...rest: unknown[]) =>
++            name === "compactMessageActions"
++                ? compactMessageActions
++                : (realGetValue as (...args: unknown[]) => unknown)(name, ...rest)) as never);
++
+         vi.mocked(canCancel).mockImplementation((status) => status === EventStatus.QUEUED);
+         vi.mocked(canEditContent).mockReturnValue(true);
+         vi.mocked(isContentActionable).mockReturnValue(true);
+@@ -349,6 +360,7 @@ describe("EventTileActionBarViewModel", () => {
+         expect(roomStateOffSpy).toHaveBeenCalledWith(RoomStateEvent.Events, expect.any(Function));
+         expect(SettingsStore.unwatchSetting).toHaveBeenCalledWith("mediaPreviewConfig:!room:example.org");
+         expect(SettingsStore.unwatchSetting).toHaveBeenCalledWith("showMediaEventIds:global");
++        expect(SettingsStore.unwatchSetting).toHaveBeenCalledWith("compactMessageActions:global");
+     });
+ 
+     it("routes resend and cancel actions to the actionable failed event variant", () => {
+@@ -712,4 +724,94 @@ describe("EventTileActionBarViewModel", () => {
+             expect(vm.getSnapshot().isDownloadLoading).toBe(false);
+         });
+     });
++
++    describe("compactMessageActions", () => {
++        beforeEach(() => {
++            compactMessageActions = true;
++        });
++
++        it("collapses the quick actions into the options button", () => {
++            const vm = createVm({ isQuoteExpanded: true });
++
++            // Hovering a plain message reveals one button, not six.
++            expect(vm.getSnapshot().actions).toEqual([ActionBarAction.Expand, ActionBarAction.Options]);
++        });
++
++        it("collapses to the options button alone for a message with no reply chain", () => {
++            const vm = createVm();
++
++            expect(vm.getSnapshot().actions).toEqual([ActionBarAction.Options]);
++        });
++
++        it.each([ActionBarAction.React, ActionBarAction.Reply, ActionBarAction.ReplyInThread, ActionBarAction.Edit])(
++            "drops %s from the bar",
++            (action) => {
++                const vm = createVm();
++
++                expect(vm.getSnapshot().actions).not.toContain(action);
++            },
++        );
++
++        it("drops the pin action from the bar", () => {
++            vi.mocked(PinningUtils.canPin).mockReturnValue(true);
++
++            const vm = createVm();
++
++            expect(vm.getSnapshot().actions).not.toContain(ActionBarAction.Pin);
++        });
++
++        it("keeps reply in thread on the bar for a deleted message with a thread", () => {
++            const mxEvent = createMessageEvent();
++            vi.mocked(isContentActionable).mockReturnValue(false);
++            vi.spyOn(mxEvent, "getThread").mockReturnValue({ rootEvent } as never);
++
++            const vm = createVm({ mxEvent, timelineRenderingType: TimelineRenderingType.Room });
++
++            // A redacted event is not content-actionable, so the options menu cannot offer reply in thread.
++            // Dropping it from the bar as well would lose the action entirely.
++            expect(vm.getSnapshot().actions).toContain(ActionBarAction.ReplyInThread);
++        });
++
++        it("keeps download and hide on the bar, as the options menu has no equivalent", async () => {
++            vi.spyOn(MediaEventHelper, "isEligible").mockReturnValue(true);
++            vi.spyOn(MediaEventHelper, "canHide").mockReturnValue(true);
++            getHintsForMessageSpy.mockReturnValue({
++                allowDownloadingMedia: vi.fn().mockResolvedValue(true),
++            } as never);
++
++            const vm = createVm({
++                mxEvent: createMessageEvent({
++                    content: { msgtype: MsgType.Image, body: "Image", url: "mxc://example.org/file" },
++                }),
++            });
++
++            expect(vm.getSnapshot().actions).toContain(ActionBarAction.Hide);
++            // Download resolves behind an async permission check, exactly as in the non-compact case.
++            await waitFor(() => expect(vm.getSnapshot().actions).toContain(ActionBarAction.Download));
++        });
++
++        it("keeps resend and cancel on a failed event, which the options menu cannot offer", () => {
++            vi.mocked(canCancel).mockReturnValue(true);
++            const mxEvent = createMessageEvent();
++            mxEvent.setStatus(EventStatus.NOT_SENT);
++
++            const vm = createVm({ mxEvent });
++
++            expect(vm.getSnapshot().actions).toEqual([ActionBarAction.Resend, ActionBarAction.Cancel]);
++        });
++
++        it("re-resolves the actions when the setting is turned off", () => {
++            const vm = createVm();
++            expect(vm.getSnapshot().actions).toEqual([ActionBarAction.Options]);
++
++            // The view model watches the setting, so flipping it must repopulate the bar without a remount.
++            compactMessageActions = false;
++            const onChange = vi
++                .mocked(SettingsStore.watchSetting)
++                .mock.calls.find(([name]) => name === "compactMessageActions")?.[2];
++            onChange?.("compactMessageActions", null, SettingLevel.ACCOUNT, false, false);
++
++            expect(vm.getSnapshot().actions).toContain(ActionBarAction.Reply);
++        });
++    });
+ });
