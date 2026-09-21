@@ -1159,6 +1159,13 @@ skip_done() {
 for i in "${!REBASED[@]}"; do
     skip_done feature "$i" && continue
     merge_one "${REBASED[$i]}" feature "$i"
+    # The checkout that started this run holds the previous rebuild's cache.
+    # Resolutions recorded since then are on feat/fork-tooling, merged first.
+    # Import never overwrites a live entry, so this only adds the new ones
+    # before the contribution merges need them.
+    if [[ "${REBASED[$i]}" == "feat/fork-tooling" ]]; then
+        import_rr_cache
+    fi
 done
 # ------------------------------------ contribution branches must match their remote
 # Element's own maintainers push directly to these branches, because each one is the head
