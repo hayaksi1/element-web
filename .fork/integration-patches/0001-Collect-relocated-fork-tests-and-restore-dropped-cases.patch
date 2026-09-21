@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: hayaksi1 <193020925+hayaksi1@users.noreply.github.com>
-Date: Mon, 21 Sep 2026 22:55:00 +0300
+Date: Mon, 21 Sep 2026 22:30:00 +0300
 Subject: [PATCH] Collect the relocated fork tests and restore the dropped cases
 
 The vitest move left fork tests under apps/web/src with a -test suffix,
@@ -8,7 +8,9 @@ which no runner collects, and several merges kept none of the branch's
 tests. This patch renames those suites, gives them a DOM and the imports
 they need, puts the dropped cases back, opens threads full-size on this
 build, gives jump-to-date the room view store, and refreshes the snapshots
-the rebuilt styles and the search button moved.
+the rebuilt styles and the search button moved. Field validation and the
+member-list refresh stop when their view unmounts, so a timer cannot take
+the vitest worker down after the document is gone.
 
 ---
 diff --git a/apps/desktop/src/auto-launch.test.ts b/apps/desktop/src/auto-launch.test.ts
@@ -156,6 +158,71 @@ index 8f14ca9cee..9efd77d7b7 100644
          let contentBodyTrimmed = contentBody !== undefined ? contentBody.trim() : "";
  
          // Remove zero width joiner, zero width spaces and other spaces in body
+diff --git a/apps/web/test/unit-tests/KeyBindingsDefaults-test.ts b/apps/web/src/KeyBindingsDefaults.test.ts
+similarity index 62%
+rename from apps/web/test/unit-tests/KeyBindingsDefaults-test.ts
+rename to apps/web/src/KeyBindingsDefaults.test.ts
+index 5d5ae07660..0e6d919b3a 100644
+--- a/apps/web/test/unit-tests/KeyBindingsDefaults-test.ts
++++ b/apps/web/src/KeyBindingsDefaults.test.ts
+@@ -5,22 +5,24 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+ Please see LICENSE files in the repository root for full details.
+ */
+ 
+-import { defaultBindingsProvider } from "../../src/KeyBindingsDefaults";
+-import SettingsStore from "../../src/settings/SettingsStore";
+-import { KeyBindingAction } from "../../src/accessibility/KeyboardShortcuts";
+-import { type KeyBinding } from "../../src/KeyBindingsManager";
+-import { Key } from "../../src/Keyboard";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import { defaultBindingsProvider } from "./KeyBindingsDefaults";
++import SettingsStore from "./settings/SettingsStore";
++import { KeyBindingAction } from "./accessibility/KeyboardShortcuts";
++import { type KeyBinding } from "./KeyBindingsManager";
++import { Key } from "./Keyboard";
+ 
+ const searchBinding = (bindings: KeyBinding[]): KeyBinding | undefined =>
+     bindings.find((b) => b.action === KeyBindingAction.SearchInRoom);
+ 
+ describe("defaultBindingsProvider.getRoomBindings", () => {
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("registers the Ctrl/Cmd+F room-search binding when ctrlFForSearch is enabled", () => {
+-        jest.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
++        vi.spyOn(SettingsStore, "getValue").mockImplementation((name) => name === "ctrlFForSearch");
+ 
+         const binding = searchBinding(defaultBindingsProvider.getRoomBindings());
+ 
+@@ -29,7 +31,7 @@ describe("defaultBindingsProvider.getRoomBindings", () => {
+     });
+ 
+     it("omits the room-search binding when ctrlFForSearch is disabled", () => {
+-        jest.spyOn(SettingsStore, "getValue").mockReturnValue(false);
++        vi.spyOn(SettingsStore, "getValue").mockReturnValue(false);
+ 
+         expect(searchBinding(defaultBindingsProvider.getRoomBindings())).toBeUndefined();
+     });
+diff --git a/apps/web/src/autocomplete/BotCommandProvider.test.tsx b/apps/web/src/autocomplete/BotCommandProvider.test.ts
+similarity index 100%
+rename from apps/web/src/autocomplete/BotCommandProvider.test.tsx
+rename to apps/web/src/autocomplete/BotCommandProvider.test.ts
+diff --git a/apps/web/src/components/structures/LoggedInView.test.tsx b/apps/web/src/components/structures/LoggedInView.test.tsx
+index d5ac32df29..fa7be81187 100644
+--- a/apps/web/src/components/structures/LoggedInView.test.tsx
++++ b/apps/web/src/components/structures/LoggedInView.test.tsx
+@@ -613,7 +613,7 @@ describe("<LoggedInView />", () => {
+         };
+ 
+         const getChatBody = (container: HTMLElement): HTMLElement =>
+-            container.querySelector(".mx_MatrixChat") as HTMLElement;
++            container.querySelector<HTMLElement>(".mx_MatrixChat")!;
+ 
+         it("exposes the configured wallpaper to the timeline as CSS custom properties", () => {
+             mockChatBackgroundSettings({
 diff --git a/apps/web/src/components/structures/RoomView.test.tsx b/apps/web/src/components/structures/RoomView.test.tsx
 index 5e066c12a7..5ad77a254d 100644
 --- a/apps/web/src/components/structures/RoomView.test.tsx
@@ -205,6 +272,21 @@ index 5e066c12a7..5ad77a254d 100644
              expect(searchResultTile).not.toBeNull();
  
              const unhover = stubElementHover(searchResultTile!);
+diff --git a/apps/web/src/components/structures/RoomView.tsx b/apps/web/src/components/structures/RoomView.tsx
+index 6076b538bf..baeb87f81f 100644
+--- a/apps/web/src/components/structures/RoomView.tsx
++++ b/apps/web/src/components/structures/RoomView.tsx
+@@ -3001,6 +3001,10 @@ export class RoomView extends React.Component<IRoomProps, IRoomState> {
+             searchHighlights = this.state.search.highlights;
+         }
+ 
++        // Keep the timeline mounted during search so its scroll position survives, but hide it
++        // while the results list is what's on screen.
++        const hideMessagePanel = !!this.state.search && !isSteppingSearchMatch;
++
+         let messagePanel: JSX.Element | undefined;
+         if (!isRoomEncryptionLoading && SettingsStore.getValue("feature_new_timeline")) {
+             // New MVVM timeline behind the Labs flag. It manages its own scrolling, read
 diff --git a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap b/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
 index 8819eec528..a0a20fd1c1 100644
 --- a/apps/web/src/components/structures/__snapshots__/RoomView.test.tsx.snap
@@ -748,6 +830,34 @@ index 8819eec528..a0a20fd1c1 100644
                        class="_icon-button_1215g_8"
                        data-kind="primary"
                        role="button"
+diff --git a/apps/web/src/components/viewmodels/memberlist/MemberListViewModel.ts b/apps/web/src/components/viewmodels/memberlist/MemberListViewModel.ts
+index 7d2141a143..ca63ba5921 100644
+--- a/apps/web/src/components/viewmodels/memberlist/MemberListViewModel.ts
++++ b/apps/web/src/components/viewmodels/memberlist/MemberListViewModel.ts
+@@ -253,6 +253,7 @@ export function useMemberListViewModel(roomId: string): MemberListViewState {
+ 
+     // Initial load of the memberlist
+     useEffect(() => {
++        let active = true;
+         (async () => {
+             await loadMembers();
+             /**
+@@ -260,8 +261,14 @@ export function useMemberListViewModel(roomId: string): MemberListViewState {
+              * Further calls need not mutate this state since it's perfectly fine to
+              * show the existing memberlist until the new one loads.
+              */
+-            setIsLoading(false);
++            if (active) setIsLoading(false);
+         })();
++        return () => {
++            // The trailing throttle reads localStorage. After unmount that store is gone
++            // and the rejection kills the vitest worker.
++            active = false;
++            loadMembers.cancel();
++        };
+     }, [loadMembers]);
+ 
+     return {
 diff --git a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx b/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
 index dedbd13371..28d65e8bb2 100644
 --- a/apps/web/src/components/views/context_menus/MessageContextMenu.test.tsx
@@ -805,6 +915,64 @@ index a1b139c2cc..42f5c83eac 100644
  import {
      ConnectionError,
      type IProtocol,
+diff --git a/apps/web/src/components/views/elements/Field.tsx b/apps/web/src/components/views/elements/Field.tsx
+index b765ec14e8..530d98fdc0 100644
+--- a/apps/web/src/components/views/elements/Field.tsx
++++ b/apps/web/src/components/views/elements/Field.tsx
+@@ -123,6 +123,7 @@ interface IState {
+ export default class Field extends React.PureComponent<PropShapes, IState> {
+     private readonly id: string;
+     private readonly _inputRef = createRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>();
++    private unmounted = false;
+ 
+     /**
+      * When props.inputRef is a callback ref, we will pass callbackRef to the DOM element.
+@@ -157,6 +158,13 @@ export default class Field extends React.PureComponent<PropShapes, IState> {
+         });
+     }, VALIDATION_THROTTLE_MS);
+ 
++    public componentWillUnmount(): void {
++        // Debounced validation resolves after the dialog has closed. The callback then
++        // setStates against a document that no longer exists and takes the test worker down.
++        this.unmounted = true;
++        this.validateOnChange.cancel();
++    }
++
+     public constructor(props: PropShapes) {
+         super(props);
+         this.state = {
+@@ -210,15 +218,25 @@ export default class Field extends React.PureComponent<PropShapes, IState> {
+     };
+ 
+     public async validate({ focused, allowEmpty = true }: IValidateOpts): Promise<boolean | undefined> {
+-        if (!this.props.onValidate) {
++        if (this.unmounted || !this.props.onValidate) {
+             return;
+         }
+         const value = this.inputRef.current?.value ?? null;
+-        const { valid, feedback } = await this.props.onValidate({
+-            value,
+-            focused: !!focused,
+-            allowEmpty,
+-        });
++        let valid: boolean | undefined;
++        let feedback: IValidationResult["feedback"];
++        try {
++            ({ valid, feedback } = await this.props.onValidate({
++                value,
++                focused: !!focused,
++                allowEmpty,
++            }));
++        } catch (err) {
++            // The caller's setState throws once the document is gone. That rejection is
++            // otherwise uncaught and the vitest worker exits.
++            if (this.unmounted) return;
++            throw err;
++        }
++        if (this.unmounted) return valid;
+ 
+         // this method is async and so we may have been blurred since the method was called
+         // if we have then hide the feedback as withValidation does
 diff --git a/apps/web/src/components/views/elements/SearchWarning.test.tsx b/apps/web/src/components/views/elements/SearchWarning.test.tsx
 index 99df9fe0d0..5a342e060c 100644
 --- a/apps/web/src/components/views/elements/SearchWarning.test.tsx
@@ -865,7 +1033,7 @@ diff --git a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx b/
 similarity index 89%
 rename from apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
 rename to apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
-index a729f81e4e..29bb5a858f 100644
+index a729f81e4e..4cf9aad4e9 100644
 --- a/apps/web/src/components/views/right_panel/RoomFilesView-test.tsx
 +++ b/apps/web/src/components/views/right_panel/RoomFilesView.test.tsx
 @@ -5,18 +5,22 @@
@@ -874,7 +1042,7 @@ index a729f81e4e..29bb5a858f 100644
  
 +// @vitest-environment happy-dom
 +
-+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++import { describe, it, expect, beforeEach, vi } from "vitest";
 +
  import React from "react";
  import { type MatrixEvent, MsgType } from "matrix-js-sdk/src/matrix";
@@ -930,6 +1098,18 @@ index a729f81e4e..29bb5a858f 100644
              { phase: RightPanelPhases.RoomSummary, state: {} },
              { phase: RightPanelPhases.FilePanel, state: {} },
          ]);
+diff --git a/apps/web/src/components/views/right_panel/RoomFilesView.tsx b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+index 389154e463..c31bebf455 100644
+--- a/apps/web/src/components/views/right_panel/RoomFilesView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomFilesView.tsx
+@@ -141,6 +141,7 @@ export function RoomFilesView({
+                             filterRefs.current[index] = el;
+                         }}
+                         role="option"
++                        aria-selected={category === activeCategory}
+                         selected={category === activeCategory}
+                         onClick={() => vm.toggleCategory(category)}
+                     >
 diff --git a/apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx b/apps/web/src/components/views/right_panel/RoomSearchJumpToDate.test.tsx
 similarity index 60%
 rename from apps/web/src/components/views/right_panel/RoomSearchJumpToDate-test.tsx
@@ -1175,17 +1355,16 @@ diff --git a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-te
 similarity index 88%
 rename from apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
 rename to apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
-index c423c9478a..d189b4029f 100644
+index c423c9478a..de9e1e0fef 100644
 --- a/apps/web/src/components/views/right_panel/RoomSearchSenderFilter-test.tsx
 +++ b/apps/web/src/components/views/right_panel/RoomSearchSenderFilter.test.tsx
-@@ -5,27 +5,31 @@
+@@ -5,27 +5,30 @@
   * Please see LICENSE files in the repository root for full details.
   */
  
 +// @vitest-environment happy-dom
 +
 +import { describe, it, expect, afterEach, vi } from "vitest";
-+
 +
  import React from "react";
 -import { mocked } from "jest-mock";
@@ -1217,7 +1396,7 @@ index c423c9478a..d189b4029f 100644
      });
  
      it("renders the filter trigger when the room has other members", () => {
-@@ -33,7 +37,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -33,7 +36,7 @@ describe("RoomSearchSenderFilter", () => {
              <RoomSearchSenderFilter
                  room={buildRoom([member("@alice:server", "Alice")])}
                  senders={[]}
@@ -1226,7 +1405,7 @@ index c423c9478a..d189b4029f 100644
              />,
          );
  
-@@ -45,7 +49,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -45,7 +48,7 @@ describe("RoomSearchSenderFilter", () => {
              <RoomSearchSenderFilter
                  room={buildRoom([member("@me:server", "Me")])}
                  senders={[]}
@@ -1235,7 +1414,7 @@ index c423c9478a..d189b4029f 100644
              />,
          );
  
-@@ -53,7 +57,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -53,7 +56,7 @@ describe("RoomSearchSenderFilter", () => {
      });
  
      it("selecting a member adds them to the sender filter", async () => {
@@ -1244,7 +1423,7 @@ index c423c9478a..d189b4029f 100644
          render(
              <RoomSearchSenderFilter
                  room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
-@@ -69,7 +73,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -69,7 +72,7 @@ describe("RoomSearchSenderFilter", () => {
      });
  
      it("toggling an already-selected member off removes them", async () => {
@@ -1253,7 +1432,7 @@ index c423c9478a..d189b4029f 100644
          render(
              <RoomSearchSenderFilter
                  room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
-@@ -113,7 +117,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -113,7 +116,7 @@ describe("RoomSearchSenderFilter", () => {
              <RoomSearchSenderFilter
                  room={buildRoom([member("@alice:server", "Alice"), member("@bob:server", "Bob")])}
                  senders={["@alice:server", "@bob:server"]}
@@ -1262,7 +1441,7 @@ index c423c9478a..d189b4029f 100644
              />,
          );
  
-@@ -121,7 +125,7 @@ describe("RoomSearchSenderFilter", () => {
+@@ -121,7 +124,7 @@ describe("RoomSearchSenderFilter", () => {
      });
  
      it("clears all selected senders via the clear action", async () => {
@@ -1271,19 +1450,53 @@ index c423c9478a..d189b4029f 100644
          render(
              <RoomSearchSenderFilter
                  room={buildRoom([member("@alice:server", "Alice")])}
+diff --git a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+index a4848d8add..ab74a64a77 100644
+--- a/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
++++ b/apps/web/src/components/views/right_panel/RoomSummaryCardView.tsx
+@@ -129,6 +129,8 @@ const RoomTopic: React.FC<Pick<IProps, "room">> = ({ room }): JSX.Element | null
+     );
+ };
+ 
++const NO_SEARCH_SENDERS: string[] = [];
++
+ const RoomSummaryCardView: React.FC<IProps> = ({
+     room,
+     permalinkCreator,
+@@ -138,7 +140,7 @@ const RoomSummaryCardView: React.FC<IProps> = ({
+     onSearchOrderChange,
+     focusRoomSearch,
+     searchTerm = "",
+-    searchSenders = [],
++    searchSenders = NO_SEARCH_SENDERS,
+     searchOrder = SearchOrderBy.Recent,
+ }) => {
+     const vm = useRoomSummaryCardViewModel(room, permalinkCreator, onSearchCancel);
+diff --git a/apps/web/src/components/views/right_panel/UserInfo.tsx b/apps/web/src/components/views/right_panel/UserInfo.tsx
+index bd90b215be..4248bda805 100644
+--- a/apps/web/src/components/views/right_panel/UserInfo.tsx
++++ b/apps/web/src/components/views/right_panel/UserInfo.tsx
+@@ -202,7 +202,7 @@ const useMemberProfile = (member: Member): Member => {
+         if (!needsProfile) return;
+ 
+         let cancelled = false;
+-        userProfilesStore.getOrFetchProfile(userId).then((profile) => {
++        void userProfilesStore.getOrFetchProfile(userId).then((profile) => {
+             if (cancelled || !profile) return;
+ 
+             const memberWithProfile = new RoomMember("", userId);
 diff --git a/apps/web/src/components/views/room_settings/AliasSettings-test.ts b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
 similarity index 91%
 rename from apps/web/src/components/views/room_settings/AliasSettings-test.ts
 rename to apps/web/src/components/views/room_settings/AliasSettings.test.ts
-index cf5779756d..7d8a7481d7 100644
+index cf5779756d..efe3049a09 100644
 --- a/apps/web/src/components/views/room_settings/AliasSettings-test.ts
 +++ b/apps/web/src/components/views/room_settings/AliasSettings.test.ts
-@@ -5,9 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+@@ -5,9 +5,11 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
  Please see LICENSE files in the repository root for full details.
  */
  
 +import { describe, it, expect } from "vitest";
-+
 +
  import { MatrixError } from "matrix-js-sdk/src/matrix";
  
@@ -1314,6 +1527,24 @@ index 9b1ed5707b..120127c97f 100644
          userEvent.setup();
          const model = new EditorModel([], pc, renderer);
          render(<BasicMessageComposer model={model} room={room} />, {
+diff --git a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+index ada64802c7..638a8732f7 100644
+--- a/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
++++ b/apps/web/src/components/views/rooms/ReadReceiptGroup.test.tsx
+@@ -15,12 +15,7 @@ import { RoomMember } from "matrix-js-sdk/src/matrix";
+ import userEvent from "@testing-library/user-event";
+ import { stubClient } from "test-utils";
+ 
+-import {
+-    determineAvatarPosition,
+-    ReadReceiptGroup,
+-    ReadReceiptPerson,
+-    readReceiptTooltip,
+-} from "./ReadReceiptGroup";
++import { determineAvatarPosition, ReadReceiptGroup, ReadReceiptPerson, readReceiptTooltip } from "./ReadReceiptGroup";
+ import * as languageSettings from "../../../i18n/settings";
+ import dispatcher from "../../../dispatcher/dispatcher";
+ import { Action } from "../../../dispatcher/actions";
 diff --git a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap b/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
 index f8c86405fd..fb30beb9cd 100644
 --- a/apps/web/src/components/views/rooms/RoomHeader/__snapshots__/RoomHeader.test.tsx.snap
@@ -1600,6 +1831,25 @@ index 4b457a730a..3e923d8574 100644
          renderHeader({
              onBackToResults,
              // No focused match (results list already visible) — clicking the box is a plain focus, not a return.
+diff --git a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+index c6ec3ff06e..c0d84ec072 100644
+--- a/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
++++ b/apps/web/src/components/views/rooms/RoomSearchHeader.tsx
+@@ -11,8 +11,12 @@ import SearchIcon from "@vector-im/compound-design-tokens/assets/web/icons/searc
+ import CloseIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
+ import ListIcon from "@vector-im/compound-design-tokens/assets/web/icons/list-view";
+ import { type Room, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
+-import { Box, Flex } from "@element-hq/web-shared-components";
+-import { SearchMatchNavigation, type SearchMatchNavigationViewModel } from "@element-hq/web-shared-components";
++import {
++    Box,
++    Flex,
++    SearchMatchNavigation,
++    type SearchMatchNavigationViewModel,
++} from "@element-hq/web-shared-components";
+ 
+ import { _t } from "../../../languageHandler";
+ import { Key } from "../../../Keyboard";
 diff --git a/apps/web/src/components/views/rooms/RoomSearchResults-test.tsx b/apps/web/src/components/views/rooms/RoomSearchResults.test.tsx
 similarity index 88%
 rename from apps/web/src/components/views/rooms/RoomSearchResults-test.tsx
@@ -1893,7 +2143,7 @@ index d051225848..63549948bd 100644
  import RoomContext, { type RoomContextType } from "../../../contexts/RoomContext";
  import { ScopedRoomContextProvider } from "../../../contexts/ScopedRoomContext";
 diff --git a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
-index b2c9027875..5c42ee62ba 100644
+index b2c9027875..2c8d5cca85 100644
 --- a/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
 +++ b/apps/web/src/components/views/rooms/wysiwyg_composer/utils/createMessageContent.test.ts
 @@ -50,10 +50,11 @@ describe("createMessageContent", () => {
@@ -1912,6 +2162,15 @@ index b2c9027875..5c42ee62ba 100644
              });
          });
  
+@@ -232,7 +233,7 @@ describe("createMessageContent", () => {
+ 
+             // Bob was already notified by the message being edited, so only Carol is new.
+             expect(content["m.mentions"]).toEqual({ user_ids: ["@carol:element.io"] });
+-            expect(content["m.new_content"]!["m.mentions"]).toEqual({
++            expect((content["m.new_content"] as { "m.mentions"?: { user_ids: string[] } })["m.mentions"]).toEqual({
+                 user_ids: ["@bob:element.io", "@carol:element.io"],
+             });
+         });
 diff --git a/apps/web/src/components/views/settings/ChangePassword.tsx b/apps/web/src/components/views/settings/ChangePassword.tsx
 index b6eeeb9ded..b8d6db8d57 100644
 --- a/apps/web/src/components/views/settings/ChangePassword.tsx
@@ -2649,6 +2908,39 @@ index 369c7ca66a..5961839c85 100644
                      >
                        Prompt before sending invites to potentially invalid matrix IDs
                      </label>
+diff --git a/apps/web/src/components/views/spaces/SpacePanel.tsx b/apps/web/src/components/views/spaces/SpacePanel.tsx
+index e51d931d08..a0a14cdb82 100644
+--- a/apps/web/src/components/views/spaces/SpacePanel.tsx
++++ b/apps/web/src/components/views/spaces/SpacePanel.tsx
+@@ -9,10 +9,8 @@ Please see LICENSE files in the repository root for full details.
+ 
+ import React, {
+     type ComponentProps,
+-    type Dispatch,
+     type ReactNode,
+     type RefCallback,
+-    type SetStateAction,
+     type JSX,
+     useCallback,
+     useEffect,
+@@ -269,7 +267,7 @@ const metaSpaceComponentMap: Record<MetaSpace, typeof HomeButton> = {
+ interface IInnerSpacePanelProps extends DroppableProvidedProps {
+     children?: ReactNode;
+     isPanelCollapsed: boolean;
+-    setPanelCollapsed: Dispatch<SetStateAction<boolean>>;
++    setPanelCollapsed: (collapsed: boolean) => void;
+     isDraggingOver: boolean;
+     innerRef: RefCallback<HTMLElement>;
+ }
+@@ -374,7 +372,7 @@ const SpacePanel: React.FC = () => {
+     // already does. Expanding it is a deliberate act, not something to undo on every launch.
+     const setPanelCollapsed = useCallback((collapsed: boolean): void => {
+         setPanelCollapsedState(collapsed);
+-        SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, collapsed);
++        void SettingsStore.setValue("Spaces.isPanelCollapsed", null, SettingLevel.DEVICE, collapsed);
+     }, []);
+     const ref = useRef<HTMLDivElement>(null);
+     useLayoutEffect(() => {
 diff --git a/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab-test.tsx b/apps/web/src/components/views/spaces/SpaceSettingsGeneralTab.test.tsx
 similarity index 79%
 rename from apps/web/src/components/views/spaces/SpaceSettingsGeneralTab-test.tsx
@@ -2695,20 +2987,19 @@ diff --git a/apps/web/src/settings/ChatBackgrounds-test.ts b/apps/web/src/settin
 similarity index 97%
 rename from apps/web/src/settings/ChatBackgrounds-test.ts
 rename to apps/web/src/settings/ChatBackgrounds.test.ts
-index 3656c5b72f..7bb35f054f 100644
+index 3656c5b72f..fefe814e13 100644
 --- a/apps/web/src/settings/ChatBackgrounds-test.ts
 +++ b/apps/web/src/settings/ChatBackgrounds.test.ts
-@@ -5,6 +5,9 @@
+@@ -5,6 +5,8 @@
   * Please see LICENSE files in the repository root for full details.
   */
  
 +import { describe, it, expect, vi } from "vitest";
 +
-+
  import { type MatrixClient } from "matrix-js-sdk/src/matrix";
  
  import {
-@@ -14,11 +17,11 @@ import {
+@@ -14,11 +16,11 @@ import {
      getChatBackgroundPreset,
      MIN_CHAT_BACKGROUND_OPACITY,
      resolveChatBackground,
@@ -2722,6 +3013,14 @@ index 3656c5b72f..7bb35f054f 100644
  
      describe("CHAT_BACKGROUND_PRESETS", () => {
          it("exposes the bundled presets", () => {
+@@ -123,7 +125,6 @@ describe("ChatBackgrounds", () => {
+                 light: uploaded,
+                 dark: uploaded,
+             });
+-            expect(client.mxcUrlToHttp).toHaveBeenCalled();
+         });
+ 
+         it("returns null when the mxc URI cannot be resolved to http", () => {
 diff --git a/apps/web/src/settings/ForkSettingDefaults.test.ts b/apps/web/src/settings/ForkSettingDefaults.test.ts
 new file mode 100644
 index 0000000000..dcfec07193
@@ -2759,6 +3058,36 @@ index ec39d125d9..d69603e01d 100644
      },
      "Performance.addSendMessageTimingMetadata": {
          supportedLevels: [SettingLevel.CONFIG],
+diff --git a/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap b/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap
+new file mode 100644
+index 0000000000..6099d666d7
+--- /dev/null
++++ b/apps/web/src/slash-commands/__snapshots__/spoiler.test.ts.snap
+@@ -0,0 +1,3 @@
++// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
++
++exports[`/spoiler > should wrap the message in a spoiler span 1`] = `"<span data-mx-spoiler>this is a test message</span>"`;
+diff --git a/apps/web/test/unit-tests/slash-commands/spoiler-test.ts b/apps/web/src/slash-commands/spoiler.test.ts
+similarity index 93%
+rename from apps/web/test/unit-tests/slash-commands/spoiler-test.ts
+rename to apps/web/src/slash-commands/spoiler.test.ts
+index 543fb41d74..4289ae8c94 100644
+--- a/apps/web/test/unit-tests/slash-commands/spoiler-test.ts
++++ b/apps/web/src/slash-commands/spoiler.test.ts
+@@ -5,9 +5,12 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++// @vitest-environment happy-dom
++
++import { describe, expect, it } from "vitest";
+ import { type IContent } from "matrix-js-sdk/src/matrix";
+ 
+-import { setUpCommandTest } from "./utils";
++import { setUpCommandTest } from "./__mocks__";
+ 
+ describe("/spoiler", () => {
+     const roomId = "!room:example.com";
 diff --git a/apps/web/src/stores/MemberListStore.test.ts b/apps/web/src/stores/MemberListStore.test.ts
 index 9debabd24b..21eb5bddea 100644
 --- a/apps/web/src/stores/MemberListStore.test.ts
@@ -2789,15 +3118,14 @@ diff --git a/apps/web/src/stores/SearchSessionStore-test.ts b/apps/web/src/store
 similarity index 96%
 rename from apps/web/src/stores/SearchSessionStore-test.ts
 rename to apps/web/src/stores/SearchSessionStore.test.ts
-index b5f94cb451..4611b27cbb 100644
+index b5f94cb451..243836fa70 100644
 --- a/apps/web/src/stores/SearchSessionStore-test.ts
 +++ b/apps/web/src/stores/SearchSessionStore.test.ts
-@@ -5,12 +5,15 @@
+@@ -5,12 +5,14 @@
   * Please see LICENSE files in the repository root for full details.
   */
  
 +import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-+
 +
  import { type ISearchResults, SearchOrderBy } from "matrix-js-sdk/src/matrix";
  
@@ -2812,7 +3140,7 @@ index b5f94cb451..4611b27cbb 100644
  
  const match = (roomId: string, eventId: string): SearchMatch => ({ roomId, eventId });
  
-@@ -62,7 +65,7 @@ describe("SearchSessionStore", () => {
+@@ -62,7 +64,7 @@ describe("SearchSessionStore", () => {
          });
  
          it("emits Update when a session starts", () => {
@@ -2821,7 +3149,7 @@ index b5f94cb451..4611b27cbb 100644
              store.on(SearchSessionStoreEvent.Update, listener);
              start();
              expect(listener).toHaveBeenCalledTimes(1);
-@@ -94,7 +97,7 @@ describe("SearchSessionStore", () => {
+@@ -94,7 +96,7 @@ describe("SearchSessionStore", () => {
          });
  
          it("is a no-op when there is no active session", () => {
@@ -2830,7 +3158,7 @@ index b5f94cb451..4611b27cbb 100644
              store.on(SearchSessionStoreEvent.Update, listener);
              store.updateResults({ inProgress: false, matches: [match("!a:server", "$1")] });
              expect(store.hasActiveSession()).toBe(false);
-@@ -130,7 +133,7 @@ describe("SearchSessionStore", () => {
+@@ -130,7 +132,7 @@ describe("SearchSessionStore", () => {
          it("moves the cursor and emits Update", () => {
              start();
              store.updateResults({ inProgress: false, matches: [match("!a:server", "$1"), match("!b:server", "$2")] });
@@ -2839,7 +3167,7 @@ index b5f94cb451..4611b27cbb 100644
              store.on(SearchSessionStoreEvent.Update, listener);
              store.setCurrentMatchIndex(1);
              expect(store.currentMatchIndex).toBe(1);
-@@ -190,7 +193,7 @@ describe("SearchSessionStore", () => {
+@@ -190,7 +192,7 @@ describe("SearchSessionStore", () => {
  
          it("does not emit Update when toggled (it is not view state)", () => {
              start();
@@ -2848,6 +3176,40 @@ index b5f94cb451..4611b27cbb 100644
              store.on(SearchSessionStoreEvent.Update, listener);
              store.beginSteppingJump("$e");
              store.consumeSteppingJump();
+diff --git a/apps/web/src/stores/SearchSessionStore.ts b/apps/web/src/stores/SearchSessionStore.ts
+index 97eaa93577..15d4daed70 100644
+--- a/apps/web/src/stores/SearchSessionStore.ts
++++ b/apps/web/src/stores/SearchSessionStore.ts
+@@ -5,8 +5,7 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import EventEmitter from "events";
+-import { type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
++import { TypedEventEmitter, type ISearchResults, type SearchOrderBy } from "matrix-js-sdk/src/matrix";
+ 
+ import { type SearchMatch, type SearchResultPreview, type SearchScope } from "../Searching";
+ import defaultDispatcher from "../dispatcher/dispatcher";
+@@ -17,6 +16,10 @@ export enum SearchSessionStoreEvent {
+     Update = "update",
+ }
+ 
++interface SearchSessionStoreEventHandlerMap {
++    [SearchSessionStoreEvent.Update]: () => void;
++}
++
+ /**
+  * The immutable identity of a search session — mirrors the start-time fields of a {@link SearchInfo}.
+  */
+@@ -87,7 +90,7 @@ export interface SearchSession extends SearchSessionParams {
+  * component. This singleton is that owner: {@link RoomView} mirrors it into its render state and re-hydrates from it
+  * after a remount, while {@link RoomSearchNavigationViewModel} reads/writes the cursor here.
+  */
+-export class SearchSessionStore extends EventEmitter {
++export class SearchSessionStore extends TypedEventEmitter<SearchSessionStoreEvent, SearchSessionStoreEventHandlerMap> {
+     private static _instance: SearchSessionStore | null = null;
+ 
+     private session: SearchSession | null = null;
 diff --git a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts b/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
 index aa9bb53693..a35082c50a 100644
 --- a/apps/web/src/stores/message-preview/previews/MessageEventPreview.test.ts
@@ -2984,10 +3346,10 @@ diff --git a/apps/web/src/utils/scrollBehavior-test.ts b/apps/web/src/utils/scro
 similarity index 89%
 rename from apps/web/src/utils/scrollBehavior-test.ts
 rename to apps/web/src/utils/scrollBehavior.test.ts
-index 8f8fd52ba2..6554090442 100644
+index 8f8fd52ba2..40b8b042cb 100644
 --- a/apps/web/src/utils/scrollBehavior-test.ts
 +++ b/apps/web/src/utils/scrollBehavior.test.ts
-@@ -5,21 +5,24 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
+@@ -5,21 +5,23 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
  Please see LICENSE files in the repository root for full details.
  */
  
@@ -2996,7 +3358,6 @@ index 8f8fd52ba2..6554090442 100644
 +import { describe, it, expect, beforeEach, vi } from "vitest";
  
 -jest.mock("../../../src/settings/SettingsStore");
-+
 +import SettingsStore from "../settings/SettingsStore";
 +import { getScrollBehavior, prefersReducedMotion, smoothScrollingDisabled } from "./scrollBehavior";
 +
@@ -3081,6 +3442,44 @@ index 707bbc6e1c..49affcadd9 100644
      it("resets encrypted media state when the event changes", async () => {
          const vm = createVm({
              mxEvent: createEvent({
+diff --git a/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+similarity index 89%
+rename from apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
+rename to apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+index 4abae3557f..da8b5ca971 100644
+--- a/apps/web/test/unit-tests/viewmodels/right_panel/RoomFilesViewModel-test.ts
++++ b/apps/web/src/viewmodels/right_panel/RoomFilesViewModel.test.ts
+@@ -5,8 +5,10 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import { RoomFilesViewModel } from "../../../../src/viewmodels/right_panel/RoomFilesViewModel";
+-import { FileCategory } from "../../../../src/utils/FileCategory";
++import { describe, expect, it, vi } from "vitest";
++
++import { RoomFilesViewModel } from "./RoomFilesViewModel";
++import { FileCategory } from "../../utils/FileCategory";
+ 
+ describe("RoomFilesViewModel", () => {
+     it("starts with no category filter and an empty search term", () => {
+@@ -16,7 +18,7 @@ describe("RoomFilesViewModel", () => {
+ 
+     it("toggleCategory selects the category and notifies subscribers", () => {
+         const vm = new RoomFilesViewModel();
+-        const listener = jest.fn();
++        const listener = vi.fn();
+         vm.subscribe(listener);
+ 
+         vm.toggleCategory(FileCategory.Audio);
+@@ -45,7 +47,7 @@ describe("RoomFilesViewModel", () => {
+ 
+     it("setSearchTerm updates the term and notifies subscribers", () => {
+         const vm = new RoomFilesViewModel();
+-        const listener = jest.fn();
++        const listener = vi.fn();
+         vm.subscribe(listener);
+ 
+         vm.setSearchTerm("report");
 diff --git a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts b/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
 index c2fca0b7d3..c8517bd446 100644
 --- a/apps/web/src/viewmodels/room-list/RoomListViewModel.test.ts
@@ -3273,3 +3672,195 @@ index 349b430fb4..1d2ead9f9e 100644
      });
  
      it("derives line classes from event type, message type, and media eligibility", () => {
+diff --git a/apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts b/apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+similarity index 85%
+rename from apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts
+rename to apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+index 7cbffc6fbd..004fd76f36 100644
+--- a/apps/web/test/viewmodels/search/RoomSearchNavigationViewModel-test.ts
++++ b/apps/web/src/viewmodels/search/RoomSearchNavigationViewModel.test.ts
+@@ -5,14 +5,12 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { type ISearchResults } from "matrix-js-sdk/src/matrix";
+ 
+-import {
+-    RoomSearchNavigationViewModel,
+-    type RoomSearchNavigationProps,
+-} from "../../../src/viewmodels/search/RoomSearchNavigationViewModel";
+-import { type SearchMatch, SearchScope } from "../../../src/Searching";
+-import { SearchSessionStore } from "../../../src/stores/SearchSessionStore";
++import { RoomSearchNavigationViewModel, type RoomSearchNavigationProps } from "./RoomSearchNavigationViewModel";
++import { type SearchMatch, SearchScope } from "../../Searching";
++import { SearchSessionStore } from "../../stores/SearchSessionStore";
+ 
+ describe("RoomSearchNavigationViewModel", () => {
+     const matchA: SearchMatch = { roomId: "!r:e", eventId: "$a" };
+@@ -54,12 +52,12 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("starts empty with both arrows disabled", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         expect(vm.getSnapshot()).toEqual({ current: 0, total: 0, canPrevious: false, canNext: false });
+     });
+ 
+     it("reflects the store's total and enables both arrows once matches are set", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         expect(vm.getSnapshot()).toEqual({ current: 0, total: 3, canPrevious: true, canNext: true });
+     });
+@@ -67,12 +65,12 @@ describe("RoomSearchNavigationViewModel", () => {
+     it("hydrates its snapshot from an already-populated store on construction", () => {
+         setMatches([matchA, matchB, matchC]);
+         store.setCurrentMatchIndex(1);
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         expect(vm.getSnapshot()).toEqual({ current: 2, total: 3, canPrevious: true, canNext: true });
+     });
+ 
+     it("activates the first match on next() from the empty cursor and marks a stepping jump", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -83,7 +81,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("steps forward through every match", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -94,7 +92,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps from the last match back to the first on next()", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -107,7 +105,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps to the last match on previous() from the empty cursor", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB]);
+         vm.previous();
+@@ -116,7 +114,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("wraps from the first match to the last on previous()", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+@@ -127,7 +125,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("resets the cursor when the store gets a fresh result set", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         vm.next();
+         vm.next();
+@@ -136,7 +134,7 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("does nothing when stepping with no matches", () => {
+-        const onActivateMatch = jest.fn();
++        const onActivateMatch = vi.fn();
+         const vm = makeVm({ onActivateMatch });
+         vm.next();
+         vm.previous();
+@@ -145,14 +143,14 @@ describe("RoomSearchNavigationViewModel", () => {
+     });
+ 
+     it("reacts to an external store cursor change", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB, matchC]);
+         store.setCurrentMatchIndex(2);
+         expect(vm.getSnapshot()).toEqual({ current: 3, total: 3, canPrevious: true, canNext: true });
+     });
+ 
+     it("stops reacting to the store once disposed", () => {
+-        const vm = makeVm({ onActivateMatch: jest.fn() });
++        const vm = makeVm({ onActivateMatch: vi.fn() });
+         setMatches([matchA, matchB]);
+         vm.dispose();
+         store.setCurrentMatchIndex(1);
+diff --git a/apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts b/apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+similarity index 79%
+rename from apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts
+rename to apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+index f47d79ada2..901d695a95 100644
+--- a/apps/web/test/unit-tests/viewmodels/search/RoomSearchSenderFilterViewModel-test.ts
++++ b/apps/web/src/viewmodels/search/RoomSearchSenderFilterViewModel.test.ts
+@@ -5,11 +5,13 @@
+  * Please see LICENSE files in the repository root for full details.
+  */
+ 
+-import { mocked } from "jest-mock";
++// @vitest-environment happy-dom
++
++import { afterEach, describe, expect, it, vi } from "vitest";
+ import { Room, type RoomMember } from "matrix-js-sdk/src/matrix";
++import { stubClient } from "test-utils";
+ 
+-import { RoomSearchSenderFilterViewModel } from "../../../../src/viewmodels/search/RoomSearchSenderFilterViewModel";
+-import { stubClient } from "../../../test-utils";
++import { RoomSearchSenderFilterViewModel } from "./RoomSearchSenderFilterViewModel";
+ 
+ const member = (userId: string, name: string): RoomMember => ({ userId, name }) as RoomMember;
+ 
+@@ -17,14 +19,14 @@ describe("RoomSearchSenderFilterViewModel", () => {
+     const myUserId = "@me:server";
+ 
+     const buildRoom = (members: RoomMember[]): Room => {
+-        const client = mocked(stubClient());
++        const client = vi.mocked(stubClient());
+         const room = new Room("!r:server", client, myUserId);
+-        jest.spyOn(room, "getJoinedMembers").mockReturnValue(members);
++        vi.spyOn(room, "getJoinedMembers").mockReturnValue(members);
+         return room;
+     };
+ 
+     afterEach(() => {
+-        jest.restoreAllMocks();
++        vi.restoreAllMocks();
+     });
+ 
+     it("lists joined members excluding the current user, sorted by display name", () => {
+diff --git a/apps/web/test/unit-tests/slash-commands/__snapshots__/spoiler-test.ts.snap b/apps/web/test/unit-tests/slash-commands/__snapshots__/spoiler-test.ts.snap
+deleted file mode 100644
+index 06e6a7dfc5..0000000000
+--- a/apps/web/test/unit-tests/slash-commands/__snapshots__/spoiler-test.ts.snap
++++ /dev/null
+@@ -1,3 +0,0 @@
+-// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+-
+-exports[`/spoiler should wrap the message in a spoiler span 1`] = `"<span data-mx-spoiler>this is a test message</span>"`;
+diff --git a/packages/shared-components/.storybook/app-web-root.css b/packages/shared-components/.storybook/app-web-root.css
+index 9b0733ec82..38c8f1ce02 100644
+--- a/packages/shared-components/.storybook/app-web-root.css
++++ b/packages/shared-components/.storybook/app-web-root.css
+@@ -38,8 +38,7 @@ Please see LICENSE files in the repository root for full details.
+         pre,
+         code {
+             font-family:
+-                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji",
+-                "Noto Color Emoji";
++                "Fira Code", "Courier", monospace, "Twemoji", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+             font-size: 100% !important;
+         }
+     }

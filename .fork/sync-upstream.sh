@@ -1583,6 +1583,12 @@ KNOWN_JEST_FAILURES="$REPO_ROOT/.fork/known-jest-failures.txt"
 gate_jest() {
     local out json failed unknown
     log "gate: jest (apps/web)"
+    # Upstream removed jest (#35084). The unit gate is vitest, via pnpm test:unit above.
+    # A missing binary used to fail this gate and block every publish.
+    if [[ ! -e "$REPO_ROOT/node_modules/.bin/jest" ]]; then
+        log "  jest is not installed; skipping"
+        return 0
+    fi
     out="$(mktemp)"; json="$(mktemp)"
     if ( cd "$REPO_ROOT/apps/web" && TZ=UTC NODE_OPTIONS=--max_old_space_size=8192 \
             pnpm exec jest --ci --maxWorkers=50% --json --outputFile="$json" ) >"$out" 2>&1; then
