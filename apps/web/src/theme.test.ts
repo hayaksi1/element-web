@@ -56,6 +56,7 @@ describe("theme", () => {
 
         afterEach(() => {
             vi.useRealTimers();
+            delete (window as { electron?: unknown }).electron;
         });
 
         it("should switch theme on onload call", async () => {
@@ -191,6 +192,35 @@ describe("theme", () => {
             expect(spy).toHaveBeenCalledWith("--sidebar-color-0pct", "#abcdef00");
             expect(spy).toHaveBeenCalledWith("--sidebar-color-15pct", "#abcdef26");
             expect(spy).toHaveBeenCalledWith("--sidebar-color-50pct", "#abcdef80");
+        });
+
+        it("reports the resolved theme background colour to the desktop app", async () => {
+            vi.spyOn(global, "getComputedStyle").mockReturnValue({
+                backgroundColor: "rgb(16, 19, 23)",
+            } as CSSStyleDeclaration);
+            const send = vi.fn();
+            (window as { electron?: unknown }).electron = { send, on: vi.fn() } as any;
+
+            await new Promise((resolve) => {
+                setTheme("dark").then(resolve);
+                darkTheme.onload!({} as Event);
+            });
+
+            expect(send).toHaveBeenCalledWith("setThemeColor", "rgb(16, 19, 23)");
+        });
+
+        it("does not report or throw when not running on desktop", async () => {
+            vi.spyOn(global, "getComputedStyle").mockReturnValue({
+                backgroundColor: "rgb(255, 255, 255)",
+            } as CSSStyleDeclaration);
+            delete (window as { electron?: unknown }).electron;
+
+            await expect(
+                new Promise((resolve) => {
+                    setTheme("light").then(resolve);
+                    lightTheme.onload!({} as Event);
+                }),
+            ).resolves.toBeUndefined();
         });
     });
 

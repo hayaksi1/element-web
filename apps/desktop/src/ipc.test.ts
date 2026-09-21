@@ -247,3 +247,55 @@ describe("ipcCall: callDisplayMediaCallback", () => {
         expect(send).toHaveBeenCalledWith("ipcReply", { id: 14, reply: null });
     });
 });
+
+describe("setThemeColor", () => {
+    const setBackgroundColor = vi.fn();
+    const handler = ipcHandlers["setThemeColor"] as (ev: unknown, color: unknown) => void;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockStore.get.mockReturnValue(undefined);
+        (global as unknown as { mainWindow: unknown }).mainWindow = { setBackgroundColor };
+    });
+
+    afterEach(() => {
+        (global as unknown as { mainWindow: unknown }).mainWindow = null;
+    });
+
+    it("persists a valid colour and repaints the live window", () => {
+        handler({}, "rgb(16, 19, 23)");
+
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "rgb(16, 19, 23)");
+        expect(setBackgroundColor).toHaveBeenCalledWith("rgb(16, 19, 23)");
+    });
+
+    it("ignores an invalid colour", () => {
+        handler({}, "javascript:alert(1)");
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
+    });
+
+    it("ignores a non-string payload", () => {
+        handler({}, { malicious: true });
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
+    });
+
+    it("does not throw when there is no window", () => {
+        (global as unknown as { mainWindow: unknown }).mainWindow = null;
+
+        expect(() => handler({}, "#101317")).not.toThrow();
+        expect(mockStore.set).toHaveBeenCalledWith("backgroundColor", "#101317");
+    });
+
+    it("does not re-persist or repaint when the colour is unchanged", () => {
+        mockStore.get.mockReturnValue("#101317");
+
+        handler({}, "#101317");
+
+        expect(mockStore.set).not.toHaveBeenCalled();
+        expect(setBackgroundColor).not.toHaveBeenCalled();
+    });
+});
